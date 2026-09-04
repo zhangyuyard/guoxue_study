@@ -71,6 +71,59 @@ export function isWithinPreloadWindow(
 }
 
 /**
+ * 滑动窗口丢头方案（阅读器连续滚动「可无限前进」改造）。
+ *
+ * 背景：连续滚动拼接原以 MAX_CONTINUOUS_CHAPTERS 为「到达即停」的硬上限——序列满后
+ * 正文停在章边界，只能靠翻页条前进；阅读器 UI 精简删除翻页条后，改为滑动窗口：
+ * appendNextChapter 成功后若序列超限，丢弃头部最旧章节腾位，使连续滚动可无限前进。
+ *
+ * 丢头安全规则（宁晚勿扰）：
+ * - 只丢「严格位于当前阅读章之前」的头部章节：若当前章落在将被丢弃的头部区间内
+ *   （用户正在回看头部），本轮不丢，等用户向前进、当前章前移后的下一次触发再丢；
+ * - 当前章未知（-1）时保守不丢，绝不丢弃用户可能正在看的内容；
+ * - 末章收敛：丢头只发生在 length > max 时，且结果恰好收敛到 max，不会死循环；
+ * - 上限边界（恰好 = max）不丢。
+ *
+ * 丢弃后的滚动偏移补偿由调用方按 rowOffsets 精确计算（保留首行旧偏移 - 被丢首行
+ * 旧偏移 = 丢弃内容总高），并在 onContentSizeChange 中消费；偏移不可靠时调用方
+ * 应推迟本轮丢弃。
+ */
+export interface HeadDropPlan {
+  /** 丢弃后保留的章 id 序列（保持原顺序，长度恰为 maxChapters） */
+  keptChapterIds: string[];
+  /** 被丢弃的头部章 id（按原顺序；空数组表示本轮不丢） */
+  droppedChapterIds: string[];
+}
+
+/**
+ * 规划滑动窗口丢头：序列超限时丢弃头部最旧章节，使长度收敛回 maxChapters。
+ * @param chapterIds 当前拼接序列的章 id（按拼接顺序）
+ * @param activeChapterId 用户当前正在阅读的章 id（未知传 null）
+ * @param maxChapters 窗口上限
+ * @returns 丢弃方案；droppedChapterIds 为空表示本轮不丢（序列未超限或当前章在头部区间）
+ */
+export function planHeadDrop(
+  chapterIds: readonly string[],
+  activeChapterId: string | null,
+  maxChapters: number,
+): HeadDropPlan {
+  // 未超限（含恰好 = 上限的边界）：不丢
+  if (chapterIds.length <= maxChapters) {
+    return { keptChapterIds: [...chapterIds], droppedChapterIds: [] };
+  }
+  const excess = chapterIds.length - maxChapters;
+  const activeIdx = activeChapterId ? chapterIds.indexOf(activeChapterId) : -1;
+  // 当前章未知或落在将被丢弃的头部区间内（用户正在回看头部）→ 本轮不丢（宁晚勿扰）
+  if (activeIdx < 0 || activeIdx < excess) {
+    return { keptChapterIds: [...chapterIds], droppedChapterIds: [] };
+  }
+  return {
+    keptChapterIds: chapterIds.slice(excess),
+    droppedChapterIds: chapterIds.slice(0, excess),
+  };
+}
+
+/**
  * 计算滚动模式初始渲染行数。
  * @param rowCharCounts 各行码点数（标题行传 0；顺序与渲染顺序一致）
  * @param options 计算选项

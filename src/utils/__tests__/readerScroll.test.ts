@@ -11,6 +11,7 @@ import { parseTxtBook } from '@/services/UserBookService';
 import {
   computeScrollInitialRows,
   isWithinPreloadWindow,
+  planHeadDrop,
   SCROLL_INITIAL_ROWS_DEFAULTS,
 } from '@/utils/readerScroll';
 
@@ -109,6 +110,67 @@ describe('回归：5 万字无换行 txt → parseTxtBook → 滚动初始行数
     // 旧行为：固定 30 行 → 30 × 2500 = 75000 字格同步挂载（Bug 根因量级）
     // 新行为：预算 3000 → 初始 3 行（标题行 + 2 段 = 5000 字），其余随滚动增量渲染
     expect(computeScrollInitialRows(counts)).toBe(3);
+  });
+});
+
+describe('planHeadDrop：滑动窗口丢头（UI 精简后连续滚动可无限前进）', () => {
+  const ids = (n: number): string[] => Array.from({ length: n }, (_, i) => `ch${i + 1}`);
+  const MAX = 30;
+
+  test('未超限（含恰好 = 上限的边界）不丢', () => {
+    const chapters = ids(30);
+    const plan = planHeadDrop(chapters, 'ch30', MAX);
+    expect(plan.droppedChapterIds).toEqual([]);
+    expect(plan.keptChapterIds).toEqual(chapters);
+  });
+
+  test('超限且当前章在保留区间内：丢弃头部 excess 章，长度收敛回上限', () => {
+    const chapters = ids(31); // 追加 ch31 后超限 1
+    const plan = planHeadDrop(chapters, 'ch31', MAX);
+    expect(plan.droppedChapterIds).toEqual(['ch1']);
+    expect(plan.keptChapterIds).toHaveLength(30);
+    expect(plan.keptChapterIds[0]).toBe('ch2');
+    expect(plan.keptChapterIds[plan.keptChapterIds.length - 1]).toBe('ch31');
+  });
+
+  test('连续前进多章后一次性收敛：超限 excess 按头部整段丢弃', () => {
+    const chapters = ids(35); // 极端场景：序列膨胀到 35
+    const plan = planHeadDrop(chapters, 'ch35', MAX);
+    expect(plan.droppedChapterIds).toEqual(ids(5));
+    expect(plan.keptChapterIds).toHaveLength(30);
+    expect(plan.keptChapterIds[0]).toBe('ch6');
+  });
+
+  test('当前章落在将被丢弃的头部区间内（用户正在回看头部）→ 本轮不丢（宁晚勿扰）', () => {
+    const chapters = ids(31);
+    // 当前章 ch1 位于将被丢弃的头部区间 [ch1]
+    expect(planHeadDrop(chapters, 'ch1', MAX).droppedChapterIds).toEqual([]);
+    // 当前章未知（-1）同样保守不丢
+    expect(planHeadDrop(chapters, '不存在', MAX).droppedChapterIds).toEqual([]);
+    expect(planHeadDrop(chapters, null, MAX).droppedChapterIds).toEqual([]);
+  });
+
+  test('当前章恰在丢弃边界之上（activeIdx === excess）允许丢头（用户已向前进）', () => {
+    const chapters = ids(32); // excess = 2，头部 [ch1, ch2]
+    // 当前章 ch3 恰在边界之上 → 丢 ch1、ch2
+    const plan = planHeadDrop(chapters, 'ch3', MAX);
+    expect(plan.droppedChapterIds).toEqual(['ch1', 'ch2']);
+    expect(plan.keptChapterIds[0]).toBe('ch3');
+  });
+
+  test('单章序列不丢、不死循环（丢头结果长度恰为上限）', () => {
+    expect(planHeadDrop(['only'], 'only', MAX).droppedChapterIds).toEqual([]);
+    // 反复对收敛结果再规划是幂等的（不会继续丢）
+    const once = planHeadDrop(ids(31), 'ch31', MAX);
+    const twice = planHeadDrop(once.keptChapterIds, 'ch31', MAX);
+    expect(twice.droppedChapterIds).toEqual([]);
+  });
+
+  test('末章收敛：没有下一章时序列不再增长，丢头规划不再触发', () => {
+    // 模拟末章：序列停留在上限 30，规划器不丢
+    const chapters = ids(30);
+    const plan = planHeadDrop(chapters, 'ch30', MAX);
+    expect(plan.droppedChapterIds).toEqual([]);
   });
 });
 

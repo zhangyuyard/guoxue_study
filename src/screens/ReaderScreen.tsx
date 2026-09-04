@@ -1,14 +1,16 @@
 /**
  * 阅读器主页面（ReaderScreen）
  * 页面结构：
- * - 顶部：书名 + 章节名 + 返回按钮 + 设置入口（字号/行距/主题）
+ * - 顶部：书名 + 章节名 + 返回按钮 + 设置入口（字号/行距/主题）+ 繁简切换 + 注音切换
  * - 正文：FlatList 逐段渲染（注音模式用 PinyinText，关闭注音用 HighlightText）
- * - 底部：PinyinModeBar（浮动注音模式切换）+ ReaderToolbar（划线/笔记/收藏/背诵）
+ * - 无底部 dock（已随 UI 精简删除）：进度 / 朗读 / 语速 / 收藏 / 背诵 / 注音切换
+ *   全部并入「长按正文弹出的选词操作面板」与右上角按钮
  * 交互流程：
- * - 长按正文 → 弹出选词面板（可调整范围）→ 解析 / 选色划线 / 笔记
+ * - 长按正文 → 弹出选词面板（进度 + 可调整范围 + 解析/划线/笔记 + 收藏/背诵/朗读/语速）
  * - 点击已有划线 → 弹出笔记编辑器（新建或编辑关联笔记）
+ * - 章节前进：滚动模式为滑动窗口连续拼接（无限前进）；翻页模式翻到章边界自动跨章
  * - 与 useReaderStore 联动：openChapter 保存阅读位置，滚动更新当前段落
- * 说明：T05 已接入导航——「背诵」跳转 RecitationPracticeScreen；
+ * 说明：「背诵」跳转 RecitationPracticeScreen；
  * props 保持宽松路由签名，兼容 RootStack 注入（阅读经书架选书进入）。
  * 正文支持繁简一键切换：转换在「数据层」统一作用于段落文本，渲染、选区码点与
  * 划线偏移均基于转换后文本，保证三者一致、切换不错位。
@@ -44,9 +46,7 @@ import AnalysisPanel from '@/components/reader/AnalysisPanel';
 import TranslationPanel from '@/components/reader/TranslationPanel';
 import HighlightText from '@/components/reader/HighlightText';
 import PageFlipPager from '@/components/reader/PageFlipPager';
-import PinyinModeBar from '@/components/reader/PinyinModeBar';
 import PinyinText from '@/components/reader/PinyinText';
-import ReaderToolbar from '@/components/reader/ReaderToolbar';
 import type { RecitationPracticeParams } from '@/navigation/types';
 import {
   StorageService,
@@ -77,7 +77,7 @@ import {
   type PaginatedPage,
 } from '@/utils/pagination';
 import type { HighlightedSegment } from '@/utils/highlight';
-import { computeScrollInitialRows, isWithinPreloadWindow } from '@/utils/readerScroll';
+import { computeScrollInitialRows, isWithinPreloadWindow, planHeadDrop } from '@/utils/readerScroll';
 
 // ============ 类型定义 ============
 
@@ -126,19 +126,34 @@ const EMPTY_HIGHLIGHTS: Highlight[] = [];
 const TITLE_ROW_PREFIX = '__title__:';
 
 /**
- * 正文容器底部留白：底部 dock（进度+朗读+注音+工具栏）悬浮于正文之上，需留出等高空档。
- * P2-02 起新增朗读条（约 40px），由 180 上调至 220。
+ * 注音模式循环切换顺序（右上角「音」按钮，沿用原底部注音切换条的模式定义与顺序）：
+ * 全文注音 → 仅生僻字 → 关闭 → 全文注音 …
  */
-const CONTENT_BOTTOM_PADDING = 220;
+const PINYIN_MODE_CYCLE: readonly PinyinMode[] = ['full', 'rare', 'off'];
+
+/** 注音模式标签（无障碍朗读与语义化展示用） */
+const PINYIN_MODE_LABELS: Record<PinyinMode, string> = {
+  full: '全文注音',
+  rare: '仅生僻字',
+  off: '关闭',
+};
 
 /**
- * 连续滚动「单次会话最多拼接的章节数」。
- * 拼接是双向的（向后追加 + 向前插入），长书（如《史记》130 篇）一路滚下去会无限吃
- * 内存，故设上限：到达上限后停止自动拼接（正文停在该章边界，仍可用「上一章 /
- * 下一章」按钮继续）。
- * 之所以不做「从两端裁剪 + 补偿滚动偏移」的滑动窗口：变高行的偏移补偿需按 rowOffsets
- * 反推并在数据变更后立刻 scrollToOffset，跨端时机不可靠，一旦算错会造成可见跳页，
- * 风险远大于收益。真机确认内存吃紧时再考虑滑动窗口。
+ * 正文容器底部留白（px）：底部 dock（进度/朗读/注音/工具栏）已随 UI 精简删除，
+ * 功能并入长按弹出菜单与右上角按钮，仅保留少量呼吸空隙，避免末段贴底。
+ */
+const CONTENT_BOTTOM_PADDING = 32;
+
+/**
+ * 连续滚动「滑动窗口」的最大章节数。
+ * 拼接是双向的（向后追加 + 向前插入），长书（如《史记》130 篇）一路滚下去会无限
+ * 吃内存，故设窗口上限。语义已从旧版「到达即停」（正文停在章边界、靠翻页条前进）
+ * 改为滑动窗口：appendNextChapter 成功后若序列超限，丢弃头部最旧章节腾位
+ * （见 maybeDropHeadChapters / utils/readerScroll 的 planHeadDrop），使连续滚动
+ * 可无限前进；向前拼接（prependPreviousChapter）仍以窗口满为界——向后的回看范围
+ * 即当前窗口内容，更早的章节经目录跳转（goToChapter）可达。
+ * 丢头偏移补偿按 rowOffsets 精确计算并在 onContentSizeChange 消费，算不出时
+ * 推迟本轮丢弃（宁晚勿扰），避免变高行反推误差造成可见跳页。
  */
 const MAX_CONTINUOUS_CHAPTERS = 30;
 
@@ -510,7 +525,7 @@ function PageModeView({
   const [chunkHeights, setChunkHeights] = useState<Record<string, number>>({});
 
   // 影响「段高测量」的因素：仅排版相关（与 pageHeight 无关，段高只取决于宽度与字号/行距）。
-  // 刻意不含 pageHeight：pageHeight 会因底部 dock 量高而由大变小，若纳入则会触发
+  // 刻意不含 pageHeight：pageHeight 只应随旋转等容器尺寸变化而变化，若纳入则会触发
   // 整段重测（清空 segHeights → 首屏闪白/空白）。pageHeight 变化只重建分页，不清测量。
   const measureKey = `${chapterTitle}|${pinyinMode}|${fontSize}|${lineHeight}|${Math.round(
     pageWidth,
@@ -580,7 +595,7 @@ function PageModeView({
    * ① 整段实测高度 > pageBudget 的段 → 先用当前 blocks 跑一次分页，找到该段
    *    所在页的「已用高度」，剩余空间作为 firstBudget 传给 computeChunkBoundaries：
    *    第一块填满当前页剩余部分、后续每块填满一整页（而非均分码点导致每页都不满）。
-   *    页高变化（dock 量高 / 旋转）时同步增删拆分（段高与页高无关，可复用）。
+   *    页高变化（旋转）时同步增删拆分（段高与页高无关，可复用）。
    * ② 某个已测块仍超高（线性估算误差 / 换行取整导致）→ 对该块区间递归再切；
    *    带 CHUNK_RESPLIT_TOLERANCE 容差，轻微超页交给页内纵向滚动吸收，避免碎页震荡。
    * 块边界处会强制换行（flexWrap 每字一格，视觉上与自然换行一致），
@@ -608,7 +623,7 @@ function PageModeView({
         continue;
       }
       if (splitPlan[s.id]) {
-        // 页高变大后（旋转 / dock 量高变化）整段可能不再超高：撤销拆分方案，
+        // 页高变大后（旋转）整段可能不再超高：撤销拆分方案，
         // 否则 splitSettled 的「需拆分 ⇔ 已有方案」判定永久失衡卡 loading。
         if (h <= pageBudget) {
           delete next[s.id];
@@ -929,6 +944,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
   /** 连续滚动模式：已拼接的章节序列（首项为当前打开章，滚到末尾向后追加） */
   const [continuousChapters, setContinuousChapters] = useState<Chapter[]>([]);
+  /**
+   * 当前拼接序列的「种子章」id：切章重置 effect 以路由章重置序列时同步记录。
+   * 用于区分「切章过渡帧」（种子章 ≠ 路由章，序列还是旧章的，需以路由章单独成列防闪烁）
+   * 与「滑动窗口丢头后的稳态」（种子章 = 路由章但入口章已被丢出窗口，序列仍需原样使用）。
+   */
+  const [continuousSeedChapterId, setContinuousSeedChapterId] = useState<string | null>(null);
   /** 实际正在阅读的章节（滚动跨章后与路由 chapterId 不同），初值在 chapterId 解析后给出 */
   const [activeChapterId, setActiveChapterId] = useState<string | null>(null);
   /** continuousChapters 的即时引用：滚动回调需读到最新值，避免闭包陈旧 */
@@ -966,6 +987,17 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   } | null>(null);
   /** 最近一次滚动偏移（向前拼接的补偿起点） */
   const scrollOffset = useRef(0);
+  /**
+   * 滑动窗口丢头的滚动补偿量（px）：丢头使保留内容整体上移，onContentSizeChange
+   * 消费时把滚动偏移回退该值，使视口仍停留在用户正在阅读的内容上。
+   * 写入于 setContinuousChapters 之前，消费于丢头引发的那次 contentSize 变化。
+   */
+  const headDropCompensation = useRef(0);
+  /**
+   * maybeDropHeadChapters 的即时引用：onViewableItemsChanged 是一次性创建的
+   * useRef 回调（不能安全闭包 useCallback 实例），经此 ref 调用最新实现。
+   */
+  const maybeDropHeadRef = useRef<() => void>(() => undefined);
   /** 滚动模式列表引用（定位段落 + 向前拼接后的偏移补偿） */
   const listRef = useRef<FlatList<ReaderRow>>(null);
   /** 打开时一次性定位到目标段落：行 id + 是否已完成 */
@@ -1026,15 +1058,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    * 打开/切章时取路由参数；模式切换时取 useReaderStore 里的当前段（Bug 3）。
    */
   const [locateTarget, setLocateTarget] = useState<string | null>(null);
-  // 底部浮动 dock（进度 + 注音模式 + 工具栏）为绝对定位，悬浮在正文之上。
-  // 若不扣除其高度，仿真翻页会把整页当成「铺满 pagerArea（含 dock 区域）」来分页，
-  // 导致正文底部被 dock 遮挡、且因内容「恰好放下」而没有任何可滚动空间 → 看起来像卡死。
-  const [dockHeight, setDockHeight] = useState(0);
-  // 仿真翻页可用页高 = pagerArea 高度 - 底部 dock 高度（可见区域）。
+  // 底部浮动 dock 已删除（UI 精简：进度/朗读/注音/工具栏并入长按弹出菜单与右上角），
+  // 仿真翻页可用页高即 pagerArea 完整高度，不再扣除 dock 高度。
   // 仅在 pagerArea 已完成量高后给有效值；首帧 pagerLayout.height=0 时保持 0，
   // 让 PageModeView 走占位/测量态，避免「最小 80」在首帧触发一次错误分页与定位跳页。
   const measured = pagerLayout.height > 0;
-  const visiblePageHeight = measured ? Math.max(80, pagerLayout.height - dockHeight) : 0;
+  const visiblePageHeight = measured ? Math.max(80, pagerLayout.height) : 0;
 
   const params = route?.params;
   const bookId = params?.bookId ?? null;
@@ -1079,15 +1108,17 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    * 滚动拼接序列的「当帧一致视图」（切章闪烁的另一半修复）。
    * 路由切章后、重置 effect 把 continuousChapters 重置为 [chapter] 之前，
    * continuousChapters 仍是上一章的序列，直接渲染会闪现旧章内容。
-   * 派生规则：路由章已在序列中（正常阅读 / 向前后拼接的稳态）→ 原样使用；
-   * 不在（切章过渡帧）→ 以路由章单独成列，当帧即渲染新章。
+   * 派生规则：重置 effect 已以当前路由章为种子重置过序列（种子章匹配且序列非空）
+   * → 原样使用；否则（切章过渡帧 / 初始帧）→ 以路由章单独成列，当帧即渲染新章。
+   * 注意不能用「路由章是否在序列中」作判据：滑动窗口丢头后，入口章可能已被
+   * 丢弃出窗口（用户已滚到很远的前方），此时序列必须原样使用。
    */
   const effectiveChapters = useMemo<Chapter[]>(() => {
-    if (continuousChapters.some((c) => c.id === chapter?.id)) {
+    if (chapter && continuousSeedChapterId === chapter.id && continuousChapters.length > 0) {
       return continuousChapters;
     }
     return chapter ? [chapter] : [];
-  }, [continuousChapters, chapter]);
+  }, [chapter, continuousSeedChapterId, continuousChapters]);
 
   /**
    * P1-17 段落级续读：路由未携带 segmentId 时，从持久化 lastRead 恢复该章
@@ -1293,6 +1324,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     scrollOffset.current = 0;
     rowOffsets.current.clear();
     setContinuousChapters(seeded);
+    // 记录种子章（见 continuousSeedChapterId / effectiveChapters 注释）
+    setContinuousSeedChapterId(chapter?.id ?? null);
   }, [chapter, rowOffsets]);
 
   /**
@@ -1311,8 +1344,70 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   }, []);
 
   /**
+   * 滑动窗口丢头检查：序列超出 MAX_CONTINUOUS_CHAPTERS 时丢弃头部最旧章节腾位。
+   * 触发时机：①appendNextChapter 成功后（用户向前进、序列将超限）；
+   * ②当前章前移时（onViewableItemsChanged，补丢此前因「当前章在头部」被推迟的丢弃）。
+   * 安全规则（宁晚勿扰）：
+   * - 丢弃方案由 planHeadDrop 判定——只丢严格位于当前章之前的头部章节，
+   *   用户正在回看头部时本轮不丢；末章 / 单章 / 恰好等于上限时不丢、不死循环；
+   * - 丢头会使保留内容整体上移，需按 rowOffsets 精确补偿：丢弃高度 =
+   *   保留序列首行旧偏移 - 被丢首行旧偏移（两行之间的全部行恰为被丢内容）。
+   *   任一偏移未知（行从未布局，如刚被回收）则本轮放弃丢弃、等下次触发再试；
+   * - 挂起的向前拼接锚点一并安全放弃（appendNextChapter 已与锚点互斥，此处
+   *   双保险）：放弃补偿意味着视野可能跳到保留序列开头，属可接受降级，
+   *   绝不能残留锚点阻塞后续拼接。
+   */
+  const maybeDropHeadChapters = useCallback(() => {
+    if (readerMode !== 'scroll') {
+      return;
+    }
+    const loaded = continuousRef.current;
+    if (loaded.length <= MAX_CONTINUOUS_CHAPTERS) {
+      return;
+    }
+    const plan = planHeadDrop(
+      loaded.map((c) => c.id),
+      activeChapterIdRef.current,
+      MAX_CONTINUOUS_CHAPTERS,
+    );
+    if (plan.droppedChapterIds.length === 0) {
+      return;
+    }
+    const keptY = rowOffsets.current.get(`${TITLE_ROW_PREFIX}${plan.keptChapterIds[0]}`);
+    const droppedY = rowOffsets.current.get(`${TITLE_ROW_PREFIX}${plan.droppedChapterIds[0]}`);
+    if (typeof keptY !== 'number' || typeof droppedY !== 'number' || keptY <= droppedY) {
+      // 偏移不可靠（被丢行从未布局 / 数据异常）：推迟本轮丢弃，等下次触发再试
+      return;
+    }
+    // 挂起的向前拼接锚点安全放弃（双保险）：绝不残留锚点阻塞后续拼接
+    prependAnchor.current = null;
+    // 清理被丢章节的行偏移（标题行 + 段落行），避免 rowOffsets 无限膨胀
+    const droppedIds = new Set(plan.droppedChapterIds);
+    for (const ch of loaded) {
+      if (droppedIds.has(ch.id)) {
+        rowOffsets.current.delete(`${TITLE_ROW_PREFIX}${ch.id}`);
+        for (const seg of ch.segments) {
+          rowOffsets.current.delete(seg.id);
+        }
+      }
+    }
+    headDropCompensation.current = keptY - droppedY;
+    const merged = loaded.filter((c) => !droppedIds.has(c.id));
+    continuousRef.current = merged;
+    setContinuousChapters(merged);
+  }, [readerMode]);
+
+  // 把最新实现交给 ref（供一次性创建的 onViewableItemsChanged 回调调用）
+  useEffect(() => {
+    maybeDropHeadRef.current = maybeDropHeadChapters;
+  }, [maybeDropHeadChapters]);
+
+  /**
    * 追加下一章到连续滚动序列。
-   * 五重守卫：①仅滚动模式 ②无并发加载 ③未达拼接上限 ④存在下一章（不越过末章） ⑤未重复追加。
+   * 守卫：①仅滚动模式 ②无并发加载 ③无进行中的向前拼接补偿 ④存在下一章（不越过末章）
+   * ⑤未重复追加 ⑥滑动窗口守卫——序列已达上限且「追加后无法丢头腾位」（当前章位于
+   * 头部区域，用户正在回看）时停止追加，防止用户停在头部时级联追加无限吃内存；
+   * 其余情况超限不再停止拼接，成功后由 maybeDropHeadChapters 丢头腾位。
    */
   const appendNextChapter = useCallback(() => {
     // 正在做「向前拼接」的偏移补偿时不要追加：两者的 contentSize 变化会互相干扰
@@ -1320,7 +1415,16 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       return;
     }
     const loaded = continuousRef.current;
-    if (loaded.length === 0 || loaded.length >= MAX_CONTINUOUS_CHAPTERS) {
+    if (loaded.length === 0) {
+      return;
+    }
+    // 滑动窗口守卫：追加后超出上限时，仅当当前章位于将被丢弃的头部区间之外
+    // （丢头可行）才允许追加；当前章未知（-1）时保守停止
+    const activeIdx = activeChapterIdRef.current
+      ? loaded.findIndex((c) => c.id === activeChapterIdRef.current)
+      : -1;
+    const excessAfterAppend = loaded.length + 1 - MAX_CONTINUOUS_CHAPTERS;
+    if (loaded.length >= MAX_CONTINUOUS_CHAPTERS && excessAfterAppend > 0 && activeIdx < excessAfterAppend) {
       return;
     }
     const lastId = loaded[loaded.length - 1].id;
@@ -1344,7 +1448,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     const merged = [...continuousRef.current, loadedChapter];
     continuousRef.current = merged;
     setContinuousChapters(merged);
-  }, [book, readerMode]);
+    // 滑动窗口：追加成功后若序列超限，立即丢头腾位（当前章守卫已保证可行）
+    maybeDropHeadChapters();
+  }, [book, readerMode, maybeDropHeadChapters]);
 
   /** 滚至接近末尾：追加下一章（FlatList onEndReached 回调） */
   const handleEndReached = useCallback(() => {
@@ -1707,6 +1813,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       if (row.chapterId !== activeChapterIdRef.current) {
         activeChapterIdRef.current = row.chapterId;
         setActiveChapterId(row.chapterId);
+        // 用户向前进（当前章前移）：检查滑动窗口丢头。此前因「当前章位于头部
+        // 区间」被推迟的丢弃，在当前章前移后的此刻补丢（经 ref 调最新实现）
+        maybeDropHeadRef.current();
         const currentBookId = useReaderStore.getState().bookId;
         if (currentBookId) {
           // openChapter 会一并写入 segmentId，无需再单独 setSegment
@@ -1881,18 +1990,6 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [selection, bookId, chapterId, segmentChapterMap, addHighlight],
   );
 
-  /** 工具栏划线：无选区时提示先选择文字 */
-  const handleToolbarHighlight = useCallback(
-    (color: HighlightColor) => {
-      if (!selection) {
-        Alert.alert('划线', '请先长按正文选中文字');
-        return;
-      }
-      createHighlight(color);
-    },
-    [selection, createHighlight],
-  );
-
   // ---------- 笔记 ----------
 
   /** 点击划线：打开笔记编辑器（已有关联笔记则预填） */
@@ -2051,6 +2148,16 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     navigation?.goBack();
   }, [navigation]);
 
+  /**
+   * 注音模式循环切换（右上角「音」按钮，原底部注音切换条的功能迁移）：
+   * 全文注音 → 仅生僻字 → 关闭 → 全文注音 …。持久化走 setPinyinMode（不变）。
+   */
+  const handleCyclePinyinMode = useCallback(() => {
+    const idx = PINYIN_MODE_CYCLE.indexOf(pinyinMode);
+    const next = PINYIN_MODE_CYCLE[(idx + 1) % PINYIN_MODE_CYCLE.length] ?? 'full';
+    setPinyinMode(next);
+  }, [pinyinMode, setPinyinMode]);
+
   // ---------- 渲染 ----------
 
   /** 渲染一行：段落行走 SegmentItem（承载划线 / 长按选词 / 注音），标题行走章标题 */
@@ -2157,53 +2264,41 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             {conversionMode === 'traditional' ? '繁' : '简'}
           </Text>
         </Pressable>
+        {/* 注音模式切换（原底部注音条迁移）：循环 全文注音 → 仅生僻字 → 关闭。
+            视觉指示：全文注音=主色 / 仅生僻字=正文色 / 关闭=弱化灰，a11y 标签说明当前模式 */}
+        <Pressable
+          onPress={handleCyclePinyinMode}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`注音模式：${PINYIN_MODE_LABELS[pinyinMode]}，点击切换为${
+            PINYIN_MODE_LABELS[
+              PINYIN_MODE_CYCLE[
+                (PINYIN_MODE_CYCLE.indexOf(pinyinMode) + 1) % PINYIN_MODE_CYCLE.length
+              ] ?? 'full'
+            ]
+          }`}
+        >
+          <Text
+            style={[
+              styles.convButton,
+              {
+                color:
+                  pinyinMode === 'full'
+                    ? colors.primary
+                    : pinyinMode === 'rare'
+                      ? colors.text
+                      : colors.pinyin,
+              },
+            ]}
+          >
+            音
+          </Text>
+        </Pressable>
       </View>
 
-      {/* 章节翻页：上一章 / 当前章 / 下一章 */}
-      {(siblings.prev || siblings.next) && (
-        <View style={[styles.pager, { borderBottomColor: colors.border }]}>
-          <Pressable
-            onPress={() => siblings.prev && goToChapter(siblings.prev.id)}
-            disabled={!siblings.prev}
-            style={[styles.pagerBtn, !siblings.prev && styles.pagerBtnDisabled]}
-            accessibilityRole="button"
-            accessibilityLabel="上一章"
-          >
-            <Text
-              style={[
-                styles.pagerText,
-                { color: siblings.prev ? colors.primary : colors.pinyin },
-              ]}
-            >
-              {'‹ 上一章'}
-            </Text>
-          </Pressable>
-          <Text
-            style={[styles.pagerInfo, { color: colors.textSecondary }]}
-            numberOfLines={1}
-          >
-            {displayChapterTitle}
-          </Text>
-          <Pressable
-            onPress={() => siblings.next && goToChapter(siblings.next.id)}
-            disabled={!siblings.next}
-            style={[styles.pagerBtn, !siblings.next && styles.pagerBtnDisabled]}
-            accessibilityRole="button"
-            accessibilityLabel="下一章"
-          >
-            <Text
-              style={[
-                styles.pagerText,
-                { color: siblings.next ? colors.primary : colors.pinyin },
-              ]}
-            >
-              {'下一章 ›'}
-            </Text>
-          </Pressable>
-        </View>
-      )}
-
-      {/* 正文：滚动模式用 FlatList，仿真翻页模式用分页容器 */}
+      {/* 正文：滚动模式用 FlatList，仿真翻页模式用分页容器
+          （章节翻页条已随 UI 精简删除：滚动模式为滑动窗口连续拼接无限前进，
+          翻页模式翻到章边界自动跨章，跨章跳转保留目录入口） */}
       {readerMode === 'page' ? (
         <View
           style={styles.pagerArea}
@@ -2280,6 +2375,17 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                 prependAnchor.current = null;
               }
             }
+            // 滑动窗口丢头补偿：头部章节被丢弃后保留内容整体上移「丢弃高度」，
+            // 把滚动偏移回退相同高度，使视口仍停留在用户正在阅读的内容上。
+            // 补偿量在丢头时按 rowOffsets 精确算出（见 maybeDropHeadChapters）。
+            const dropDelta = headDropCompensation.current;
+            if (dropDelta > 0) {
+              headDropCompensation.current = 0;
+              listRef.current?.scrollToOffset({
+                offset: Math.max(0, scrollOffset.current - dropDelta),
+                animated: false,
+              });
+            }
             contentH.current = h;
             // 短内容兜底：内容不足预载窗口时级联追加下一章（道德经级短章的
             // 「停在第一章、无法滚动」死锁的修复点，见 fillShortContentIfNeeded）
@@ -2316,93 +2422,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         />
       )}
 
-      {/* 底部浮动：进度 + 注音模式切换 + 工具栏 */}
-      <View
-        style={styles.bottomDock}
-        onLayout={(e) => {
-          const h = e.nativeEvent.layout.height;
-          setDockHeight((prev) => (prev === h ? prev : h));
-        }}
-      >
-        {/* 阅读进度：第 N / 共 M 章 · 百分比 */}
-        {totalChapters > 0 && (
-          <View
-            style={[styles.progressWrap, { backgroundColor: colors.card, borderTopColor: colors.border }]}
-          >
-            <Text style={[styles.progressText, { color: colors.textSecondary }]}>
-              {readerMode === 'page' && pageCount > 0
-                ? `第 ${Math.max(1, chapterIndex + 1)}/${totalChapters} 章 · 第 ${
-                    pageIndex + 1
-                  }/${pageCount} 页 · ${Math.round(overallProgress * 100)}%`
-                : `第 ${Math.max(1, chapterIndex + 1)} / ${totalChapters} 章 · ${Math.round(
-                    overallProgress * 100,
-                  )}%`}
-            </Text>
-            <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
-              <View
-                style={[
-                  styles.progressFill,
-                  {
-                    width: `${Math.round(overallProgress * 100)}%`,
-                    backgroundColor: colors.primary,
-                  },
-                ]}
-              />
-            </View>
-          </View>
-        )}
-        {/* 正文朗读（P2-02）：当前段落 朗读/停止 + 语速步进（−/+ 0.25） */}
-        <View
-          style={[styles.ttsBar, { backgroundColor: colors.card, borderTopColor: colors.border }]}
-        >
-          <Pressable
-            onPress={handleToggleSpeech}
-            hitSlop={6}
-            style={({ pressed }) => [styles.ttsSpeakBtn, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel={ttsSpeaking ? '停止朗读' : '朗读当前段落'}
-          >
-            <Text
-              style={[
-                styles.ttsSpeakText,
-                { color: ttsSpeaking ? colors.primary : colors.textSecondary },
-              ]}
-            >
-              {ttsSpeaking ? '⏹ 停止' : '▶ 朗读'}
-            </Text>
-          </Pressable>
-          <View style={styles.ttsRateGroup}>
-            <Pressable
-              onPress={() => handleStepSpeechRate(-1)}
-              disabled={speechRate <= 0.5}
-              style={[styles.ttsRateBtn, speechRate <= 0.5 && styles.pagerBtnDisabled]}
-              accessibilityRole="button"
-              accessibilityLabel="降低语速"
-            >
-              <Text style={[styles.ttsRateBtnText, { color: colors.textSecondary }]}>{'−'}</Text>
-            </Pressable>
-            <Text style={[styles.ttsRateValue, { color: colors.text }]}>
-              {speechRate.toFixed(2)}x
-            </Text>
-            <Pressable
-              onPress={() => handleStepSpeechRate(1)}
-              disabled={speechRate >= 2.0}
-              style={[styles.ttsRateBtn, speechRate >= 2.0 && styles.pagerBtnDisabled]}
-              accessibilityRole="button"
-              accessibilityLabel="提高语速"
-            >
-              <Text style={[styles.ttsRateBtnText, { color: colors.textSecondary }]}>{'＋'}</Text>
-            </Pressable>
-          </View>
-        </View>
-        <PinyinModeBar mode={pinyinMode} onChange={setPinyinMode} />
-        <ReaderToolbar
-          onHighlight={handleToolbarHighlight}
-          onNote={openNoteEditorForSelection}
-          onBookmark={handleBookmarkArticle}
-          onRecite={handleRecite}
-        />
-      </View>
+      {/* 底部浮动 dock（进度 + 朗读 + 注音模式 + 工具栏）已随 UI 精简删除：
+          进度 / 朗读 / 语速 / 收藏 / 背诵并入下方「选词操作面板」（长按正文弹出），
+          注音切换迁移至右上角「音」按钮 */}
 
       {/* 选词操作面板 */}
       <Modal
@@ -2416,6 +2438,31 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             style={[styles.sheet, { backgroundColor: colors.background }]}
             onPress={() => undefined}
           >
+            {/* 阅读进度（原底部进度条迁移）：第 N/共 M 章 ·（第 i/j 页）· 百分比 */}
+            {totalChapters > 0 && (
+              <View style={styles.menuProgressWrap}>
+                <Text style={[styles.progressText, { color: colors.textSecondary }]}>
+                  {readerMode === 'page' && pageCount > 0
+                    ? `第 ${Math.max(1, chapterIndex + 1)}/${totalChapters} 章 · 第 ${
+                        pageIndex + 1
+                      }/${pageCount} 页 · ${Math.round(overallProgress * 100)}%`
+                    : `第 ${Math.max(1, chapterIndex + 1)} / ${totalChapters} 章 · ${Math.round(
+                        overallProgress * 100,
+                      )}%`}
+                </Text>
+                <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
+                  <View
+                    style={[
+                      styles.progressFill,
+                      {
+                        width: `${Math.round(overallProgress * 100)}%`,
+                        backgroundColor: colors.primary,
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+            )}
             <Text style={[styles.sheetTitle, { color: colors.textSecondary }]}>选中文字</Text>
             <View style={styles.selectionRow}>
               <Pressable
@@ -2483,6 +2530,66 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
               </Pressable>
               <Pressable style={styles.actionButton} onPress={openNoteEditorForSelection}>
                 <Text style={[styles.actionButtonText, { color: colors.primary }]}>笔记</Text>
+              </Pressable>
+            </View>
+
+            {/* 全文操作区（原底部 dock 功能迁移）：收藏全文 / 背诵练习 / 朗读（TTS 状态实时反映） */}
+            <View style={styles.actionRow}>
+              <Pressable
+                style={({ pressed }) => [styles.menuActionButton, pressed && styles.pressed]}
+                onPress={handleBookmarkArticle}
+                accessibilityRole="button"
+                accessibilityLabel="收藏本章全文"
+              >
+                <Text style={[styles.actionButtonText, { color: colors.text }]}>收藏全文</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.menuActionButton, pressed && styles.pressed]}
+                onPress={handleRecite}
+                accessibilityRole="button"
+                accessibilityLabel="背诵练习"
+              >
+                <Text style={[styles.actionButtonText, { color: colors.text }]}>背诵练习</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.menuActionButton, pressed && styles.pressed]}
+                onPress={handleToggleSpeech}
+                accessibilityRole="button"
+                accessibilityLabel={ttsSpeaking ? '停止朗读' : '朗读当前段落'}
+              >
+                <Text
+                  style={[
+                    styles.actionButtonText,
+                    { color: ttsSpeaking ? colors.primary : colors.text },
+                  ]}
+                >
+                  {ttsSpeaking ? '⏹ 停止朗读' : '▶ 朗读'}
+                </Text>
+              </Pressable>
+            </View>
+
+            {/* 语速步进（原底部朗读条迁移）：−/+ 0.25，边界禁用，显示当前倍率 */}
+            <View style={styles.actionRow}>
+              <Pressable
+                style={[styles.rangeButton, { borderColor: colors.border }, speechRate <= 0.5 && styles.actionDisabled]}
+                onPress={() => handleStepSpeechRate(-1)}
+                disabled={speechRate <= 0.5}
+                accessibilityRole="button"
+                accessibilityLabel="降低语速"
+              >
+                <Text style={[styles.rangeButtonText, { color: colors.textSecondary }]}>{'−'}</Text>
+              </Pressable>
+              <Text style={[styles.menuRateValue, { color: colors.text }]}>
+                {speechRate.toFixed(2)}x
+              </Text>
+              <Pressable
+                style={[styles.rangeButton, { borderColor: colors.border }, speechRate >= 2.0 && styles.actionDisabled]}
+                onPress={() => handleStepSpeechRate(1)}
+                disabled={speechRate >= 2.0}
+                accessibilityRole="button"
+                accessibilityLabel="提高语速"
+              >
+                <Text style={[styles.rangeButtonText, { color: colors.textSecondary }]}>{'＋'}</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -2725,7 +2832,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   );
 }
 
-/** 划线圆点实色（与 ReaderToolbar 保持一致的视觉语言） */
+/** 划线圆点实色（选词面板三色划线，与全 App 划线视觉语言一致） */
 const DOT_COLORS: Record<HighlightColor, string> = {
   yellow: '#F5D742',
   green: '#4CAF50',
@@ -2784,32 +2891,6 @@ const styles = StyleSheet.create({
     minWidth: 20,
     textAlign: 'center',
   },
-  // 章节翻页条
-  pager: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  pagerBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-  },
-  pagerBtnDisabled: {
-    opacity: 0.4,
-  },
-  pagerText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  pagerInfo: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 13,
-    marginHorizontal: 8,
-  },
   // 正文
   content: {
     paddingHorizontal: 20,
@@ -2857,62 +2938,12 @@ const styles = StyleSheet.create({
   },
   /** 拆页续块：去掉段落下边距，页内视觉上仍是同一段的连续行 */
   segmentContinuation: {},
-  // 底部浮动
-  bottomDock: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingBottom: 8,
-  },
-  // 阅读进度（底部浮动顶部）
-  progressWrap: {
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  // 正文朗读条（P2-02）
-  ttsBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 7,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  ttsSpeakBtn: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+  // 长按弹出菜单：进度行（原底部进度条迁移至此）
+  menuProgressWrap: {
+    gap: 6,
   },
   pressed: {
     opacity: 0.7,
-  },
-  ttsSpeakText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  ttsRateGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  ttsRateBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.12)',
-  },
-  ttsRateBtnText: {
-    fontSize: 15,
-  },
-  ttsRateValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    minWidth: 48,
-    textAlign: 'center',
   },
   progressText: {
     fontSize: 12,
@@ -2926,6 +2957,20 @@ const styles = StyleSheet.create({
   progressFill: {
     height: 4,
     borderRadius: 2,
+  },
+  // 长按弹出菜单：全文操作按钮（收藏/背诵/朗读）与语速倍率展示
+  menuActionButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.12)',
+  },
+  menuRateValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    minWidth: 56,
+    textAlign: 'center',
   },
   // 弹层通用
   overlay: {

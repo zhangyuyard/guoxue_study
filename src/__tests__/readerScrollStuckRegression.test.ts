@@ -92,12 +92,16 @@ describe('修复②：切章不再闪现旧章（同步派生 + 当帧一致视�
     expect(source).not.toMatch(/setLoadError\(/);
   });
 
-  test('effectiveChapters：路由章不在拼接序列（切章过渡帧）时以路由章单独成列', () => {
+  test('effectiveChapters：以「种子章匹配」判定稳态（切章过渡帧以路由章单独成列防闪烁）', () => {
     expect(source).toMatch(/const effectiveChapters = useMemo<Chapter\[\]>\(\(\) => \{/);
+    // 滑动窗口丢头后入口章可能已不在序列中，故不能用「路由章是否在序列中」作判据，
+    // 必须以重置 effect 记录的种子章（continuousSeedChapterId）判定
     expect(source).toMatch(
-      /if \(continuousChapters\.some\(\(c\) => c\.id === chapter\?\.id\)\) \{\s*\n\s*return continuousChapters;/,
+      /if \(chapter && continuousSeedChapterId === chapter\.id && continuousChapters\.length > 0\) \{\s*\n\s*return continuousChapters;/,
     );
     expect(source).toMatch(/return chapter \? \[chapter\] : \[\];/);
+    // 重置 effect 必须同步记录种子章
+    expect(source).toMatch(/setContinuousSeedChapterId\(chapter\?\.id \?\? null\);/);
   });
 
   test('渲染数据源使用 effectiveChapters（连续滚动行不再直接吃 continuousChapters 状态）', () => {
@@ -110,5 +114,75 @@ describe('修复②：切章不再闪现旧章（同步派生 + 当帧一致视�
     expect(source).toMatch(
       /useEffect\(\(\) => \{\s*\n\s*if \(!bookId \|\| !chapterId\) \{\s*\n\s*return;\s*\n\s*\}\s*\n\s*StorageService\.initDatabase\(\);/,
     );
+  });
+});
+
+describe('阅读器 UI 精简：翻页条 / 底部 dock 删除 + 注音按钮迁移 + 滑动窗口', () => {
+  test('章节翻页条已删除（不再渲染「上一章 / 下一章」pager 条）', () => {
+    expect(source).not.toMatch(/styles\.pager,/);
+    expect(source).not.toMatch(/styles\.pagerBtn/);
+    expect(source).not.toMatch(/'‹ 上一章'/);
+    expect(source).not.toMatch(/'下一章 ›'/);
+    // goToChapter 保留（目录跳章与仿真翻页跨章仍用）
+    expect(source).toMatch(/const goToChapter = useCallback/);
+  });
+
+  test('底部 dock 已删除（进度/朗读/注音条/工具栏并入长按菜单）', () => {
+    expect(source).not.toMatch(/styles\.bottomDock/);
+    expect(source).not.toMatch(/styles\.ttsBar/);
+    expect(source).not.toMatch(/styles\.progressWrap/);
+    expect(source).not.toMatch(/PinyinModeBar/);
+    expect(source).not.toMatch(/ReaderToolbar/);
+    // dockHeight/visiblePageHeight 扣高机制同步清理
+    expect(source).not.toMatch(/dockHeight/);
+    expect(source).toMatch(/const visiblePageHeight = measured \? Math\.max\(80, pagerLayout\.height\) : 0;/);
+    // 正文底部留白随 dock 删除大幅缩减
+    expect(source).toMatch(/const CONTENT_BOTTOM_PADDING = 32;/);
+  });
+
+  test('dock 功能迁移至长按弹出菜单（进度行 + 收藏/背诵/朗读/语速操作区）', () => {
+    // 进度行（含 progressFill 进度条）渲染于选词面板 sheet 内
+    expect(source).toMatch(/styles\.menuProgressWrap/);
+    expect(source).toMatch(/styles\.progressFill/);
+    // 全文操作区
+    expect(source).toMatch(/accessibilityLabel="收藏本章全文"/);
+    expect(source).toMatch(/accessibilityLabel="背诵练习"/);
+    expect(source).toMatch(/ttsSpeaking \? '停止朗读' : '朗读当前段落'/);
+    // 语速步进边界禁用 + 当前倍率展示
+    expect(source).toMatch(/disabled=\{speechRate <= 0\.5\}/);
+    expect(source).toMatch(/disabled=\{speechRate >= 2\.0\}/);
+    expect(source).toMatch(/speechRate\.toFixed\(2\)\}x/);
+  });
+
+  test('注音切换迁移右上角「音」按钮（循环切换 + 当前模式无障碍说明）', () => {
+    expect(source).toMatch(/const PINYIN_MODE_CYCLE: readonly PinyinMode\[\] = \['full', 'rare', 'off'\];/);
+    expect(source).toMatch(/const PINYIN_MODE_LABELS: Record<PinyinMode, string>/);
+    expect(source).toMatch(/const handleCyclePinyinMode = useCallback/);
+    expect(source).toMatch(/accessibilityLabel=\{`注音模式：\$\{PINYIN_MODE_LABELS\[pinyinMode\]\}/);
+  });
+
+  test('滑动窗口：序列超限丢头而非停止拼接（appendNextChapter 成功后丢头腾位）', () => {
+    expect(source).toMatch(/const maybeDropHeadChapters = useCallback/);
+    // 追加成功后立即检查丢头
+    expect(source).toMatch(
+      /setContinuousChapters\(merged\);\s*\n\s*\/\/ 滑动窗口：追加成功后若序列超限，立即丢头腾位（当前章守卫已保证可行）\s*\n\s*maybeDropHeadChapters\(\);/,
+    );
+    // 追加守卫改为「超限且无法丢头才停」（当前章在头部区域时保守停止）
+    expect(source).toMatch(/excessAfterAppend > 0 && activeIdx < excessAfterAppend/);
+    // 丢头后挂起的向前拼接锚点安全放弃
+    expect(source).toMatch(
+      /\/\/ 挂起的向前拼接锚点安全放弃（双保险）：绝不残留锚点阻塞后续拼接\s*\n\s*prependAnchor\.current = null;/,
+    );
+    // 丢头偏移补偿在 onContentSizeChange 消费
+    expect(source).toMatch(/const dropDelta = headDropCompensation\.current;/);
+    expect(source).toMatch(/offset: Math\.max\(0, scrollOffset\.current - dropDelta\),/);
+    // 当前章前移时补丢（经 ref 调最新实现）
+    expect(source).toMatch(/maybeDropHeadRef\.current\(\);/);
+  });
+
+  test('utils/readerScroll 提供 planHeadDrop 且只丢当前章之前的头部章节', () => {
+    expect(scrollUtil).toMatch(/export function planHeadDrop\(/);
+    expect(scrollUtil).toMatch(/keptChapterIds: chapterIds\.slice\(excess\),/);
+    expect(scrollUtil).toMatch(/droppedChapterIds: chapterIds\.slice\(0, excess\),/);
   });
 });
