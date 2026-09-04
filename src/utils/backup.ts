@@ -10,7 +10,15 @@
 /** 备份文件格式版本（当前唯一支持版本；解析时严格校验） */
 export const BACKUP_VERSION = 1;
 
-/** 备份聚合数据（五类数据的最小结构约束在 parseBackup 校验） */
+/**
+ * v1 schema 扩展说明（userBooks 字段）：
+ * userBooks 为 v1 的「可选字段」而非升 version 的原因——
+ * 升 version 会使 parseBackup 拒绝所有旧备份（旧文件 version=1 落入不支持分支），
+ * 与「最小破坏」原则相悖；而可选字段（缺失=空数组）+ 未知字段忽略的既有向前兼容
+ * 机制即可让新旧备份双读，恢复侧对空数组天然无副作用。
+ */
+
+/** 备份聚合数据（各字段最小结构约束在 parseBackup 校验） */
 export interface BackupData {
   /** 设置快照（键值对；恢复时逐字段覆盖，未提供的字段保持现值） */
   settings: Record<string, unknown>;
@@ -22,6 +30,8 @@ export interface BackupData {
   notes: unknown[];
   /** 成就解锁记录（achievementId → ISO 解锁时间） */
   achievements: Record<string, string>;
+  /** 用户书籍 Book 结构列表（v1 扩展字段；旧备份缺失，解析时容错为空数组） */
+  userBooks: unknown[];
 }
 
 /** buildBackup 的输入（与 BackupData 同构；由 UI 层从各 store 采集） */
@@ -90,7 +100,9 @@ export function pickSettingsSnapshot(
 
 /**
  * 构造备份 JSON 字符串（pretty 缩进 2 空格，便于用户用文本编辑器检查）。
- * 注意：调用方应先经 pickSettingsSnapshot 等采集函数得到快照，本函数不再清洗。
+ * 注意：本函数保持纯函数（不 import service），用户书籍由 UI 层经
+ * UserBookService.getAllBooks() 采集后随快照传入（与五类数据同一采集套路）。
+ * 调用方应先经 pickSettingsSnapshot 等采集函数得到快照，本函数不再清洗。
  */
 export function buildBackup(snapshot: BackupSnapshot): string {
   const payload = {
@@ -102,6 +114,7 @@ export function buildBackup(snapshot: BackupSnapshot): string {
       bookmarks: snapshot.bookmarks,
       notes: snapshot.notes,
       achievements: snapshot.achievements,
+      userBooks: snapshot.userBooks,
     },
   };
   return JSON.stringify(payload, null, 2);
@@ -162,6 +175,11 @@ export function parseBackup(text: string): ParsedBackup {
   if (!isPlainObject(data.achievements)) {
     throw new Error('备份文件格式错误：data.achievements 应为对象');
   }
+  // userBooks 为 v1 扩展的可选字段：旧备份缺失 → 空数组（不报错，向后兼容）；
+  // 新备份提供该字段 → 必须为数组（非法报错，与 recitation 等字段的口径一致）
+  if (data.userBooks !== undefined && !Array.isArray(data.userBooks)) {
+    throw new Error('备份文件格式错误：data.userBooks 应为数组');
+  }
 
   // 只挑已知字段重组（未知字段忽略），保证返回类型可信
   return {
@@ -173,13 +191,15 @@ export function parseBackup(text: string): ParsedBackup {
       bookmarks: data.bookmarks as unknown[],
       notes: data.notes as unknown[],
       achievements: data.achievements as Record<string, string>,
+      userBooks: (data.userBooks ?? []) as unknown[],
     },
   };
 }
 
 /**
  * 汇总备份数据规模（导入确认弹窗 / 完成提示共用），例如：
- * 「设置 16 项、背诵进度 12 条、收藏 8 条、笔记 5 条、成就 3 项」。
+ * 「设置 16 项、背诵进度 12 条、收藏 8 条、笔记 5 条、成就 3 项、用户书籍 2 本」。
+ * 旧备份无 userBooks 字段时解析已容错为空数组，此处显示「用户书籍 0 本」。
  */
 export function summarizeBackup(data: BackupData): string {
   const parts = [
@@ -188,6 +208,7 @@ export function summarizeBackup(data: BackupData): string {
     `收藏 ${data.bookmarks.length} 条`,
     `笔记 ${data.notes.length} 条`,
     `成就 ${Object.keys(data.achievements).length} 项`,
+    `用户书籍 ${data.userBooks.length} 本`,
   ];
   return parts.join('、');
 }

@@ -448,6 +448,122 @@ export function isUserBook(id: string): boolean {
   return TextLibraryService.isUserBook(id);
 }
 
+/** 获取全部已装载用户书的内存快照（浅拷贝数组，防调用方误改内部列表）。
+ * 供备份导出（buildBackup 快照采集）与管理页展示使用；App 启动时
+ * loadAndRegisterAll 已全量装载，此后 importBook/deleteBook 增量维护，
+ * 故该列表始终与 db 一致，无需再查库。 */
+export function getAllBooks(): Book[] {
+  return [...loadedBooks];
+}
+
+// ============ 备份恢复（P2-15 补全） ============
+
+/** 用户书恢复结果统计 */
+export interface UserBooksRestoreResult {
+  /** 成功恢复（持久化 + 注册 + 入 FTS）的书本数 */
+  restored: number;
+  /** 非法条目静默跳过的数量（与五类 restoreFromBackup 的跳过惯例一致） */
+  skipped: number;
+}
+
+/**
+ * 备份条目 → Book 的最小校验与收窄（非法返回 null，由调用方跳过）。
+ * 校验口径与 loadAndRegisterAll 一致：id 非空且为用户书前缀、chapters 为数组；
+ * title/author/description 缺失或类型不符时补默认值（宁可降级也不丢书）。
+ */
+function normalizeRestoredBook(entry: unknown): Book | null {
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+    return null;
+  }
+  const b = entry as Record<string, unknown>;
+  if (typeof b.id !== 'string' || b.id === '' || !isUserBook(b.id)) {
+    return null;
+  }
+  if (!Array.isArray(b.chapters)) {
+    return null;
+  }
+  return {
+    id: b.id,
+    title: typeof b.title === 'string' && b.title !== '' ? b.title : '未命名书籍',
+    author: typeof b.author === 'string' ? b.author : '佚名',
+    category: 'user',
+    description: typeof b.description === 'string' ? b.description : '',
+    chapters: b.chapters as Book['chapters'],
+  };
+}
+
+/**
+ * 从备份数据恢复用户书（P2-15 补全）。
+ *
+ * 恢复语义为「合并」（只增改不删），与五类数据的「整体替换」不同——
+ * 取舍说明：设置/背诵等五类由 App 自身产生，覆盖即可完整重建状态；
+ * 用户书是用户的导入劳动成果（原始文件可能已不在手上），若按替换语义
+ * 删除「设备上有而备份中没有」的书，将造成不可再生的数据损失，故恢复
+ * 只按 id 幂等覆盖备份中存在的书，设备独有的书原样保留。
+ *
+ * 对备份中每本合法书依次：持久化（INSERT OR REPLACE，同 id 幂等覆盖）→
+ * 注册进 TextLibraryService（整体重注册，内存列表与 db 收敛一致）→
+ * upsertFtsForBook 同步入搜索索引（失败吞错降级，与导入同口径，
+ * 冷启动 ensureFtsIndex 会兜底补齐）。
+ *
+ * 书架刷新不在此处做（UserBookService 被 useLibraryStore 依赖，
+ * 反向引用会成环），由 UI 层恢复完成后调 useLibraryStore.loadBooks()。
+ */
+export async function restoreUserBooks(
+  raw: unknown,
+): Promise<ServiceResult<UserBooksRestoreResult>> {
+  if (!Array.isArray(raw)) {
+    return { success: false, error: '恢复数据格式不正确：userBooks 应为数组' };
+  }
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: '用户书籍数据库不可用' };
+  }
+
+  const restoredBooks: Book[] = [];
+  let skipped = 0;
+  for (const entry of raw) {
+    const book = normalizeRestoredBook(entry);
+    if (!book) {
+      skipped += 1;
+      continue;
+    }
+    try {
+      // 同 id 幂等覆盖；created_at 取恢复时刻（书架按 created_at 排序，
+      // 恢复书排在最近，与「刚导入了书」的用户直觉一致）
+      instance.execute(
+        'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at) VALUES (?, ?, ?, ?, ?)',
+        [book.id, book.title, book.author, JSON.stringify(book), Date.now()],
+      );
+    } catch (e) {
+      return { success: false, error: `恢复书籍失败：${(e as Error).message}` };
+    }
+    restoredBooks.push(book);
+  }
+
+  // 注册：备份中的书按 id 覆盖内存列表同 id 书，设备独有的书保留（合并语义）
+  const byId = new Map<string, Book>();
+  for (const b of loadedBooks) {
+    byId.set(b.id, b);
+  }
+  for (const b of restoredBooks) {
+    byId.set(b.id, b);
+  }
+  const next = Array.from(byId.values());
+  const reg = TextLibraryService.registerUserBooks(next);
+  if (!reg.success) {
+    return { success: false, error: reg.error };
+  }
+  loadedBooks = next;
+
+  // FTS 同步：恢复的书重新入索引（失败吞错降级，与 importBook 同口径）
+  for (const b of restoredBooks) {
+    StorageService.upsertFtsForBook(b);
+  }
+
+  return { success: true, data: { restored: restoredBooks.length, skipped } };
+}
+
 /** 导入一本书：选文件 → 读取 → 解析 → 存库 → 注册 → 刷新内存列表 */
 export async function importBook(
   picked?: PickedBookFile,
@@ -561,8 +677,10 @@ export const UserBookService = {
   makeUserBookId,
   loadAndRegisterAll,
   isUserBook,
+  getAllBooks,
   importBook,
   deleteBook,
+  restoreUserBooks,
 };
 
 export default UserBookService;

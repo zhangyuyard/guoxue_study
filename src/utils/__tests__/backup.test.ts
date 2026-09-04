@@ -4,7 +4,8 @@
  *   - pickSettingsSnapshot：设置白名单采集
  *   - buildBackup → parseBackup：往返一致
  *   - parseBackup：各字段最小结构校验与中文错误文案
- *   - summarizeBackup：规模汇总
+ *   - userBooks：v1 扩展可选字段（缺失容错 / 非法报错 / 正常透传）
+ *   - summarizeBackup：规模汇总（含用户书籍计数）
  */
 import {
   BACKUP_VERSION,
@@ -16,6 +17,26 @@ import {
   summarizeBackup,
   type BackupSnapshot,
 } from '@/utils/backup';
+
+/** 构造一本最小用户书 Book 结构（备份聚合用） */
+function makeUserBook(id = 'user-backup-1'): Record<string, unknown> {
+  return {
+    id,
+    title: '备份之书',
+    author: '佚名',
+    category: 'user',
+    description: '共 1 章 1 段 · 导入自 TXT',
+    chapters: [
+      {
+        id: `${id}-c1`,
+        bookId: id,
+        title: '全文',
+        order: 1,
+        segments: [{ id: `${id}-c1-s1`, chapterId: `${id}-c1`, order: 1, text: '学而时习之。' }],
+      },
+    ],
+  };
+}
 
 /** 构造一份最小备份快照 */
 function makeSnapshot(): BackupSnapshot {
@@ -35,6 +56,7 @@ function makeSnapshot(): BackupSnapshot {
     bookmarks: [{ id: 'bm-1', type: 'paragraph', tags: ['名句'], createdAt: '2026-03-15T00:00:00.000Z' }],
     notes: [{ id: 'note-1', bookId: 'book1', chapterId: 'ch1', segmentId: 'seg-1', startOffset: 0, endOffset: 3, content: '温故知新' }],
     achievements: { 'recite-10': '2026-03-15T03:00:00.000Z' },
+    userBooks: [makeUserBook()],
   };
 }
 
@@ -96,6 +118,14 @@ describe('buildBackup → parseBackup 往返', () => {
   test('JSON 为 pretty 格式（含缩进）', () => {
     const text = buildBackup(makeSnapshot());
     expect(text).toContain('\n  "version"');
+  });
+
+  test('userBooks 随快照透传进 JSON（聚合断言）', () => {
+    const root = JSON.parse(buildBackup(makeSnapshot())) as {
+      data: { userBooks: Array<{ id: string }> };
+    };
+    expect(root.data.userBooks).toHaveLength(1);
+    expect(root.data.userBooks[0].id).toBe('user-backup-1');
   });
 });
 
@@ -182,6 +212,7 @@ describe('parseBackup 校验与错误文案', () => {
         bookmarks: [],
         notes: [],
         achievements: {},
+        userBooks: [],
         futureField: { whatever: true },
       },
       extraRoot: 1,
@@ -193,15 +224,66 @@ describe('parseBackup 校验与错误文案', () => {
       bookmarks: [],
       notes: [],
       achievements: {},
+      userBooks: [],
     });
+  });
+
+  test('userBooks 为 v1 扩展可选字段：旧备份缺失 → 容错为空数组（不报错）', () => {
+    const text = JSON.stringify({
+      version: 1,
+      data: { settings: {}, recitation: [], bookmarks: [], notes: [], achievements: {} },
+    });
+    const parsed = parseBackup(text);
+    expect(parsed.data.userBooks).toEqual([]);
+  });
+
+  test('userBooks 提供但非数组 → 报错并指名字段', () => {
+    const text = JSON.stringify({
+      version: 1,
+      data: {
+        settings: {},
+        recitation: [],
+        bookmarks: [],
+        notes: [],
+        achievements: {},
+        userBooks: 'oops',
+      },
+    });
+    expect(() => parseBackup(text)).toThrow('data.userBooks 应为数组');
+  });
+
+  test('userBooks 正常数组 → 原样透传', () => {
+    const book = makeUserBook('user-passthrough');
+    const text = JSON.stringify({
+      version: 1,
+      data: {
+        settings: {},
+        recitation: [],
+        bookmarks: [],
+        notes: [],
+        achievements: {},
+        userBooks: [book],
+      },
+    });
+    expect(parseBackup(text).data.userBooks).toEqual([book]);
   });
 });
 
 describe('summarizeBackup', () => {
-  test('汇总五类数据规模', () => {
+  test('汇总六类数据规模（含用户书籍计数）', () => {
     const parsed = parseBackup(buildBackup(makeSnapshot()));
     expect(summarizeBackup(parsed.data)).toBe(
-      '设置 3 项、背诵进度 1 条、收藏 1 条、笔记 1 条、成就 1 项',
+      '设置 3 项、背诵进度 1 条、收藏 1 条、笔记 1 条、成就 1 项、用户书籍 1 本',
     );
+  });
+
+  test('旧备份（无 userBooks 字段）→ 用户书籍显示 0 本', () => {
+    const parsed = parseBackup(
+      JSON.stringify({
+        version: 1,
+        data: { settings: {}, recitation: [], bookmarks: [], notes: [], achievements: {} },
+      }),
+    );
+    expect(summarizeBackup(parsed.data)).toContain('用户书籍 0 本');
   });
 });

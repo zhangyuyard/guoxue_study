@@ -30,6 +30,8 @@ import { useAchievementStore } from '@/store/useAchievementStore';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { useNoteStore } from '@/store/useNoteStore';
 import { useRecitationStore } from '@/store/useRecitationStore';
+import { useLibraryStore } from '@/store/useLibraryStore';
+import { UserBookService } from '@/services/UserBookService';
 import {
   buildBackup,
   formatBackupStamp,
@@ -186,29 +188,37 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
   // ---------- 备份与恢复（P2-15 本地版） ----------
 
   /**
-   * 执行恢复：各 store restoreFromBackup（整体替换并持久化）→ 成就重算 → 完成提示。
+   * 执行恢复：各 store restoreFromBackup（整体替换并持久化）→
+   * 用户书恢复（合并语义：只增改不删）→ 刷新书架 → 成就重算 → 完成提示。
    * IO 异常不崩溃（try-catch 兜底提示）。
    */
   const applyBackupRestore = useCallback((parsed: ParsedBackup) => {
-    try {
-      useSettingsStore.getState().restoreFromBackup(parsed.data.settings);
-      useRecitationStore.getState().restoreFromBackup(parsed.data.recitation);
-      useBookmarkStore.getState().restoreFromBackup(parsed.data.bookmarks);
-      useNoteStore.getState().restoreFromBackup(parsed.data.notes);
-      useAchievementStore.getState().restoreFromBackup(parsed.data.achievements);
-      // 恢复后按新数据重算成就（幂等；备份里没有的成就按当前数据补齐解锁）
-      useAchievementStore.getState().recompute();
-      Alert.alert('导入成功', `已恢复数据：\n${summarizeBackup(parsed.data)}`);
-    } catch (e) {
-      Alert.alert('导入失败', `恢复数据时出错：${(e as Error).message ?? '未知错误'}`);
-    }
+    void (async () => {
+      try {
+        useSettingsStore.getState().restoreFromBackup(parsed.data.settings);
+        useRecitationStore.getState().restoreFromBackup(parsed.data.recitation);
+        useBookmarkStore.getState().restoreFromBackup(parsed.data.bookmarks);
+        useNoteStore.getState().restoreFromBackup(parsed.data.notes);
+        useAchievementStore.getState().restoreFromBackup(parsed.data.achievements);
+        // 用户书恢复：备份中的书按 id 幂等覆盖，设备独有的书保留（合并语义）
+        await UserBookService.restoreUserBooks(parsed.data.userBooks);
+        // 恢复后刷新书架（新增/覆盖的用户书需重新上屏；两段式装载，内置书目先立即可用）
+        await useLibraryStore.getState().loadBooks();
+        // 恢复后按新数据重算成就（幂等；备份里没有的成就按当前数据补齐解锁）
+        useAchievementStore.getState().recompute();
+        Alert.alert('导入成功', `已恢复数据：\n${summarizeBackup(parsed.data)}`);
+      } catch (e) {
+        Alert.alert('导入失败', `恢复数据时出错：${(e as Error).message ?? '未知错误'}`);
+      }
+    })();
   }, []);
 
   /** 导出备份：聚合五类数据写入 Documents 目录 JSON，成功后提示路径并复制到剪贴板 */
   const handleBackupExport = useCallback(() => {
     void (async () => {
       try {
-        // 采集快照：设置走白名单函数字段（避免把方法序列化进备份）
+        // 采集快照：设置走白名单函数字段（避免把方法序列化进备份）；
+        // 用户书经 UserBookService 读取（内存列表与 db 一致，见 getAllBooks 注释）
         const settingsState = useSettingsStore.getState();
         const snapshot = {
           settings: pickSettingsSnapshot(settingsState as unknown as Record<string, unknown>),
@@ -216,6 +226,7 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
           bookmarks: useBookmarkStore.getState().bookmarks,
           notes: useNoteStore.getState().notes,
           achievements: useAchievementStore.getState().unlockedAt,
+          userBooks: UserBookService.getAllBooks(),
         };
         const text = buildBackup(snapshot);
         const fileName = `guoxue-backup-${formatBackupStamp(new Date())}.json`;
@@ -421,7 +432,7 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
           <View style={styles.settingLabelBox}>
             <Text style={[styles.settingLabel, { color: colors.text }]}>导出备份</Text>
             <Text style={[styles.settingHint, { color: colors.pinyin }]}>
-              设置 / 背诵进度 / 收藏 / 笔记 / 成就 → 本地 JSON 文件
+              设置 / 背诵进度 / 收藏 / 笔记 / 成就 / 用户书籍 → 本地 JSON 文件
             </Text>
           </View>
           <Text style={[styles.settingValue, { color: colors.textSecondary }]}>导出 ›</Text>
