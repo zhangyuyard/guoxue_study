@@ -9,6 +9,7 @@
  * 时间戳统一 ISO 8601 UTC；主键 TEXT 类型。
  */
 import type {
+  Book,
   Bookmark,
   BookmarkType,
   Highlight,
@@ -193,7 +194,72 @@ export function initDatabase(): ServiceResult<boolean> {
   }
 }
 
-/** 将全部经典文本段落写入 FTS5 索引（幂等，可重复调用） */
+// ---------- FTS5 全文索引 ----------
+
+/** segments_fts 待插行（字段与 FTS 建表列一一对应） */
+export interface FtsRow {
+  segmentId: string;
+  bookId: string;
+  chapterId: string;
+  bookTitle: string;
+  chapterTitle: string;
+  text: string;
+}
+
+/** FTS 单行插入语句（列序与 ensureFtsIndex 历史实现保持一致） */
+const FTS_INSERT_SQL = `INSERT OR REPLACE INTO segments_fts
+  (segment_id, book_id, chapter_id, book_title, chapter_title, text)
+  VALUES (?, ?, ?, ?, ?, ?)`;
+
+/**
+ * 将一本书的章/段展开为 FTS 待插行（纯函数，便于单测锁定字段映射）。
+ * 空段与超长段不做任何特殊处理——与原全量构建行为完全一致：
+ * 空段 text 为 ''（instr 匹配不上非空关键词，不影响搜索语义），
+ * 超长段按段落切分后的结果原样入索引（切分发生在导入解析层）。
+ */
+export function buildFtsRows(book: Book): FtsRow[] {
+  const rows: FtsRow[] = [];
+  for (const chapter of book.chapters) {
+    for (const seg of chapter.segments) {
+      rows.push({
+        segmentId: seg.id,
+        bookId: book.id,
+        chapterId: chapter.id,
+        bookTitle: book.title,
+        chapterTitle: chapter.title,
+        text: seg.text,
+      });
+    }
+  }
+  return rows;
+}
+
+/**
+ * 将待插行同步逐条写入 segments_fts。
+ * 导入书可能很大（数千段），保持同步逐条插入即可——
+ * 与原 ensureFtsIndex 全量构建同级代价，不引入异步复杂度。
+ */
+function insertFtsRows(instance: DB, rows: FtsRow[]): void {
+  for (const r of rows) {
+    instance.execute(FTS_INSERT_SQL, [
+      r.segmentId,
+      r.bookId,
+      r.chapterId,
+      r.bookTitle,
+      r.chapterTitle,
+      r.text,
+    ]);
+  }
+}
+
+/**
+ * 确保内置经典全部进入 FTS 索引（幂等，可重复调用；对外签名不变）。
+ * 增量构建：先查 segments_fts 已有的 book_id 集合，跳过已入索引的书——
+ * 冷启动重复调用由「全量重插所有书」降为「仅补缺失的书」，
+ * 消除首次搜索时万级段落重插带来的一次性卡顿。
+ * 同时做死索引自愈：清除不在当前文本库中的 book_id 残留行
+ * （如删除用户书时 FTS 清理曾失败的残留），防止搜索命中已删书。
+ */
 export function ensureFtsIndex(): ServiceResult<boolean> {
   const instance = getDb();
   if (!instance) {
@@ -209,21 +275,73 @@ export function ensureFtsIndex(): ServiceResult<boolean> {
     if (!segRes.success || !segRes.data) {
       return { success: false, error: '无法读取文本库' };
     }
+    const indexedRows = selectRows(instance, 'SELECT DISTINCT book_id FROM segments_fts');
+    const indexed = new Set(indexedRows.map((r) => String(r.book_id)));
     for (const book of TextLibraryService.getBooks().data ?? []) {
-      for (const chapter of book.chapters) {
-        for (const seg of chapter.segments) {
-          instance.execute(
-            `INSERT OR REPLACE INTO segments_fts
-             (segment_id, book_id, chapter_id, book_title, chapter_title, text)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [seg.id, book.id, chapter.id, book.title, chapter.title, seg.text],
-          );
-        }
+      if (indexed.has(book.id)) {
+        continue;
+      }
+      insertFtsRows(instance, buildFtsRows(book));
+    }
+    // 死索引自愈：再次查询现有 book_id，不在当前文本库中的行一律清除
+    const libraryIds = new Set(
+      (TextLibraryService.getBooks().data ?? []).map((b) => b.id),
+    );
+    for (const row of selectRows(instance, 'SELECT DISTINCT book_id FROM segments_fts')) {
+      const id = String(row.book_id);
+      if (!libraryIds.has(id)) {
+        instance.execute('DELETE FROM segments_fts WHERE book_id = ?', [id]);
       }
     }
     return { success: true, data: true };
   } catch (e) {
     return { success: false, error: (e as Error).message };
+  }
+}
+
+/**
+ * 将单本书（用户导入书）的章/段同步写入 FTS 索引（幂等 upsert）。
+ * 供 UserBookService.importBook 在导入成功后调用，使该书
+ * 无需等待冷启动重建、同会话内即可被搜索路径命中。
+ * 导入书可能很大（数千段），保持同步逐条插入——与 ensureFtsIndex
+ * 全量构建同级代价，换取立即可搜。
+ */
+export function upsertFtsForBook(book: Book): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    const initRes = initDatabase();
+    if (!initRes.success) {
+      return initRes;
+    }
+    insertFtsRows(instance, buildFtsRows(book));
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `FTS 索引写入失败：${(e as Error).message}` };
+  }
+}
+
+/**
+ * 按 bookId 清除 FTS 索引行。
+ * 供 UserBookService.deleteBook 在删除成功后调用，
+ * 防止已删书在 segments_fts 中残留死索引、搜索命中后加载失败。
+ */
+export function deleteFtsForBook(bookId: string): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    const initRes = initDatabase();
+    if (!initRes.success) {
+      return initRes;
+    }
+    instance.execute('DELETE FROM segments_fts WHERE book_id = ?', [bookId]);
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `FTS 索引清理失败：${(e as Error).message}` };
   }
 }
 
@@ -666,6 +784,9 @@ export function deleteRecitation(id: string): ServiceResult<boolean> {
 export const StorageService = {
   initDatabase,
   ensureFtsIndex,
+  upsertFtsForBook,
+  deleteFtsForBook,
+  buildFtsRows,
   genId,
   nowISO,
   saveHighlight,

@@ -4,13 +4,16 @@
  *   选文件（DocumentPicker，限支持的文本格式）→ 分块读取字节 →
  *   按格式转换（txt/md/html/fb2/epub → 纯文本+章节标记）→
  *   解析为 Book（章节/段落切分）→ user_books.db 持久化 → 注册进 TextLibraryService。
- * 与字典域隔离：独立 db 文件 user_books.db，严禁触碰 guoxue.db 与 user_dict.db。
+ * 与字典域隔离：独立 db 文件 user_books.db，严禁触碰 user_dict.db；
+ * guoxue.db 仅经 StorageService 公共 API 写入 segments_fts 搜索索引行
+ * （FTS 与导入/删除同步的唯一例外，保证同会话内导入即可搜、删除即清索引）。
  */
 import DocumentPicker from 'react-native-document-picker';
 import RNFS from 'react-native-fs';
 import { open } from 'react-native-quick-sqlite';
 import type { Book, ServiceResult } from '@/types';
 import { TextLibraryService } from '@/services/TextLibraryService';
+import { StorageService } from '@/services/StorageService';
 import { isLocalPath, toLocalPath } from '@/utils/localPath';
 import { decodeTextBytes } from '@/utils/textEncoding';
 import { decodeUtf8 } from '@/utils/utf8';
@@ -510,6 +513,12 @@ export async function importBook(
     return { success: false, error: reg.error };
   }
   loadedBooks = next;
+  // BugFix：FTS 同步入索引——此前新书要等下次冷启动 ensureFtsIndex 才可搜，
+  // 同会话内导入后立即搜索无结果。导入书可能很大（数千段），保持同步
+  // 逐条插入（与全量构建同级代价），换取同会话内立即可搜。
+  // 取舍：FTS 写入失败不阻断导入——书籍主体已持久化且已注册，失败仅意味着
+  // 本次会话搜索暂缺该书，下次冷启动 ensureFtsIndex 增量构建会补齐，故吞错降级。
+  StorageService.upsertFtsForBook(book);
   return { success: true, data: book };
 }
 
@@ -533,6 +542,10 @@ export async function deleteBook(id: string): Promise<ServiceResult<null>> {
     return { success: false, error: reg.error };
   }
   loadedBooks = next;
+  // BugFix：FTS 同步清索引——此前已删书在 segments_fts 中残留死索引，
+  // 搜索仍会命中（点进去加载失败）。清理失败同样不阻断删除结果：
+  // 书已不在文本库中，下次冷启动 ensureFtsIndex 的死索引自愈会兜底清除。
+  StorageService.deleteFtsForBook(id);
   return { success: true, data: null };
 }
 
