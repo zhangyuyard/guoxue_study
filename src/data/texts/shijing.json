@@ -1,0 +1,621 @@
+{
+ "id": "shijing",
+ "title": "诗经",
+ "author": "佚名（周代）",
+ "category": "jing",
+ "description": "我国最早的诗歌总集，收录西周初年至春秋中叶诗歌三百余篇。本册精选风、雅、颂代表篇目三十首。",
+ "chapters": [
+  {
+   "id": "shijing-guan-ju",
+   "bookId": "shijing",
+   "title": "国风·周南·关雎",
+   "order": 1,
+   "segments": [
+    {
+     "id": "shijing-guan-ju-1",
+     "chapterId": "shijing-guan-ju",
+     "order": 1,
+     "text": "关关雎鸠，在河之洲。窈窕淑女，君子好逑。参差荇菜，左右流之。窈窕淑女，寤寐求之。求之不得，寤寐思服。悠哉悠哉，辗转反侧。参差荇菜，左右采之。窈窕淑女，琴瑟友之。参差荇菜，左右芼之。窈窕淑女，钟鼓乐之。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-tao-yao",
+   "bookId": "shijing",
+   "title": "国风·周南·桃夭",
+   "order": 2,
+   "segments": [
+    {
+     "id": "shijing-tao-yao-1",
+     "chapterId": "shijing-tao-yao",
+     "order": 1,
+     "text": "桃之夭夭，灼灼其华，之子于归，宜其室家。桃之夭夭，有蕡其实，之子于归，宜其家室。桃之夭夭，其叶蓁蓁，之子于归，宜其家人。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-fu-yi",
+   "bookId": "shijing",
+   "title": "国风·周南·芣苢",
+   "order": 3,
+   "segments": [
+    {
+     "id": "shijing-fu-yi-1",
+     "chapterId": "shijing-fu-yi",
+     "order": 1,
+     "text": "采采芣苢，薄言采之，采采芣苢，薄言有之。采采芣苢，薄言掇之，采采芣苢，薄言捋之。采采芣苢，薄言袺之，采采芣苢，薄言襭之。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-biao-you-mei",
+   "bookId": "shijing",
+   "title": "国风·召南·摽有梅",
+   "order": 4,
+   "segments": [
+    {
+     "id": "shijing-biao-you-mei-1",
+     "chapterId": "shijing-biao-you-mei",
+     "order": 1,
+     "text": "摽有梅，其实七兮，求我庶士，迨其吉兮。摽有梅，其实三兮，求我庶士，迨其今兮。摽有梅，顷筐塈之，求我庶士，迨其谓之。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-shi-wei",
+   "bookId": "shijing",
+   "title": "国风·邶风·式微",
+   "order": 5,
+   "segments": [
+    {
+     "id": "shijing-shi-wei-1",
+     "chapterId": "shijing-shi-wei",
+     "order": 1,
+     "text": "式微式微，胡不归？微君之故，胡为乎中露？式微式微，胡不归？微君之躬，胡为乎泥中？"
+    }
+   ]
+  },
+  {
+   "id": "shijing-kai-feng",
+   "bookId": "shijing",
+   "title": "国风·邶风·凯风",
+   "order": 6,
+   "segments": [
+    {
+     "id": "shijing-kai-feng-1",
+     "chapterId": "shijing-kai-feng",
+     "order": 1,
+     "text": "凯风自南，吹彼棘心；棘心夭夭，母氏劬劳。凯风自南，吹彼棘薪；母氏圣善，我无令人。爰有寒泉，在浚之下；有子七人，母氏劳苦。睍睆黄鸟，载好其音；有子七人，莫慰母心。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-ji-gu",
+   "bookId": "shijing",
+   "title": "国风·邶风·击鼓",
+   "order": 7,
+   "segments": [
+    {
+     "id": "shijing-ji-gu-1",
+     "chapterId": "shijing-ji-gu",
+     "order": 1,
+     "text": "击鼓其镗，踊跃用兵，土国城漕，我独南行。从孙子仲，平陈与宋，不我以归，忧心有忡。爰居爰处，爰丧其马，于以求之，于林之下。死生契阔，与子成说，执子之手，与子偕老。于嗟阔兮，不我活兮，于嗟洵兮，不我信兮。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-shuo-ren",
+   "bookId": "shijing",
+   "title": "国风·卫风·硕人",
+   "order": 8,
+   "segments": [
+    {
+     "id": "shijing-shuo-ren-1",
+     "chapterId": "shijing-shuo-ren",
+     "order": 1,
+     "text": "硕人其颀，衣锦褧衣，齐侯之子，卫侯之妻，东宫之妹，邢侯之姨，谭公维私。手如柔荑，肤如凝脂，领如蝤蛴，齿如瓠犀，螓首蛾眉，巧笑倩兮，美目盼兮。硕人敖敖，说于农郊，四牡有骄，朱幩镳镳，翟茀以朝，大夫夙退，无使君劳。河水洋洋，北流活活，施罛濊濊，鳣鲔发发，葭菼揭揭，庶姜孽孽，庶士有朅。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-meng",
+   "bookId": "shijing",
+   "title": "国风·卫风·氓",
+   "order": 9,
+   "segments": [
+    {
+     "id": "shijing-meng-1",
+     "chapterId": "shijing-meng",
+     "order": 1,
+     "text": "氓之蚩蚩，抱布贸丝。匪来贸丝，来即我谋。送子涉淇，至于顿丘。匪我愆期，子无良媒。将子无怒，秋以为期。乘彼垝垣，以望复关。不见复关，泣涕涟涟。既见复关，载笑载言。尔卜尔筮，体无咎言。以尔车来，以我贿迁。桑之未落，其叶沃若。于嗟鸠兮，无食桑葚。于嗟女兮，无与士耽。士之耽兮，犹可说也。女之耽兮，不可说也。桑之落矣，其黄而陨。自我徂尔，三岁食贫。淇水汤汤，渐车帷裳。女也不爽，士贰其行。士也罔极，二三其德。三岁为妇，靡室劳矣。夙兴夜寐，靡有朝矣。言既遂矣，至于暴矣。兄弟不知，咥其笑矣。静言思之，躬自悼矣。及尔偕老，老使我怨。淇则有岸，隰则有泮。总角之宴，言笑晏晏。信誓旦旦，不思其反。反是不思，亦已焉哉。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-mu-gua",
+   "bookId": "shijing",
+   "title": "国风·卫风·木瓜",
+   "order": 10,
+   "segments": [
+    {
+     "id": "shijing-mu-gua-1",
+     "chapterId": "shijing-mu-gua",
+     "order": 1,
+     "text": "投我以木瓜，报之以琼琚，匪报也，永以为好也。"
+    },
+    {
+     "id": "shijing-mu-gua-2",
+     "chapterId": "shijing-mu-gua",
+     "order": 2,
+     "text": "投我以木桃，报之以琼瑶，匪报也，永以为好也。"
+    },
+    {
+     "id": "shijing-mu-gua-3",
+     "chapterId": "shijing-mu-gua",
+     "order": 3,
+     "text": "投我以木李，报之以琼玖，匪报也，永以为好也。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-shu-li",
+   "bookId": "shijing",
+   "title": "国风·王风·黍离",
+   "order": 11,
+   "segments": [
+    {
+     "id": "shijing-shu-li-1",
+     "chapterId": "shijing-shu-li",
+     "order": 1,
+     "text": "彼黍离离，彼稷之苗。行迈靡靡，中心摇摇。知我者，谓我心忧，不知我者，谓我何求。悠悠苍天，此何人哉！彼黍离离，彼稷之穗。行迈靡靡，中心如醉。知我者，谓我心忧，不知我者，谓我何求。悠悠苍天，此何人哉！彼黍离离，彼稷之实。行迈靡靡，中心如噎。知我者，谓我心忧，不知我者，谓我何求。悠悠苍天，此何人哉！"
+    }
+   ]
+  },
+  {
+   "id": "shijing-cai-ge",
+   "bookId": "shijing",
+   "title": "国风·王风·采葛",
+   "order": 12,
+   "segments": [
+    {
+     "id": "shijing-cai-ge-1",
+     "chapterId": "shijing-cai-ge",
+     "order": 1,
+     "text": "彼采葛兮，一日不见，如三月兮。彼采萧兮，一日不见，如三秋兮。彼采艾兮，一日不见，如三岁兮。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-jun-zi-yu-yi",
+   "bookId": "shijing",
+   "title": "国风·王风·君子于役",
+   "order": 13,
+   "segments": [
+    {
+     "id": "shijing-jun-zi-yu-yi-1",
+     "chapterId": "shijing-jun-zi-yu-yi",
+     "order": 1,
+     "text": "君子于役，不知其期。曷至哉？鸡栖于埘，日之夕矣，羊牛下来。君子于役，如之何勿思！君子于役，不日不月。曷其有佸？鸡栖于桀，日之夕矣，羊牛下括。君子于役，苟无饥渴。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-fa-tan",
+   "bookId": "shijing",
+   "title": "国风·魏风·伐檀",
+   "order": 14,
+   "segments": [
+    {
+     "id": "shijing-fa-tan-1",
+     "chapterId": "shijing-fa-tan",
+     "order": 1,
+     "text": "坎坎伐檀兮，寘之河之干兮，河水清且涟猗。不稼不穑，胡取禾三百廛兮！不狩不猎，胡瞻尔庭有县貆兮。彼君子兮，不素餐兮。坎坎伐辐兮，寘之河之侧兮，河水清且直猗。不稼不穑，胡取禾三百亿兮！不狩不猎，胡瞻尔庭有县特兮。彼君子兮，不素食兮。坎坎伐轮兮，寘之河之漘兮，河水清且沦猗。不稼不穑，胡取禾三百囷兮！不狩不猎，胡瞻尔庭有县鹑兮。彼君子兮，不素飧兮。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-shuo-shu",
+   "bookId": "shijing",
+   "title": "国风·魏风·硕鼠",
+   "order": 15,
+   "segments": [
+    {
+     "id": "shijing-shuo-shu-1",
+     "chapterId": "shijing-shuo-shu",
+     "order": 1,
+     "text": "硕鼠硕鼠，无食我黍！三岁贯女，莫我肯顾。逝将去女，适彼乐土。乐土乐土，爰得我所。硕鼠硕鼠，无食我麦！三岁贯女，莫我肯德。逝将去女，适彼乐国。乐国乐国，爰得我直。硕鼠硕鼠，无食我苗！三岁贯女，莫我肯劳。逝将去女，适彼乐郊。乐郊乐郊，谁之永号。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-yue-chu",
+   "bookId": "shijing",
+   "title": "国风·陈风·月出",
+   "order": 16,
+   "segments": [
+    {
+     "id": "shijing-yue-chu-1",
+     "chapterId": "shijing-yue-chu",
+     "order": 1,
+     "text": "月出皎兮，佼人僚兮，舒窈纠兮，劳心悄兮。月出皓兮，佼人懰兮，舒懮受兮，劳心慅兮。月出照兮，佼人燎兮，舒夭绍兮，劳心惨兮。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-jian-jia",
+   "bookId": "shijing",
+   "title": "国风·秦风·蒹葭",
+   "order": 17,
+   "segments": [
+    {
+     "id": "shijing-jian-jia-1",
+     "chapterId": "shijing-jian-jia",
+     "order": 1,
+     "text": "蒹葭苍苍，白露为霜。所谓伊人，在水一方。溯洄从之，道阻且长。溯游从之，宛在水中央。蒹葭萋萋，白露未晞。所谓伊人，在水之湄。溯洄从之，道阻且跻。溯游从之，宛在水中坻。蒹葭采采，白露未已。所谓伊人，在水之涘。溯洄从之，道阻且右。溯游从之，宛在水中沚。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-wu-yi",
+   "bookId": "shijing",
+   "title": "国风·秦风·无衣",
+   "order": 18,
+   "segments": [
+    {
+     "id": "shijing-wu-yi-1",
+     "chapterId": "shijing-wu-yi",
+     "order": 1,
+     "text": "岂曰无衣、与子同袍。王于兴师、修我戈矛、与子同仇。岂曰无衣、与子同泽。王于兴师、修我矛戟、与子偕作。岂曰无衣、与子同裳。王于兴师、修我甲兵、与子偕行。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-qi-yue",
+   "bookId": "shijing",
+   "title": "国风·豳风·七月",
+   "order": 19,
+   "segments": [
+    {
+     "id": "shijing-qi-yue-1",
+     "chapterId": "shijing-qi-yue",
+     "order": 1,
+     "text": "七月流火，九月授衣。一之日觱发，二之日栗烈。无衣无褐，何以卒岁？三之日于耜，四之日举趾。同我妇子，馌彼南亩。田畯至喜。七月流火，九月授衣。春日载阳，有鸣仓庚。女执懿筐，遵彼微行，爰求柔桑。春日迟迟。采蘩祁祁。女心伤悲，殆及公子同归。七月流火，八月萑苇。蚕月条桑，取彼斧斨。以伐远扬，猗彼女桑。七月鸣鵙，八月载绩，载玄载黄。我朱孔阳，为公子裳。四月秀葽，五月鸣蜩，八月其获，十月陨萚。一之日于貉，取彼狐狸，为公子裘。二之日其同，载缵武功，言私其豵，献豜于公。五月斯螽动股，六月莎鸡振羽，七月在野，八月在宇，九月在户，十月蟋蟀入我床下。穹窒熏鼠，塞向墐户。嗟我妇子，曰为改岁。入此室处。六月食郁及薁，七月亨葵及菽，八月剥枣，十月获稻。为此春酒，以介眉寿。七月食瓜，八月断壶，九月叔苴，采荼薪樗，食我农夫。九月筑场圃，十月纳禾稼。黍稷重穋，禾麻菽麦。嗟我农夫，我稼既同，上入执宫功。昼尔于茅，宵尔索绹。亟其乘屋，其始播百谷。二之日凿冰冲冲，三之日纳于凌阴，四之日其蚤，献羔祭韭。九月肃霜，十月涤场。朋酒斯飨，曰杀羔羊。跻彼公堂，称彼兕觥。万寿无疆。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-dong-shan",
+   "bookId": "shijing",
+   "title": "国风·豳风·东山",
+   "order": 20,
+   "segments": [
+    {
+     "id": "shijing-dong-shan-1",
+     "chapterId": "shijing-dong-shan",
+     "order": 1,
+     "text": "我徂东山，慆慆不归。我来自东，零雨其濛。我东曰归，我心西悲。制彼裳衣，勿士行枚。蜎蜎者蠋，烝在桑野。敦彼独宿，亦在车下。"
+    },
+    {
+     "id": "shijing-dong-shan-2",
+     "chapterId": "shijing-dong-shan",
+     "order": 2,
+     "text": "我徂东山，慆慆不归。我来自东，零雨其濛。果裸之实，亦施于宇。伊威在室，蟏蛸在户。町畽鹿场，熠燿宵行。不可畏也，伊可怀也。"
+    },
+    {
+     "id": "shijing-dong-shan-3",
+     "chapterId": "shijing-dong-shan",
+     "order": 3,
+     "text": "我徂东山，慆慆不归。我来自东，零雨其濛。鹳鸣于垤，妇叹于室。洒埽穹窒，我征聿至。有敦瓜苦，烝在栗薪。自我不见，于今三年。"
+    },
+    {
+     "id": "shijing-dong-shan-4",
+     "chapterId": "shijing-dong-shan",
+     "order": 4,
+     "text": "我徂东山，慆慆不归。我来自东，零雨其濛。仓庚于飞，熠燿其羽。之子于归，皇驳其马。亲结其缡，九十其仪。其新孔嘉，其旧如之何？"
+    }
+   ]
+  },
+  {
+   "id": "shijing-lu-ming",
+   "bookId": "shijing",
+   "title": "小雅·鹿鸣",
+   "order": 21,
+   "segments": [
+    {
+     "id": "shijing-lu-ming-1",
+     "chapterId": "shijing-lu-ming",
+     "order": 1,
+     "text": "呦呦鹿鸣，食野之苹。我有嘉宾，鼓瑟吹笙。吹笙鼓簧，承筐是将。人之好我，示我周行。"
+    },
+    {
+     "id": "shijing-lu-ming-2",
+     "chapterId": "shijing-lu-ming",
+     "order": 2,
+     "text": "呦呦鹿鸣，食野之蒿。我有嘉宾，德音孔昭。视民不恌，君子是则是效。我有旨酒，嘉宾式燕以敖。"
+    },
+    {
+     "id": "shijing-lu-ming-3",
+     "chapterId": "shijing-lu-ming",
+     "order": 3,
+     "text": "呦呦鹿鸣，食野之芩。我有嘉宾，鼓瑟鼓琴。鼓瑟鼓琴，和乐且湛。我有旨酒，以燕乐嘉宾之心。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-cai-wei",
+   "bookId": "shijing",
+   "title": "小雅·采薇",
+   "order": 22,
+   "segments": [
+    {
+     "id": "shijing-cai-wei-1",
+     "chapterId": "shijing-cai-wei",
+     "order": 1,
+     "text": "采薇采薇，薇亦作止。曰归曰归，岁亦莫止。靡室靡家，猃狁之故。不遑启居，猃狁之故。"
+    },
+    {
+     "id": "shijing-cai-wei-2",
+     "chapterId": "shijing-cai-wei",
+     "order": 2,
+     "text": "采薇采薇，薇亦柔止。曰归曰归，心亦忧止。忧心烈烈，载饥载渴。我戍未定，靡使归聘。"
+    },
+    {
+     "id": "shijing-cai-wei-3",
+     "chapterId": "shijing-cai-wei",
+     "order": 3,
+     "text": "采薇采薇，薇亦刚止。曰归曰归，岁亦阳止。王事靡盬，不遑启处。忧心孔疚，我行不来。"
+    },
+    {
+     "id": "shijing-cai-wei-4",
+     "chapterId": "shijing-cai-wei",
+     "order": 4,
+     "text": "彼尔维何？维常之华。彼路斯何？君子之车。戎车既驾，四牡业业。岂敢定居？一月三捷。"
+    },
+    {
+     "id": "shijing-cai-wei-5",
+     "chapterId": "shijing-cai-wei",
+     "order": 5,
+     "text": "驾彼四牡，四牡骙骙。君子所依，小人所腓。四牡翼翼，象弭鱼服。岂不日戒，猃狁孔棘！"
+    },
+    {
+     "id": "shijing-cai-wei-6",
+     "chapterId": "shijing-cai-wei",
+     "order": 6,
+     "text": "昔我往矣，杨柳依依。今我来思，雨雪霏霏。行道迟迟，载渴载饥。我心伤悲，莫知我哀！"
+    }
+   ]
+  },
+  {
+   "id": "shijing-liao-e",
+   "bookId": "shijing",
+   "title": "小雅·蓼莪",
+   "order": 23,
+   "segments": [
+    {
+     "id": "shijing-liao-e-1",
+     "chapterId": "shijing-liao-e",
+     "order": 1,
+     "text": "蓼蓼者莪，匪莪伊蒿。哀哀父母，生我劬劳。"
+    },
+    {
+     "id": "shijing-liao-e-2",
+     "chapterId": "shijing-liao-e",
+     "order": 2,
+     "text": "蓼蓼者莪，匪莪伊蔚。哀哀父母，生我劳瘁。"
+    },
+    {
+     "id": "shijing-liao-e-3",
+     "chapterId": "shijing-liao-e",
+     "order": 3,
+     "text": "缾之罄矣，维罍之耻。鲜民之生，不如死之久矣。"
+    },
+    {
+     "id": "shijing-liao-e-4",
+     "chapterId": "shijing-liao-e",
+     "order": 4,
+     "text": "无父何怙？无母何恃？出则衔恤，入则靡至。"
+    },
+    {
+     "id": "shijing-liao-e-5",
+     "chapterId": "shijing-liao-e",
+     "order": 5,
+     "text": "父兮生我，母兮鞠我，拊我、畜我、长我、育我、顾我、复我、出入腹我。欲报之德，昊天罔极。"
+    },
+    {
+     "id": "shijing-liao-e-6",
+     "chapterId": "shijing-liao-e",
+     "order": 6,
+     "text": "南山烈烈，飘风发发。民莫不穀，我独何害？"
+    },
+    {
+     "id": "shijing-liao-e-7",
+     "chapterId": "shijing-liao-e",
+     "order": 7,
+     "text": "南山律律，飘风弗弗。民莫不穀，我独不卒！"
+    }
+   ]
+  },
+  {
+   "id": "shijing-he-ming",
+   "bookId": "shijing",
+   "title": "小雅·鹤鸣",
+   "order": 24,
+   "segments": [
+    {
+     "id": "shijing-he-ming-1",
+     "chapterId": "shijing-he-ming",
+     "order": 1,
+     "text": "鹤鸣于九皋，声闻于野。鱼潜在渊，或在于渚。乐彼之园，爰有树檀，其下维萚。他山之石，可以为错。"
+    },
+    {
+     "id": "shijing-he-ming-2",
+     "chapterId": "shijing-he-ming",
+     "order": 2,
+     "text": "鹤鸣于九皋，声闻于天。鱼在于渚，或潜在渊。乐彼之园，爰有树檀，其下维谷。他山之石，可以攻玉。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-wen-wang",
+   "bookId": "shijing",
+   "title": "大雅·文王",
+   "order": 25,
+   "segments": [
+    {
+     "id": "shijing-wen-wang-1",
+     "chapterId": "shijing-wen-wang",
+     "order": 1,
+     "text": "文王在上，于昭于天。周虽旧邦，其命维新。有周不显，帝命不时。文王陟降，在帝左右。"
+    },
+    {
+     "id": "shijing-wen-wang-2",
+     "chapterId": "shijing-wen-wang",
+     "order": 2,
+     "text": "亹亹文王，令闻不已。陈锡哉周，侯文王孙子。文王孙子，本支百世。凡周之士，不显亦世。"
+    },
+    {
+     "id": "shijing-wen-wang-3",
+     "chapterId": "shijing-wen-wang",
+     "order": 3,
+     "text": "世之不显，厥犹翼翼。思皇多士，生此王国。王国克生，维周之桢。济济多士，文王以宁。"
+    },
+    {
+     "id": "shijing-wen-wang-4",
+     "chapterId": "shijing-wen-wang",
+     "order": 4,
+     "text": "穆穆文王，于缉熙敬止。假哉天命，有商孙子。商之孙子，其丽不亿。上帝既命，侯于周服。"
+    },
+    {
+     "id": "shijing-wen-wang-5",
+     "chapterId": "shijing-wen-wang",
+     "order": 5,
+     "text": "侯服于周，天命靡常。殷士肤敏，祼将于京。厥作祼将，常服黼冔。王之荩臣，无念尔祖。"
+    },
+    {
+     "id": "shijing-wen-wang-6",
+     "chapterId": "shijing-wen-wang",
+     "order": 6,
+     "text": "无念尔祖，聿修厥德。永言配命，自求多福。殷之未丧师，克配上帝。宜鉴于殷，骏命不易。"
+    },
+    {
+     "id": "shijing-wen-wang-7",
+     "chapterId": "shijing-wen-wang",
+     "order": 7,
+     "text": "命之不易，无遏尔躬。宣昭义问，有虞殷自天。上天之载，无声无臭。仪刑文王，万邦作孚。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-sheng-min",
+   "bookId": "shijing",
+   "title": "大雅·生民",
+   "order": 26,
+   "segments": [
+    {
+     "id": "shijing-sheng-min-1",
+     "chapterId": "shijing-sheng-min",
+     "order": 1,
+     "text": "厥初生民，时维姜嫄。生民如何？克禋克祀，以弗无子。履帝武敏歆，攸介攸止。载震载夙，载生载育。时维后稷。"
+    },
+    {
+     "id": "shijing-sheng-min-2",
+     "chapterId": "shijing-sheng-min",
+     "order": 2,
+     "text": "诞弥厥月，先生如达。不坼不副，无菑无害。以赫厥灵，上帝不宁。不康禋祀，居然生子。"
+    },
+    {
+     "id": "shijing-sheng-min-3",
+     "chapterId": "shijing-sheng-min",
+     "order": 3,
+     "text": "诞寘之隘巷，牛羊腓字之。诞寘之平林，会伐平林。诞寘之寒冰，鸟覆翼之。鸟乃去矣，后稷呱矣。"
+    },
+    {
+     "id": "shijing-sheng-min-4",
+     "chapterId": "shijing-sheng-min",
+     "order": 4,
+     "text": "实覃实吁，厥声载路。诞实匍匐，克岐克嶷，以就口食。艺之荏菽，荏菽斾斾，禾役穟穟。麻麦幪幪，瓜瓞唪唪。"
+    },
+    {
+     "id": "shijing-sheng-min-5",
+     "chapterId": "shijing-sheng-min",
+     "order": 5,
+     "text": "诞后稷之穑，有相之道。茀厥丰草，种之黄茂。实方实苞，实种实褎，实发实秀，实坚实好，实颖实栗。即有邰家室。"
+    },
+    {
+     "id": "shijing-sheng-min-6",
+     "chapterId": "shijing-sheng-min",
+     "order": 6,
+     "text": "诞降嘉种，维秬维秠，维穈维芑。恒之秬秠，是获是亩。恒之穈芑，是任是负。以归肇祀。"
+    },
+    {
+     "id": "shijing-sheng-min-7",
+     "chapterId": "shijing-sheng-min",
+     "order": 7,
+     "text": "诞我祀如何？或舂或揄，或簸或蹂。释之叟叟，烝之浮浮。载谋载惟，取萧祭脂，取羝以軷。载燔载烈，以兴嗣岁。"
+    },
+    {
+     "id": "shijing-sheng-min-8",
+     "chapterId": "shijing-sheng-min",
+     "order": 8,
+     "text": "卬盛于豆，于豆于登。其香始升，上帝居歆。胡臭亶时？后稷肇祀，庶无罪悔，以迄于今。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-qing-miao",
+   "bookId": "shijing",
+   "title": "周颂·清庙",
+   "order": 27,
+   "segments": [
+    {
+     "id": "shijing-qing-miao-1",
+     "chapterId": "shijing-qing-miao",
+     "order": 1,
+     "text": "于穆清庙，肃雝显相。济济多士，秉文之德。对越在天，骏奔走在庙。不显不承，无射于人斯。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-feng-nian",
+   "bookId": "shijing",
+   "title": "周颂·丰年",
+   "order": 28,
+   "segments": [
+    {
+     "id": "shijing-feng-nian-1",
+     "chapterId": "shijing-feng-nian",
+     "order": 1,
+     "text": "丰年多黍多稌，亦有高廪，万亿及秭。为酒为醴，烝畀祖妣，以洽百礼，降福孔皆。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-yi-xi",
+   "bookId": "shijing",
+   "title": "周颂·噫嘻",
+   "order": 29,
+   "segments": [
+    {
+     "id": "shijing-yi-xi-1",
+     "chapterId": "shijing-yi-xi",
+     "order": 1,
+     "text": "噫嘻成王，既昭假尔，率时农夫，播厥百谷。骏发尔私，终三十里，亦服尔耕，十千维耦。"
+    }
+   ]
+  },
+  {
+   "id": "shijing-xuan-niao",
+   "bookId": "shijing",
+   "title": "商颂·玄鸟",
+   "order": 30,
+   "segments": [
+    {
+     "id": "shijing-xuan-niao-1",
+     "chapterId": "shijing-xuan-niao",
+     "order": 1,
+     "text": "天命玄鸟，降而生商。宅殷土芒芒。古帝命武汤，正域彼四方。方命厥后，奄有九有。商之先后，受命不殆。在武丁孙子。武丁孙子，武王靡不胜。龙旗十乘，大糦是承。邦畿千里，维民所止。肇域彼四海。四海来假，来假祁祁。景员维河。殷受命咸宜，百禄是何。"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,32 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- B4 复习提醒：Android 13+ 通知运行时权限由 notifee requestPermission 发起，
+         但 manifest 仍需静态声明 POST_NOTIFICATIONS（notifee 自身 manifest 不含该声明） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- B4 复习提醒：notifee TIMESTAMP 触发器在 Android 12+ 走 AlarmManager 精确闹钟，
+         未授权时自动降级为 inexact（不崩溃），声明此权限以获得精确提醒 -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <application
+      android:name=".MainApplication"
+      android:label="@string/app_name"
+      android:icon="@mipmap/ic_launcher"
+      android:roundIcon="@mipmap/ic_launcher_round"
+      android:allowBackup="false"
+      android:extractNativeLibs="true"
+      android:theme="@style/AppTheme">
+      <activity
+        android:name=".MainActivity"
+        android:label="@string/app_name"
+        android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+        android:launchMode="singleTask"
+        android:windowSoftInputMode="adjustResize"
+        android:exported="true">
+        <intent-filter>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent-filter>
+      </activity>
+    </application>
+</manifest>

@@ -1,0 +1,15 @@
+{
+  "name": "guoxue_study_app",
+  "displayName": "国学学习助手",
+  "version": "1.0.0",
+  "orientation": "portrait",
+  "userInterfaceStyle": "automatic",
+  "android": {
+    "package": "com.guoxue.studyapp",
+    "versionCode": 1
+  },
+  "ios": {
+    "bundleIdentifier": "com.guoxue.studyapp",
+    "supportsTablet": true
+  }
+}

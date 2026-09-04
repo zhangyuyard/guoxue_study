@@ -1,0 +1,21 @@
+# 签名证书（泄露 = 应用可被他人冒名更新）
+*.keystore
+!android/app/debug.keystore
+
+# 构建产物
+android/app/build/
+android/build/
+android/.gradle/
+android/captures/
+android/local.properties
+ios/Pods/
+ios/build/
+ios/*.xcworkspace/xcuserdata/
+
+# 依赖
+node_modules/
+
+# 系统 / 编辑器
+.DS_Store
+.history/
+*.log

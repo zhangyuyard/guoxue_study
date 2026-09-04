@@ -1,0 +1,11823 @@
+{
+ "generatedAt": "2026-08-26T00:00:00.000Z",
+ "dicts": [
+  {
+   "id": "native-common",
+   "name": "国学通用小字典",
+   "kind": "native",
+   "format": "builtin",
+   "version": "1.0",
+   "license": "本项目内置样例数据（基于自带 pinyin-dict / word-dict 词库程序化整理）",
+   "description": "现代通用视角的常用字词条目，含拼音、词性、释义与例句。",
+   "entries": [
+    {
+     "headword": "之",
+     "pinyin": "zhī",
+     "senses": [
+      {
+       "def": "结构助词，的",
+       "examples": [
+        "学而时习之",
+        "夫子之道"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "def": "取消句子独立性",
+       "label": "多义虚词"
+      },
+      {
+       "def": "宾语前置标志",
+       "label": "多义虚词"
+      },
+      {
+       "def": "也可作代词",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "乎",
+     "pinyin": "hū",
+     "senses": [
+      {
+       "def": "语气助词，表疑问或感叹",
+       "examples": [
+        "不亦乐乎",
+        "其皆出于此乎"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "def": "或介词，相当于‘于’",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "者",
+     "pinyin": "zhě",
+     "senses": [
+      {
+       "pos": "助词",
+       "def": "构成名词性短语‘……的人/事物’",
+       "examples": [
+        "知者不惑",
+        "仁者安仁"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "def": "或表停顿",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "也",
+     "pinyin": "yě",
+     "senses": [
+      {
+       "def": "语气助词，表判断、肯定或停顿",
+       "examples": [
+        "是知也",
+        "道也者不可须臾离也"
+       ],
+       "label": "句末语气词"
+      }
+     ]
+    },
+    {
+     "headword": "矣",
+     "pinyin": "yǐ",
+     "senses": [
+      {
+       "def": "语气助词，表已然或将然，相当于‘了’",
+       "examples": [
+        "鲜矣仁",
+        "则近道矣"
+       ],
+       "label": "句末语气词"
+      }
+     ]
+    },
+    {
+     "headword": "焉",
+     "pinyin": "yān",
+     "senses": [
+      {
+       "def": "兼词，相当于‘于之’、‘于此’",
+       "examples": [
+        "见贤思齐焉",
+        "焉得知"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "def": "或语气助词",
+       "label": "多义虚词"
+      },
+      {
+       "def": "或疑问代词‘哪里’",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "哉",
+     "pinyin": "zāi",
+     "senses": [
+      {
+       "def": "语气助词，表感叹或反问，相当于‘呢、啊’",
+       "examples": [
+        "大哉问",
+        "岂虚言哉"
+       ],
+       "label": "句末语气词"
+      }
+     ]
+    },
+    {
+     "headword": "而",
+     "pinyin": "ér",
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "表顺承、转折、并列、修饰等关系",
+       "examples": [
+        "学而不思则罔",
+        "敏于事而慎于言"
+       ],
+       "label": "多义连词"
+      }
+     ]
+    },
+    {
+     "headword": "以",
+     "pinyin": "yǐ",
+     "senses": [
+      {
+       "pos": "介词",
+       "def": "用、拿、凭借、按照",
+       "examples": [
+        "以德报怨",
+        "何以知之"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "连词",
+       "def": "表目的或结果",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "于",
+     "pinyin": "yú",
+     "senses": [
+      {
+       "pos": "介词",
+       "def": "在、从、对、向、比、被等",
+       "examples": [
+        "敏于事而慎于言",
+        "青出于蓝"
+       ],
+       "label": "多义介词"
+      }
+     ]
+    },
+    {
+     "headword": "为",
+     "pinyin": "wèi",
+     "readings": [
+      "wèi",
+      "wéi"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "做、成为",
+       "examples": [
+        "为政以德",
+        "为人谋而不忠乎"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "介词",
+       "def": "替、为了、因为",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "则",
+     "pinyin": "zé",
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "就、那么、却",
+       "examples": [
+        "知之者不如好之者"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "副词",
+       "def": "用于判断，就是",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "乃",
+     "pinyin": "nǎi",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "于是、竟然、才",
+       "examples": [
+        "乃不知有汉",
+        "家祭无忘告乃翁"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "代词",
+       "def": "你的",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "且",
+     "pinyin": "qiě",
+     "readings": [
+      "qiě",
+      "jū"
+     ],
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "并且、而且",
+       "examples": [
+        "不义而富且贵",
+        "且夫天地之间"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "副词",
+       "def": "暂且、尚且",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "若",
+     "pinyin": "ruò",
+     "readings": [
+      "ruò",
+      "rě"
+     ],
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "如果",
+       "examples": [
+        "若使民常畏死",
+        "其翼若垂天之云"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "动词",
+       "def": "像、如同",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "代词",
+       "def": "你",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "虽",
+     "pinyin": "suī",
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "虽然",
+       "examples": [
+        "虽曰未学",
+        "虽愚必明"
+       ],
+       "label": "让步连词"
+      },
+      {
+       "def": "即使、纵然",
+       "label": "让步连词"
+      }
+     ]
+    },
+    {
+     "headword": "然",
+     "pinyin": "rán",
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "这样、如此",
+       "examples": [
+        "洋洋乎如在其上",
+        "怵然为戒"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "连词",
+       "def": "然而",
+       "label": "多义虚词"
+      },
+      {
+       "def": "词尾，‘……的样子’",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "故",
+     "pinyin": "gù",
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "所以",
+       "examples": [
+        "故君子必慎其独也",
+        "温故而知新"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "名词",
+       "def": "缘故",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "形容词",
+       "def": "旧的",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "犹",
+     "pinyin": "yóu",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "尚且、还",
+       "examples": [
+        "其犹橐籥乎",
+        "犹有所不足"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "动词",
+       "def": "如同",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "莫",
+     "pinyin": "mò",
+     "readings": [
+      "mò",
+      "mù"
+     ],
+     "senses": [
+      {
+       "def": "否定代词，没有谁、没有什么",
+       "examples": [
+        "莫之能守",
+        "天下莫能知"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "副词",
+       "def": "不、不要",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "弗",
+     "pinyin": "fú",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "不",
+       "examples": [
+        "弗措也",
+        "女弗能救与"
+       ],
+       "label": "否定副词"
+      }
+     ]
+    },
+    {
+     "headword": "无",
+     "pinyin": "wú",
+     "readings": [
+      "wú",
+      "mó"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "没有",
+       "examples": [
+        "无友不如己者",
+        "无入而不自得"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "副词",
+       "def": "不要",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "连词",
+       "def": "无论",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "非",
+     "pinyin": "fēi",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "不是",
+       "examples": [
+        "非其鬼而祭之",
+        "非天子不议礼"
+       ],
+       "label": "否定词"
+      },
+      {
+       "pos": "动词",
+       "def": "非难、反对",
+       "label": "否定词"
+      }
+     ]
+    },
+    {
+     "headword": "是",
+     "pinyin": "shì",
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "这、这样",
+       "examples": [
+        "是知也",
+        "是可忍也"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "动词",
+       "def": "表判断",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "斯",
+     "pinyin": "sī",
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "此、这",
+       "examples": [
+        "斯为美",
+        "斯可矣"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "连词",
+       "def": "则、就",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "此",
+     "pinyin": "cǐ",
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "这、这里",
+       "examples": [
+        "此三者",
+        "此之谓民之父母"
+       ],
+       "label": "指示代词"
+      }
+     ]
+    },
+    {
+     "headword": "彼",
+     "pinyin": "bǐ",
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "那、那个",
+       "examples": [
+        "彼为善之",
+        "彼竭我盈"
+       ],
+       "label": "指示代词"
+      },
+      {
+       "def": "他、他们",
+       "label": "指示代词"
+      }
+     ]
+    },
+    {
+     "headword": "夫",
+     "pinyin": "fū",
+     "readings": [
+      "fū",
+      "fú"
+     ],
+     "senses": [
+      {
+       "def": "发语词，表议论开始",
+       "examples": [
+        "夫唯不争",
+        "夫孝者善继人之志"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "代词",
+       "def": "那、这个",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "其",
+     "pinyin": "qí",
+     "readings": [
+      "qí",
+      "jī"
+     ],
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "他、它、那",
+       "examples": [
+        "其为人也孝弟",
+        "其斯以为舜乎"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "副词",
+       "def": "表推测、反问、祈使",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "所",
+     "pinyin": "suǒ",
+     "senses": [
+      {
+       "pos": "助词",
+       "def": "与动词构成‘所’字结构，表‘……的事物/人’",
+       "examples": [
+        "人之所恶",
+        "所恶于上毋以使下"
+       ],
+       "label": "特殊结构"
+      }
+     ]
+    },
+    {
+     "headword": "耳",
+     "pinyin": "ěr",
+     "senses": [
+      {
+       "def": "语气助词，相当于‘罢了’",
+       "examples": [
+        "直不百步耳"
+       ],
+       "label": "句末语气词"
+      }
+     ]
+    },
+    {
+     "headword": "尔",
+     "pinyin": "ěr",
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "你",
+       "examples": [
+        "尔爱其羊",
+        "呼尔而与之"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "助词",
+       "def": "相当于‘然’",
+       "label": "多义虚词"
+      },
+      {
+       "def": "语气词，罢了",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "兮",
+     "pinyin": "xī",
+     "senses": [
+      {
+       "def": "语气助词，多用于诗歌，相当于‘啊’",
+       "examples": [
+        "巧笑倩兮美目盼兮"
+       ],
+       "label": "诗歌语气词"
+      }
+     ]
+    },
+    {
+     "headword": "云",
+     "pinyin": "yún",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "说",
+       "examples": [
+        "诗云",
+        "人云亦云"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "助词",
+       "def": "表转述，相当于‘说、如此’",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "曰",
+     "pinyin": "yuē",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "说、叫作",
+       "examples": [
+        "子曰",
+        "名之曰道"
+       ],
+       "label": "文言常用动词"
+      }
+     ]
+    },
+    {
+     "headword": "谓",
+     "pinyin": "wèi",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "对……说、叫作、认为",
+       "examples": [
+        "孔子谓季氏",
+        "是谓玄德"
+       ],
+       "label": "文言常用动词"
+      }
+     ]
+    },
+    {
+     "headword": "安",
+     "pinyin": "ān",
+     "senses": [
+      {
+       "def": "疑问代词，哪里、怎么",
+       "examples": [
+        "安得广厦千万间",
+        "安而后能虑"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "形容词",
+       "def": "安定",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "使安定",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "恶",
+     "pinyin": "è",
+     "readings": [
+      "è",
+      "wù",
+      "ě",
+      "wū"
+     ],
+     "senses": [
+      {
+       "def": "疑问代词，哪里、怎么",
+       "examples": [
+        "恶乎成名",
+        "恶不仁者"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "厌恶",
+       "label": "多义词"
+      },
+      {
+       "pos": "名词",
+       "def": "丑恶",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "奚",
+     "pinyin": "xī",
+     "senses": [
+      {
+       "def": "疑问代词，什么、哪里、为什么",
+       "examples": [
+        "奚取于三家之堂",
+        "子奚不为政"
+       ],
+       "label": "疑问词"
+      }
+     ]
+    },
+    {
+     "headword": "胡",
+     "pinyin": "hú",
+     "senses": [
+      {
+       "def": "疑问代词，为什么、怎么",
+       "examples": [
+        "胡不慥慥尔"
+       ],
+       "label": "疑问词"
+      }
+     ]
+    },
+    {
+     "headword": "曷",
+     "senses": [
+      {
+       "def": "疑问代词，何、何时、何不",
+       "examples": [
+        "曷不委心任去留"
+       ],
+       "label": "疑问词"
+      }
+     ]
+    },
+    {
+     "headword": "盍",
+     "senses": [
+      {
+       "def": "兼词，何不",
+       "examples": [
+        "盍各言尔志"
+       ],
+       "label": "疑问词"
+      }
+     ]
+    },
+    {
+     "headword": "孰",
+     "pinyin": "shú",
+     "senses": [
+      {
+       "def": "疑问代词，谁、什么、哪一个",
+       "examples": [
+        "孰能浊以静之徐清",
+        "是可忍也孰不可忍也"
+       ],
+       "label": "疑问词"
+      }
+     ]
+    },
+    {
+     "headword": "何",
+     "pinyin": "hé",
+     "readings": [
+      "hé",
+      "hē",
+      "hè"
+     ],
+     "senses": [
+      {
+       "def": "疑问代词，什么、怎么、为什么",
+       "examples": [
+        "何谓也",
+        "何以行之哉"
+       ],
+       "label": "疑问词"
+      }
+     ]
+    },
+    {
+     "headword": "盖",
+     "pinyin": "gài",
+     "readings": [
+      "gài",
+      "gě",
+      "hé"
+     ],
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "大概、原来",
+       "examples": [
+        "盖有之矣",
+        "盖将自其变者而观之"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "def": "发语词",
+       "label": "多义虚词"
+      },
+      {
+       "def": "通‘盍’，何不",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "唯",
+     "pinyin": "wéi",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "只、只有",
+       "examples": [
+        "唯仁者能好人",
+        "唯天下至诚"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "def": "语气词，表应答",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "惟",
+     "pinyin": "wéi",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "只、只是",
+       "examples": [
+        "惟善以为宝",
+        "惟命不于常"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "def": "发语词",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "维",
+     "pinyin": "wéi",
+     "senses": [
+      {
+       "pos": "助词",
+       "def": "句首或句中语气词",
+       "examples": [
+        "维天之命於穆不已"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "名词",
+       "def": "纲维",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "遂",
+     "pinyin": "suì",
+     "readings": [
+      "suì",
+      "suí"
+     ],
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "于是、就",
+       "examples": [
+        "功成事遂",
+        "遂迷不复得路"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "动词",
+       "def": "成就、实现",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "苟",
+     "pinyin": "gǒu",
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "如果、假如",
+       "examples": [
+        "苟志于仁矣",
+        "苟不至德"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "副词",
+       "def": "苟且、随便",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "倘",
+     "pinyin": "tǎng",
+     "readings": [
+      "tǎng",
+      "cháng"
+     ],
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "假如、如果",
+       "examples": [
+        "倘能如此"
+       ],
+       "label": "假设连词"
+      }
+     ]
+    },
+    {
+     "headword": "向",
+     "pinyin": "xiàng",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "从前、先前",
+       "examples": [
+        "向使三国各爱其地"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "朝向",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "使",
+     "pinyin": "shǐ",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "让、派遣",
+       "examples": [
+        "使民重死而不远徙",
+        "使夫智者不敢为也"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "连词",
+       "def": "假使",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "即",
+     "pinyin": "jí",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "就、立即",
+       "examples": [
+        "即物而穷其理",
+        "即以其人之道还治其人之身"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "连词",
+       "def": "即使",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "动词",
+       "def": "接近",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "纵",
+     "pinyin": "zòng",
+     "readings": [
+      "zòng",
+      "zǒng"
+     ],
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "即使、纵然",
+       "examples": [
+        "纵我不往"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "放纵",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "必",
+     "pinyin": "bì",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "一定、必定",
+       "examples": [
+        "故君子必慎其独也",
+        "必先正其心"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "连词",
+       "def": "如果一定",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "凡",
+     "pinyin": "fán",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "凡是、总共",
+       "examples": [
+        "凡有血气者",
+        "凡为天下国家有九经"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "形容词",
+       "def": "平凡",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "皆",
+     "pinyin": "jiē",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "都、全",
+       "examples": [
+        "皆自明也",
+        "百姓皆谓我自然"
+       ],
+       "label": "范围副词"
+      }
+     ]
+    },
+    {
+     "headword": "悉",
+     "pinyin": "xī",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "都、全",
+       "examples": [
+        "悉以咨之"
+       ],
+       "label": "范围副词"
+      },
+      {
+       "pos": "动词",
+       "def": "详尽了解",
+       "label": "范围副词"
+      }
+     ]
+    },
+    {
+     "headword": "咸",
+     "pinyin": "xián",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "都、全",
+       "examples": [
+        "群贤毕至少长咸集"
+       ],
+       "label": "范围副词"
+      }
+     ]
+    },
+    {
+     "headword": "尽",
+     "pinyin": "jìn",
+     "readings": [
+      "jìn",
+      "jǐn"
+     ],
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "全部、都",
+       "examples": [
+        "尽其性",
+        "尽美矣又尽善也"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "竭尽",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "俱",
+     "pinyin": "jù",
+     "readings": [
+      "jù",
+      "jū"
+     ],
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "一起、都",
+       "examples": [
+        "风烟俱净"
+       ],
+       "label": "范围副词"
+      }
+     ]
+    },
+    {
+     "headword": "举",
+     "pinyin": "jǔ",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "举起、推举、全部",
+       "examples": [
+        "举直错诸枉",
+        "举天下豪杰"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "副词",
+       "def": "全",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "毕",
+     "pinyin": "bì",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "全、都",
+       "examples": [
+        "群贤毕至"
+       ],
+       "label": "范围副词"
+      },
+      {
+       "pos": "动词",
+       "def": "完毕",
+       "label": "范围副词"
+      }
+     ]
+    },
+    {
+     "headword": "共",
+     "pinyin": "gòng",
+     "readings": [
+      "gòng",
+      "gōng"
+     ],
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "共同、一起",
+       "examples": [
+        "众星共之",
+        "共观之"
+       ],
+       "label": "多义词"
+      },
+      {
+       "def": "通‘拱’，环绕",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "相",
+     "pinyin": "xiāng",
+     "readings": [
+      "xiāng",
+      "xiàng"
+     ],
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "互相",
+       "examples": [
+        "前后相随",
+        "相看两不厌"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "名词",
+       "def": "丞相、相貌",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "观察",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "见",
+     "pinyin": "jiàn",
+     "readings": [
+      "jiàn",
+      "xiàn"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "看见、拜见",
+       "examples": [
+        "见贤思齐",
+        "见乎蓍龟"
+       ],
+       "label": "多义词"
+      },
+      {
+       "def": "表被动，被",
+       "label": "多义词"
+      },
+      {
+       "def": "通‘现’，显现",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "被",
+     "pinyin": "bèi",
+     "readings": [
+      "bèi",
+      "pī"
+     ],
+     "senses": [
+      {
+       "pos": "介词",
+       "def": "表被动",
+       "examples": [
+        "被褐怀玉",
+        "信而见疑忠而被谤"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "通‘披’，穿着",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "诸",
+     "pinyin": "zhū",
+     "senses": [
+      {
+       "def": "兼词，之于、之乎",
+       "examples": [
+        "举直错诸枉",
+        "施诸己而不愿"
+       ],
+       "label": "多义虚词"
+      },
+      {
+       "pos": "形容词",
+       "def": "众多",
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "邪",
+     "pinyin": "xié",
+     "readings": [
+      "xié",
+      "yá",
+      "yé",
+      "yú",
+      "xú"
+     ],
+     "senses": [
+      {
+       "def": "语气词，相当于‘耶’，表疑问或反问",
+       "examples": [
+        "非以其无私邪"
+       ],
+       "label": "句末语气词"
+      }
+     ]
+    },
+    {
+     "headword": "与",
+     "pinyin": "yǔ",
+     "readings": [
+      "yǔ",
+      "yù",
+      "yú"
+     ],
+     "senses": [
+      {
+       "def": "介词/连词，和、跟",
+       "examples": [
+        "与朋友交",
+        "其诸异乎人之求之与"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "给予、结交",
+       "label": "多义词"
+      },
+      {
+       "def": "通‘欤’",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "道",
+     "pinyin": "dào",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "道路、道理、学说",
+       "examples": [
+        "朝闻道夕死可矣",
+        "道可道非常道"
+       ],
+       "label": "核心实词"
+      },
+      {
+       "pos": "动词",
+       "def": "说",
+       "label": "核心实词"
+      },
+      {
+       "def": "通‘导’",
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "德",
+     "pinyin": "dé",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "道德、德行、恩德",
+       "examples": [
+        "为政以德",
+        "上德不德是以有德"
+       ],
+       "label": "核心实词"
+      },
+      {
+       "pos": "动词",
+       "def": "感激",
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "仁",
+     "pinyin": "rén",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "仁爱、仁德",
+       "examples": [
+        "仁者爱人",
+        "克己复礼为仁"
+       ],
+       "label": "核心实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "仁慈",
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "义",
+     "pinyin": "yì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "正义、道义",
+       "examples": [
+        "君子喻于义",
+        "信近于义"
+       ],
+       "label": "核心实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "合宜的",
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "礼",
+     "pinyin": "lǐ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "礼制、礼节",
+       "examples": [
+        "礼之用和为贵",
+        "君使臣以礼"
+       ],
+       "label": "核心实词"
+      },
+      {
+       "pos": "动词",
+       "def": "以礼相待",
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "智",
+     "pinyin": "zhì",
+     "senses": [
+      {
+       "def": "名词/形容词，智慧、聪明",
+       "examples": [
+        "知者不惑",
+        "唯仁者能好人"
+       ],
+       "label": "核心实词"
+      },
+      {
+       "def": "通‘知’",
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "信",
+     "pinyin": "xìn",
+     "readings": [
+      "xìn",
+      "shēn"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "诚信、信用",
+       "examples": [
+        "言而有信",
+        "信近于义"
+       ],
+       "label": "核心实词"
+      },
+      {
+       "pos": "动词",
+       "def": "信任",
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "忠",
+     "pinyin": "zhōng",
+     "senses": [
+      {
+       "def": "名词/形容词，忠诚、尽心竭力",
+       "examples": [
+        "为人谋而不忠乎",
+        "忠信重禄"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "恕",
+     "pinyin": "shù",
+     "senses": [
+      {
+       "def": "名词/动词，推己及人、宽恕",
+       "examples": [
+        "夫子之道忠恕而已矣",
+        "忠恕违道不远"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "孝",
+     "pinyin": "xiào",
+     "senses": [
+      {
+       "def": "名词/动词，孝顺、孝敬父母",
+       "examples": [
+        "其为人也孝弟",
+        "孝者所以事君也"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "悌",
+     "senses": [
+      {
+       "def": "名词/动词，敬爱兄长",
+       "examples": [
+        "孝弟也者其为仁之本与"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "廉",
+     "pinyin": "lián",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "廉洁、方正",
+       "examples": [
+        "廉而不刿"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "耻",
+     "pinyin": "chǐ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "耻辱",
+       "examples": [
+        "知耻近乎勇",
+        "耻躬之不逮也"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "以……为耻",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "勇",
+     "pinyin": "yǒng",
+     "senses": [
+      {
+       "def": "名词/形容词，勇敢、有勇气",
+       "examples": [
+        "见义不为无勇也",
+        "知耻近乎勇"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "温",
+     "pinyin": "wēn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "温和",
+       "examples": [
+        "温故而知新",
+        "温良恭俭让"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "温习",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "良",
+     "pinyin": "liáng",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "善良、良好、优秀",
+       "examples": [
+        "温良恭俭让"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "恭",
+     "pinyin": "gōng",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "恭敬、谦恭",
+       "examples": [
+        "恭近于礼",
+        "笃恭而天下平"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "俭",
+     "pinyin": "jiǎn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "节俭、俭朴",
+       "examples": [
+        "礼与其奢也宁俭",
+        "俭故能广"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "让",
+     "pinyin": "ràng",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "谦让、退让、责备",
+       "examples": [
+        "能以礼让为国乎"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "敬",
+     "pinyin": "jìng",
+     "senses": [
+      {
+       "def": "动词/形容词，尊敬、恭敬、谨慎",
+       "examples": [
+        "敬事而信",
+        "为人臣止于敬"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "谨",
+     "pinyin": "jǐn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "谨慎",
+       "examples": [
+        "谨而信",
+        "庸言之谨"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "谨守",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "慎",
+     "pinyin": "shèn",
+     "senses": [
+      {
+       "def": "动词/形容词，谨慎、慎重",
+       "examples": [
+        "故君子必慎其独也",
+        "慎终追远"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "诚",
+     "pinyin": "chéng",
+     "senses": [
+      {
+       "def": "形容词/副词，诚实、真诚、确实",
+       "examples": [
+        "诚者天之道也",
+        "诚之者人之道也"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "正",
+     "pinyin": "zhèng",
+     "readings": [
+      "zhèng",
+      "zhēng"
+     ],
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "端正、正直",
+       "examples": [
+        "欲正其心者先诚其意",
+        "正己而不求于人"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "匡正",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "修",
+     "pinyin": "xiū",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "修养、整治、修建",
+       "examples": [
+        "修身齐家",
+        "修其祖庙"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "齐",
+     "pinyin": "qí",
+     "readings": [
+      "qí",
+      "jì",
+      "zī",
+      "zhāi"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "整治、治理",
+       "examples": [
+        "齐家治国",
+        "齐明盛服"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "整齐",
+       "label": "常用实词"
+      },
+      {
+       "def": "通‘斋’",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "治",
+     "pinyin": "zhì",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "治理、整治",
+       "examples": [
+        "治国平天下",
+        "天下大治"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "太平",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "平",
+     "pinyin": "píng",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "平定、使太平",
+       "examples": [
+        "平天下",
+        "天下太平"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "平坦、公平",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "格",
+     "pinyin": "gé",
+     "readings": [
+      "gé",
+      "gē"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "推究、穷至、纠正",
+       "examples": [
+        "致知在格物",
+        "格物致知"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "致",
+     "pinyin": "zhì",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "获得、达到、招致、表达",
+       "examples": [
+        "致知在格物",
+        "致中和"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "知",
+     "pinyin": "zhī",
+     "readings": [
+      "zhī",
+      "zhì"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "知道、了解、掌管",
+       "examples": [
+        "知止而后有定",
+        "温故而知新"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "def": "通‘智’",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "意",
+     "pinyin": "yì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "意念、心意、意思",
+       "examples": [
+        "欲诚其意者先致其知"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "心",
+     "pinyin": "xīn",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "内心、心思、本心",
+       "examples": [
+        "正其心",
+        "心不在焉"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "身",
+     "pinyin": "shēn",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "身体、自身、亲身",
+       "examples": [
+        "修其身",
+        "正己而不求于人"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "家",
+     "pinyin": "jiā",
+     "readings": [
+      "jiā",
+      "jia",
+      "jie"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "家庭、家族",
+       "examples": [
+        "齐其家",
+        "宜其家人"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "国",
+     "pinyin": "guó",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "国家、国都、封地",
+       "examples": [
+        "治国在齐其家",
+        "国有道其言足以兴"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "君",
+     "pinyin": "jūn",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "君主、君子、尊称",
+       "examples": [
+        "为人君止于仁",
+        "君子成人之美"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "臣",
+     "pinyin": "chén",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "臣子、官吏",
+       "examples": [
+        "为人臣止于敬",
+        "天下莫能臣也"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "臣服",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "民",
+     "pinyin": "mín",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "百姓、人民",
+       "examples": [
+        "民之父母",
+        "使民以时"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "子",
+     "pinyin": "zǐ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "儿子、子女、对人的尊称",
+       "examples": [
+        "为人子止于孝",
+        "子曰"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "父",
+     "pinyin": "fù",
+     "readings": [
+      "fù",
+      "fǔ"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "父亲、父辈",
+       "examples": [
+        "事父母能竭其力",
+        "父作之子述之"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "母",
+     "pinyin": "mǔ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "母亲、本源",
+       "examples": [
+        "有万物之母",
+        "贵食母"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "兄",
+     "pinyin": "xiōng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "兄长",
+       "examples": [
+        "友于兄弟",
+        "宜兄宜弟"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "弟",
+     "pinyin": "dì",
+     "readings": [
+      "dì",
+      "tì",
+      "tuí"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "弟弟",
+       "examples": [
+        "弟子入则孝",
+        "兄弟既翕"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "def": "通‘悌’",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "朋",
+     "pinyin": "péng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "朋友、同门",
+       "examples": [
+        "有朋自远方来",
+        "朋友之交"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "友",
+     "pinyin": "yǒu",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "朋友",
+       "examples": [
+        "与朋友交",
+        "无友不如己者"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "亲近、结交",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "师",
+     "pinyin": "shī",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "老师、军队",
+       "examples": [
+        "温故而知新可以为师矣",
+        "师之所处荆棘生焉"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "学习、效法",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "贤",
+     "pinyin": "xián",
+     "senses": [
+      {
+       "def": "名词/形容词，贤德、贤能",
+       "examples": [
+        "见贤思齐焉",
+        "贤贤易色"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "以……为贤",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "圣",
+     "pinyin": "shèng",
+     "senses": [
+      {
+       "def": "形容词/名词，圣明、圣贤",
+       "examples": [
+        "圣人无常心",
+        "虽圣人亦有所不知"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "士",
+     "pinyin": "shì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "读书人、士人、武士",
+       "examples": [
+        "士志于道",
+        "士之报礼重"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "侯",
+     "pinyin": "hóu",
+     "readings": [
+      "hóu",
+      "hòu"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "诸侯、侯爵",
+       "examples": [
+        "侯王若能守之",
+        "怀诸侯则天下畏之"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "王",
+     "pinyin": "wáng",
+     "readings": [
+      "wáng",
+      "wàng"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "君王",
+       "examples": [
+        "王天下有三重焉"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "称王",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "霸",
+     "pinyin": "bà",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "霸主",
+       "examples": [
+        "霸者之民欢虞如也"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "称霸",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "学",
+     "pinyin": "xué",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "学习、求学",
+       "examples": [
+        "学而时习之",
+        "博学之审问之"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "学问、学说",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "习",
+     "pinyin": "xí",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "温习、练习",
+       "examples": [
+        "学而时习之",
+        "传不习乎"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "习惯",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "思",
+     "pinyin": "sī",
+     "readings": [
+      "sī",
+      "sāi"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "思考、思念、希望",
+       "examples": [
+        "学而不思则罔",
+        "见贤思齐焉"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "言",
+     "pinyin": "yán",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "说、谈论",
+       "examples": [
+        "先行其言而后从之",
+        "言有宗事有君"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "言语、言论",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "命",
+     "pinyin": "mìng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "天命、命令、命运",
+       "examples": [
+        "五十而知天命",
+        "天命之谓性"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "命名",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "性",
+     "pinyin": "xìng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "本性、天性、性情",
+       "examples": [
+        "天命之谓性",
+        "尽其性"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "情",
+     "pinyin": "qíng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "情感、实情、情况",
+       "examples": [
+        "无情者不得尽其辞"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "欲",
+     "pinyin": "yù",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "欲望",
+       "examples": [
+        "无欲以观其妙",
+        "欲正其心者先诚其意"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "想要、希望",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "物",
+     "pinyin": "wù",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "事物、万物、外物",
+       "examples": [
+        "物有本末",
+        "格物致知"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "事",
+     "pinyin": "shì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "事情、事务",
+       "examples": [
+        "事父母能竭其力",
+        "事有终始"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "侍奉、从事",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "理",
+     "pinyin": "lǐ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "道理、事理、纹理",
+       "examples": [
+        "即物而穷其理",
+        "文理密察"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "治理",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "本",
+     "pinyin": "běn",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "根本、本源",
+       "examples": [
+        "物有本末",
+        "君子务本"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "本来的",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "末",
+     "pinyin": "mò",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "末端、枝节",
+       "examples": [
+        "德者本也财者末也"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "次要的",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "终",
+     "pinyin": "zhōng",
+     "senses": [
+      {
+       "def": "名词/动词，结束、终了",
+       "examples": [
+        "事有终始",
+        "慎终追远"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "副词",
+       "def": "终究",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "始",
+     "pinyin": "shǐ",
+     "senses": [
+      {
+       "def": "名词/动词，开始、起初",
+       "examples": [
+        "无名天地之始",
+        "物有本末事有终始"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "先",
+     "pinyin": "xiān",
+     "senses": [
+      {
+       "def": "副词/动词，先后、首先",
+       "examples": [
+        "知所先后",
+        "先慎乎德"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "先前的",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "后",
+     "pinyin": "hòu",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "后来、以后",
+       "examples": [
+        "后其身而身先",
+        "先天下之忧而忧"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "把……放在后面",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "中",
+     "pinyin": "zhōng",
+     "readings": [
+      "zhōng",
+      "zhòng"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "中间、中正",
+       "examples": [
+        "执其两端用其中于民",
+        "发而皆中节谓之和"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "符合",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "和",
+     "pinyin": "hé",
+     "readings": [
+      "hé",
+      "hè",
+      "huó",
+      "huò",
+      "hú"
+     ],
+     "senses": [
+      {
+       "def": "名词/形容词，和谐、适中",
+       "examples": [
+        "发而皆中节谓之和",
+        "礼之用和为贵"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "应和",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "庸",
+     "pinyin": "yōng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "平常、中正",
+       "examples": [
+        "中庸之为德也",
+        "庸德之行"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "用",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "常",
+     "pinyin": "cháng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "规律、常态",
+       "examples": [
+        "复命曰常知常曰明",
+        "道可道非常道"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "副词",
+       "def": "常常",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "变",
+     "pinyin": "biàn",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "变化、改变",
+       "examples": [
+        "不变塞焉",
+        "动则变"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "变故",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "权",
+     "pinyin": "quán",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "权变、权柄",
+       "examples": [
+        "执中无权犹执一也"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "权衡",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "经",
+     "pinyin": "jīng",
+     "readings": [
+      "jīng",
+      "jìng"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "经典、常道",
+       "examples": [
+        "经纶天下之大经",
+        "凡为天下国家有九经"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "治理",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "亲",
+     "pinyin": "qīn",
+     "readings": [
+      "qīn",
+      "qìng"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "亲人、父母",
+       "examples": [
+        "亲亲为大",
+        "亲其亲"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "亲近",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "疏",
+     "pinyin": "shū",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "疏远、稀疏",
+       "examples": [
+        "亲疏尊卑之体"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "疏浚",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "远",
+     "pinyin": "yuǎn",
+     "readings": [
+      "yuǎn",
+      "yuàn"
+     ],
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "遥远",
+       "examples": [
+        "远耻辱也",
+        "近之则不厌"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "远离",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "近",
+     "pinyin": "jìn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "接近",
+       "examples": [
+        "信近于义",
+        "好学近乎知"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "靠近",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "内",
+     "pinyin": "nèi",
+     "readings": [
+      "nèi",
+      "nà"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "内部、内心",
+       "examples": [
+        "内省不疚",
+        "外本内末"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "通‘纳’",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "外",
+     "pinyin": "wài",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "外部、外面",
+       "examples": [
+        "外其身而身存",
+        "不愿乎其外"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "疏远",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "上",
+     "pinyin": "shàng",
+     "readings": [
+      "shàng",
+      "shǎng",
+      "shang"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "上面、上位",
+       "examples": [
+        "上老老而民兴孝",
+        "在上位不陵下"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "向上、崇尚",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "下",
+     "pinyin": "xià",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "下面、下位",
+       "examples": [
+        "在下位不援上",
+        "为天下谿"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "向下",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "左",
+     "pinyin": "zuǒ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "左边",
+       "examples": [
+        "所恶于左毋以交于右"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "偏邪",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "右",
+     "pinyin": "yòu",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "右边",
+       "examples": [
+        "左右逢源"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "尊崇、佑助",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "前",
+     "pinyin": "qián",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "前面",
+       "examples": [
+        "所恶于前毋以先后",
+        "前后相随"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "向前",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "大",
+     "pinyin": "dà",
+     "readings": [
+      "dà",
+      "dài"
+     ],
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "大、宏大",
+       "examples": [
+        "大哉圣人之道",
+        "故大德必得其位"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "重视",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "小",
+     "pinyin": "xiǎo",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "小、微小",
+       "examples": [
+        "语小天下莫能破焉",
+        "小德川流"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "轻视",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "多",
+     "pinyin": "duō",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "多、众多",
+       "examples": [
+        "多闻阙疑",
+        "生之者众食之者寡"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "称赞",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "少",
+     "pinyin": "shǎo",
+     "readings": [
+      "shǎo",
+      "shào"
+     ],
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "少、不多",
+       "examples": [
+        "少私寡欲",
+        "少而好学"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "副词",
+       "def": "稍、略",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "长",
+     "pinyin": "cháng",
+     "readings": [
+      "cháng",
+      "zhǎng"
+     ],
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "长、长久",
+       "examples": [
+        "天长地久",
+        "上长长而民兴弟"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "长者",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "生长",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "幼",
+     "pinyin": "yòu",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "幼小",
+       "examples": [
+        "幼吾幼以及人之幼"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "幼儿",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "尊",
+     "pinyin": "zūn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "尊贵",
+       "examples": [
+        "尊贤为大",
+        "尊德性而道问学"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "尊崇",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "卑",
+     "pinyin": "bēi",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "卑贱、低下",
+       "examples": [
+        "自卑而尊人"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "贵",
+     "pinyin": "guì",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "尊贵、贵重",
+       "examples": [
+        "贵以贱为本",
+        "不贵难得之货"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "重视",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "贱",
+     "pinyin": "jiàn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "卑贱、低贱",
+       "examples": [
+        "贫与贱是人之所恶也",
+        "贱货而贵德"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "轻视",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "贫",
+     "pinyin": "pín",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "贫穷、贫乏",
+       "examples": [
+        "贫而无谄",
+        "素贫贱行乎贫贱"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "富",
+     "pinyin": "fù",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "富裕、富有",
+       "examples": [
+        "富而好礼者也",
+        "富润屋德润身"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "危",
+     "pinyin": "wēi",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "危险、危急",
+       "examples": [
+        "危邦不入",
+        "居安思危"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "危害",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "存",
+     "pinyin": "cún",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "存在、保存、思念",
+       "examples": [
+        "其存心也",
+        "存乎人者"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "亡",
+     "pinyin": "wáng",
+     "readings": [
+      "wáng",
+      "wú"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "灭亡、逃亡、丢失",
+       "examples": [
+        "国家将亡必有妖孽",
+        "亡人无以为宝"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "def": "通‘无’",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "得",
+     "pinyin": "dé",
+     "readings": [
+      "dé",
+      "děi",
+      "de"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "得到、获得",
+       "examples": [
+        "虑而后能得",
+        "得道多助"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "心得",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "失",
+     "pinyin": "shī",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "失去、丢失",
+       "examples": [
+        "失诸正鹄反求诸其身",
+        "失众则失国"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "过失",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "成",
+     "pinyin": "chéng",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "成就、完成、形成",
+       "examples": [
+        "成己仁也",
+        "功成而不处"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "败",
+     "pinyin": "bài",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "失败、打败",
+       "examples": [
+        "为者败之执者失之"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "败坏",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "利",
+     "pinyin": "lì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "利益",
+       "examples": [
+        "君子喻于义小人喻于利",
+        "善利万物而不争"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "形容词",
+       "def": "锋利",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "有利于",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "害",
+     "pinyin": "hài",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "祸害",
+       "examples": [
+        "天之道利而不害",
+        "万物并育而不相害"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "危害",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "福",
+     "pinyin": "fú",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "福气",
+       "examples": [
+        "祸兮福之所倚",
+        "福祸将至"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "赐福",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "祸",
+     "pinyin": "huò",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "灾祸",
+       "examples": [
+        "祸莫大于不知足",
+        "祸福将至善必先知之"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "降祸",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "生",
+     "pinyin": "shēng",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "出生、生长、生存",
+       "examples": [
+        "生之者众",
+        "天地所以能长且久者"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "生命",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "死",
+     "pinyin": "sǐ",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "死亡",
+       "examples": [
+        "死而不亡者寿",
+        "民不畏死奈何以死惧之"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "死地",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "寿",
+     "pinyin": "shòu",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "寿命、长寿",
+       "examples": [
+        "必得其寿",
+        "死而不亡者寿"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "夭",
+     "pinyin": "yāo",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "夭折、短命",
+       "examples": [
+        "桃之夭夭"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "茂盛",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "荣",
+     "pinyin": "róng",
+     "senses": [
+      {
+       "def": "名词/形容词，荣耀",
+       "examples": [
+        "宠辱若惊",
+        "虽有荣观燕处超然"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "使茂盛",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "辱",
+     "pinyin": "rǔ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "耻辱",
+       "examples": [
+        "宠辱若惊",
+        "事君数斯辱矣"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "侮辱",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "誉",
+     "pinyin": "yù",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "声誉",
+       "examples": [
+        "蚤有誉于天下",
+        "功成事遂百姓皆谓我自然"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "称赞",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "毁",
+     "pinyin": "huǐ",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "毁坏、诽谤",
+       "examples": [
+        "既明且哲以保其身"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "名",
+     "pinyin": "míng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "名称、名声",
+       "examples": [
+        "名可名非常名",
+        "必得其名"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "命名、闻名",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "报",
+     "pinyin": "bào",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "报答、回报、报告",
+       "examples": [
+        "报怨以德",
+        "士之报礼重"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "应",
+     "pinyin": "yìng",
+     "readings": [
+      "yìng",
+      "yīng"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "应和、响应、应付",
+       "examples": [
+        "不召而自来",
+        "感而应之"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "感",
+     "pinyin": "gǎn",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "感动、感念、感应",
+       "examples": [
+        "感时花溅泪"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "明",
+     "pinyin": "míng",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "明亮、明白",
+       "examples": [
+        "明明德",
+        "知常曰明"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "彰明",
+       "label": "多义词"
+      },
+      {
+       "pos": "名词",
+       "def": "智慧",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "虚",
+     "pinyin": "xū",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "空虚、虚假",
+       "examples": [
+        "虚其心实其腹",
+        "致虚极守静笃"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "使空虚",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "实",
+     "pinyin": "shí",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "充实、实在",
+       "examples": [
+        "实其腹",
+        "处其实不居其华"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "果实、实情",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "真",
+     "pinyin": "zhēn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "真实、真诚",
+       "examples": [
+        "其精甚真",
+        "质真若渝"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "伪",
+     "pinyin": "wěi",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "虚假、伪诈",
+       "examples": [
+        "智慧出有大伪"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "善",
+     "pinyin": "shàn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "善良、美好",
+       "examples": [
+        "上善若水",
+        "善建者不拔"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "擅长、善待",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "美",
+     "pinyin": "měi",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "美好、美丽",
+       "examples": [
+        "天下皆知美之为美",
+        "尽美矣又尽善也"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "赞美",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "丑",
+     "pinyin": "chǒu",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "丑陋、丑恶",
+       "examples": [
+        "美丑之辨"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "文",
+     "pinyin": "wén",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "文采、文章、文化",
+       "examples": [
+        "文质彬彬",
+        "郁郁乎文哉"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "文饰",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "武",
+     "pinyin": "wǔ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "武力、武功",
+       "examples": [
+        "文武之道",
+        "慎武不战"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "勇武",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "质",
+     "pinyin": "zhì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "本质、质朴",
+       "examples": [
+        "文质彬彬然后君子",
+        "质诸鬼神而无疑"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "质问",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "野",
+     "pinyin": "yě",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "田野",
+       "examples": [
+        "质胜文则野"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "粗野",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "巧",
+     "pinyin": "qiǎo",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "灵巧、巧妙",
+       "examples": [
+        "巧言令色",
+        "大巧若拙"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "技巧",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "拙",
+     "pinyin": "zhuō",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "笨拙、质朴",
+       "examples": [
+        "大巧若拙"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "刚",
+     "pinyin": "gāng",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "刚强、刚直",
+       "examples": [
+        "柔胜刚弱胜强",
+        "发强刚毅"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "柔",
+     "pinyin": "róu",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "柔弱、温柔",
+       "examples": [
+        "天下之至柔",
+        "柔远人也"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "怀柔",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "强",
+     "pinyin": "qiáng",
+     "readings": [
+      "qiáng",
+      "qiǎng",
+      "jiàng"
+     ],
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "强大",
+       "examples": [
+        "弱之胜强",
+        "虽柔必强"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "副词",
+       "def": "勉强",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "弱",
+     "pinyin": "ruò",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "弱小、柔弱",
+       "examples": [
+        "弱其志强其骨",
+        "弱者道之用"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "静",
+     "pinyin": "jìng",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "安静、宁静",
+       "examples": [
+        "致虚极守静笃",
+        "定而后能静"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "使平静",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "动",
+     "pinyin": "dòng",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "行动、活动、感动",
+       "examples": [
+        "不动而变无为而成",
+        "动乎四体"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "毅",
+     "pinyin": "yì",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "坚毅、刚毅",
+       "examples": [
+        "发强刚毅足以有执也"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "木",
+     "pinyin": "mù",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "树木、木材",
+       "examples": [
+        "合抱之木生于毫末",
+        "刚毅木讷"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "形容词",
+       "def": "质朴迟钝",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "讷",
+     "pinyin": "nè",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "言语迟钝，引申为谨慎寡言",
+       "examples": [
+        "君子欲讷于言而敏于行"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "敏",
+     "pinyin": "mǐn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "敏捷、聪敏、勤勉",
+       "examples": [
+        "敏于事而慎于言",
+        "君子欲讷于言而敏于行"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "惠",
+     "pinyin": "huì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "恩惠",
+       "examples": [
+        "小人怀惠",
+        "惠而不费"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "仁爱",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "直",
+     "pinyin": "zhí",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "正直、笔直",
+       "examples": [
+        "举直错诸枉",
+        "直不百步耳"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "副词",
+       "def": "径直、只是",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "谅",
+     "pinyin": "liàng",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "诚信、固执",
+       "examples": [
+        "友直友谅友多闻"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "闻",
+     "pinyin": "wén",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "听见、听说",
+       "examples": [
+        "多闻阙疑",
+        "朝闻道夕死可矣"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "名词",
+       "def": "名声、见闻",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "识",
+     "pinyin": "shí",
+     "readings": [
+      "shí",
+      "zhì"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "认识、知道、记得",
+       "examples": [
+        "多识于鸟兽草木之名"
+       ],
+       "label": "多义词"
+      },
+      {
+       "pos": "名词",
+       "def": "见识",
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "谋",
+     "pinyin": "móu",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "谋划、图谋",
+       "examples": [
+        "为人谋而不忠乎",
+        "繟然而善谋"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "计谋",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "略",
+     "pinyin": "lüè",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "谋略、策略",
+       "examples": [
+        "雄才大略"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "夺取",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "策",
+     "pinyin": "cè",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "计策、马鞭",
+       "examples": [
+        "束手无策"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "鞭策",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "术",
+     "pinyin": "shù",
+     "readings": [
+      "shù",
+      "shú",
+      "zhú"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "方法、策略、技艺",
+       "examples": [
+        "治人之术"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "何以",
+     "pinyin": "hé yǐ",
+     "senses": [
+      {
+       "def": "疑问短语，用什么、凭什么、为什么",
+       "examples": [
+        "何以行之哉",
+        "吾何以知天下然哉"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "是以",
+     "pinyin": "shì yǐ",
+     "senses": [
+      {
+       "def": "因此、所以",
+       "examples": [
+        "是以圣人为腹不为目",
+        "是以君子无所不用其极"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "于是",
+     "pinyin": "yú shì",
+     "senses": [
+      {
+       "def": "于是、在这时、在这件事上",
+       "examples": [
+        "于是叹焉"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "至于",
+     "pinyin": "zhì yú",
+     "senses": [
+      {
+       "def": "到了、竟至于",
+       "examples": [
+        "至于用力之久",
+        "及其至也虽圣人有所不知"
+       ],
+       "label": "固定结构"
+      },
+      {
+       "pos": "连词",
+       "def": "引出另一话题",
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "足以",
+     "pinyin": "zú yǐ",
+     "senses": [
+      {
+       "def": "足够用来、完全可以",
+       "examples": [
+        "足以有临也",
+        "其言足以兴"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "然而",
+     "pinyin": "rán ér",
+     "senses": [
+      {
+       "def": "这样却、但是",
+       "examples": [
+        "然而不王者未之有也"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "虽然",
+     "pinyin": "suī rán",
+     "senses": [
+      {
+       "def": "虽然如此、即使这样",
+       "examples": [
+        "虽然犹有未树也"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "若夫",
+     "pinyin": "ruò fū",
+     "senses": [
+      {
+       "def": "发语词，至于、说到",
+       "examples": [
+        "若夫淫雨霏霏"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "其诸",
+     "pinyin": "qí zhū",
+     "senses": [
+      {
+       "def": "表揣测语气，大概、莫非",
+       "examples": [
+        "其诸异乎人之求之与"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "之谓",
+     "pinyin": "zhī wèi",
+     "senses": [
+      {
+       "def": "叫做、说的就是",
+       "examples": [
+        "此之谓絜矩之道",
+        "是谓玄德"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "而已",
+     "pinyin": "ér yǐ",
+     "senses": [
+      {
+       "def": "罢了",
+       "examples": [
+        "夫子之道忠恕而已矣"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "也已",
+     "pinyin": "yě yǐ",
+     "senses": [
+      {
+       "def": "语气词连用，加强肯定",
+       "examples": [
+        "可谓好学也已"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "也夫",
+     "pinyin": "yě fū",
+     "senses": [
+      {
+       "def": "语气词连用，表感叹",
+       "examples": [
+        "道其不行矣夫"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "也哉",
+     "pinyin": "yě zāi",
+     "senses": [
+      {
+       "def": "语气词连用，表反问兼感叹",
+       "examples": [
+        "岂不快哉"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "乎哉",
+     "pinyin": "hū zāi",
+     "senses": [
+      {
+       "def": "语气词连用，表反问",
+       "examples": [
+        "吾岂若使是君为尧舜之君哉"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "天下",
+     "pinyin": "tiān xià",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "普天之下、国家、天下人",
+       "examples": [
+        "平天下",
+        "天下莫能与之争"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "小人",
+     "pinyin": "xiǎo rén",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "品行低下者",
+       "examples": [
+        "君子喻于义小人喻于利",
+        "小人乐其乐而利其利"
+       ],
+       "label": "常用实词"
+      },
+      {
+       "def": "地位低者",
+       "label": "常用实词"
+      },
+      {
+       "def": "谦称",
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "大人",
+     "pinyin": "dà rén",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "德行高尚者、尊长",
+       "examples": [
+        "大德者必受命"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "庶人",
+     "pinyin": "shù rén",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "平民百姓",
+       "examples": [
+        "自天子以至于庶人"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "大夫",
+     "pinyin": "dà fū",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "官职名、士大夫阶层",
+       "examples": [
+        "达乎诸侯大夫",
+        "敬大臣也"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "君子",
+     "pinyin": "jūn zǐ",
+     "senses": [
+      {
+       "def": "有德行的、有修养的人",
+       "examples": [
+        "君子坦荡荡，小人长戚戚"
+       ],
+       "label": "常用词"
+      },
+      {
+       "def": "亦指上位者",
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "中庸",
+     "pinyin": "zhōng yōng",
+     "senses": [
+      {
+       "def": "中正平和、不偏不倚之道",
+       "examples": [
+        "君子中庸，小人反中庸"
+       ],
+       "label": "经典概念"
+      },
+      {
+       "def": "《礼记》篇名",
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "慎独",
+     "pinyin": "shèn dú",
+     "senses": [
+      {
+       "def": "独处时也谨慎自律，不欺暗室",
+       "examples": [
+        "君子必慎其独也"
+       ],
+       "label": "修身概念"
+      }
+     ]
+    },
+    {
+     "headword": "无为",
+     "pinyin": "wú wèi",
+     "senses": [
+      {
+       "def": "道家主张，顺应自然，不强加妄为",
+       "examples": [
+        "无为而无不为"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "自然",
+     "pinyin": "zì rán",
+     "senses": [
+      {
+       "def": "自然而然、本然如此的状态",
+       "examples": [
+        "人法地，地法天，天法道，道法自然"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "格物",
+     "pinyin": "gé wù",
+     "senses": [
+      {
+       "def": "推究事物的原理",
+       "examples": [
+        "致知在格物"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "致知",
+     "pinyin": "zhì zhī",
+     "senses": [
+      {
+       "def": "获得知识、达到穷尽事理之知",
+       "examples": [
+        "致知在格物"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "诚意",
+     "pinyin": "chéng yì",
+     "senses": [
+      {
+       "def": "使心意真诚，不自欺",
+       "examples": [
+        "欲正其心者，先诚其意"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "正心",
+     "pinyin": "zhèng xīn",
+     "senses": [
+      {
+       "def": "使心端正，不受忿懥恐惧等情绪所蔽",
+       "examples": [
+        "欲正其心者，先诚其意"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "修身",
+     "pinyin": "xiū shēn",
+     "senses": [
+      {
+       "def": "修养自身品德",
+       "examples": [
+        "自天子以至于庶人，壹是皆以修身为本"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "齐家",
+     "pinyin": "qí jiā",
+     "senses": [
+      {
+       "def": "治理好自己的家庭宗族",
+       "examples": [
+        "身修而后家齐"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "治国",
+     "pinyin": "zhì guó",
+     "senses": [
+      {
+       "def": "治理国家",
+       "examples": [
+        "家齐而后国治"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "明德",
+     "pinyin": "míng dé",
+     "senses": [
+      {
+       "def": "光明正大的德性",
+       "examples": [
+        "大学之道，在明明德"
+       ],
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "亲民",
+     "pinyin": "qīn mín",
+     "senses": [
+      {
+       "def": "亲近民众",
+       "examples": [
+        "在亲民，在止于至善"
+       ],
+       "label": "三纲领"
+      },
+      {
+       "def": "一说‘亲’作‘新’，新民，使民众自新",
+       "label": "三纲领"
+      }
+     ]
+    },
+    {
+     "headword": "至善",
+     "pinyin": "zhì shàn",
+     "senses": [
+      {
+       "def": "最高的善，极致的善境",
+       "examples": [
+        "在止于至善"
+       ],
+       "label": "三纲领"
+      }
+     ]
+    },
+    {
+     "headword": "絜矩",
+     "pinyin": "jié jǔ",
+     "senses": [
+      {
+       "def": "絜，度量",
+       "examples": [
+        "是以君子有絜矩之道也"
+       ],
+       "label": "经典概念"
+      },
+      {
+       "def": "矩，规则。以己度人、推己及人之道",
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "中和",
+     "pinyin": "zhōng hé",
+     "senses": [
+      {
+       "def": "喜怒哀乐未发谓之中，发而皆中节谓之和",
+       "examples": [
+        "致中和，天地位焉，万物育焉"
+       ],
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "孝悌",
+     "senses": [
+      {
+       "def": "孝顺父母，敬爱兄长",
+       "examples": [
+        "孝悌也者，其为仁之本与"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "忠信",
+     "pinyin": "zhōng xìn",
+     "senses": [
+      {
+       "def": "忠诚守信",
+       "examples": [
+        "主忠信，无友不如己者"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "仁义",
+     "pinyin": "rén yì",
+     "senses": [
+      {
+       "def": "仁爱和道义，儒家核心道德",
+       "examples": [
+        "仁义礼智，非由外铄我也"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "礼乐",
+     "pinyin": "lǐ lè",
+     "senses": [
+      {
+       "def": "礼仪与音乐，儒家教化之具",
+       "examples": [
+        "人而不仁，如礼何"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "天命",
+     "pinyin": "tiān mìng",
+     "senses": [
+      {
+       "def": "上天的意志与赋予的使命",
+       "examples": [
+        "五十而知天命"
+       ],
+       "label": "经典概念"
+      },
+      {
+       "def": "亦指自然规律",
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "天性",
+     "pinyin": "tiān xìng",
+     "senses": [
+      {
+       "def": "人天生的本性",
+       "examples": [
+        "天命之谓性"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "率性",
+     "pinyin": "lǜ xìng",
+     "senses": [
+      {
+       "def": "顺着本性而行",
+       "examples": [
+        "率性之谓道"
+       ],
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "修道",
+     "pinyin": "xiū dào",
+     "senses": [
+      {
+       "def": "修明、整饬人伦道义",
+       "examples": [
+        "修道之谓教"
+       ],
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "教化",
+     "pinyin": "jiào huà",
+     "senses": [
+      {
+       "def": "教育感化",
+       "examples": [
+        "修道之谓教"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "玄德",
+     "pinyin": "xuán dé",
+     "senses": [
+      {
+       "def": "幽深玄妙的德性",
+       "examples": [
+        "生而不有，为而不恃，长而不宰，是谓玄德"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "道德",
+     "pinyin": "dào dé",
+     "senses": [
+      {
+       "def": "道与德",
+       "examples": [
+        "道生之，德畜之"
+       ],
+       "label": "经典概念"
+      },
+      {
+       "def": "合称为人所应遵循的规范",
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "上善",
+     "pinyin": "shàng shàn",
+     "senses": [
+      {
+       "def": "最高的善，最高的德行",
+       "examples": [
+        "上善若水"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "若水",
+     "pinyin": "ruò shuǐ",
+     "senses": [
+      {
+       "def": "如水一般利万物而不争",
+       "examples": [
+        "上善若水，水善利万物而不争"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "万物",
+     "pinyin": "wàn wù",
+     "senses": [
+      {
+       "def": "宇宙间的一切事物",
+       "examples": [
+        "万物作焉而不辞"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "天地",
+     "pinyin": "tiān dì",
+     "senses": [
+      {
+       "def": "天与地，自然界",
+       "examples": [
+        "天地不仁，以万物为刍狗"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "阴阳",
+     "pinyin": "yīn yáng",
+     "senses": [
+      {
+       "def": "中国哲学中对立统一的两种气",
+       "examples": [
+        "万物负阴而抱阳，冲气以为和"
+       ],
+       "label": "哲学概念"
+      }
+     ]
+    },
+    {
+     "headword": "玄牝",
+     "pinyin": "xuán pìn",
+     "senses": [
+      {
+       "def": "道之别名，喻深奥的生育万物之门",
+       "examples": [
+        "谷神不死，是谓玄牝"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "谷神",
+     "pinyin": "gǔ shén",
+     "senses": [
+      {
+       "def": "道体虚空幽深、生生不息之喻",
+       "examples": [
+        "谷神不死，是谓玄牝"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "刍狗",
+     "pinyin": "chú gǒu",
+     "senses": [
+      {
+       "def": "祭祀用的草扎之狗，喻无情感、顺自然",
+       "examples": [
+        "天地不仁，以万物为刍狗"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "恍惚",
+     "pinyin": "huǎng hū",
+     "senses": [
+      {
+       "def": "道之存在若有若无、似有似无的状态",
+       "examples": [
+        "是谓无状之状，无物之象，是谓惚恍"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "希言",
+     "pinyin": "xī yán",
+     "senses": [
+      {
+       "def": "少言",
+       "examples": [
+        "希言自然"
+       ],
+       "label": "道家概念"
+      },
+      {
+       "def": "以少言为贵",
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "贵身",
+     "pinyin": "guì shēn",
+     "senses": [
+      {
+       "def": "以身为贵，重视自身修养",
+       "examples": [
+        "贵以身为天下，若可寄天下"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "知足",
+     "pinyin": "zhī zú",
+     "senses": [
+      {
+       "def": "知道满足，安于所已有",
+       "examples": [
+        "知足者富"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "知止",
+     "pinyin": "zhī zhǐ",
+     "senses": [
+      {
+       "def": "知道适可而止",
+       "examples": [
+        "知止不殆，可以长久"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "不争",
+     "pinyin": "bù zhēng",
+     "senses": [
+      {
+       "def": "不与人争，顺自然而行",
+       "examples": [
+        "夫唯不争，故天下莫能与之争"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "守柔",
+     "pinyin": "shǒu róu",
+     "senses": [
+      {
+       "def": "持守柔弱之道",
+       "examples": [
+        "守柔曰强"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "见素",
+     "pinyin": "jiàn sù",
+     "senses": [
+      {
+       "def": "显现本色，纯朴无华",
+       "examples": [
+        "见素抱朴，少私寡欲"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "抱朴",
+     "pinyin": "bào pǔ",
+     "senses": [
+      {
+       "def": "持守本真质朴",
+       "examples": [
+        "见素抱朴，少私寡欲"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "寡欲",
+     "pinyin": "guǎ yù",
+     "senses": [
+      {
+       "def": "减少私欲",
+       "examples": [
+        "见素抱朴，少私寡欲"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "大成",
+     "pinyin": "dà chéng",
+     "senses": [
+      {
+       "def": "极大的成就",
+       "examples": [
+        "大成若缺，其用不弊"
+       ],
+       "label": "道家概念"
+      },
+      {
+       "def": "亦指大德之人",
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "大盈",
+     "pinyin": "dà yíng",
+     "senses": [
+      {
+       "def": "最充实的东西",
+       "examples": [
+        "大盈若冲，其用不穷"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "大直",
+     "pinyin": "dà zhí",
+     "senses": [
+      {
+       "def": "最正直的东西，看似弯曲",
+       "examples": [
+        "大直若屈，大巧若拙，大辩若讷"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "大巧",
+     "pinyin": "dà qiǎo",
+     "senses": [
+      {
+       "def": "最高的巧，看似笨拙",
+       "examples": [
+        "大直若屈，大巧若拙"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "大辩",
+     "pinyin": "dà biàn",
+     "senses": [
+      {
+       "def": "最高的辩才，看似木讷",
+       "examples": [
+        "大辩若讷"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "玄同",
+     "pinyin": "xuán tóng",
+     "senses": [
+      {
+       "def": "混同玄妙之境界，消除差别对立",
+       "examples": [
+        "和其光，同其尘，是谓玄同"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "长生",
+     "pinyin": "cháng shēng",
+     "senses": [
+      {
+       "def": "长久存在、寿命绵长",
+       "examples": [
+        "天地所以能长且久者，以其不自生，故能长生"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "忠恕",
+     "pinyin": "zhōng shù",
+     "senses": [
+      {
+       "def": "尽己之心为忠，推己及人为恕",
+       "examples": [
+        "夫子之道，忠恕而已矣"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "三省",
+     "pinyin": "sān shěng",
+     "senses": [
+      {
+       "def": "多次反省自己",
+       "examples": [
+        "吾日三省吾身"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "为政",
+     "pinyin": "wèi zhèng",
+     "senses": [
+      {
+       "def": "治理政事",
+       "examples": [
+        "为政以德"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "北辰",
+     "pinyin": "běi chén",
+     "senses": [
+      {
+       "def": "北极星，喻德政之君",
+       "examples": [
+        "为政以德，譬如北辰，居其所而众星共之"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "八佾",
+     "pinyin": "bā yì",
+     "senses": [
+      {
+       "def": "古代天子用的一种乐舞队列",
+       "examples": [
+        "八佾舞于庭，是可忍也，孰不可忍也"
+       ],
+       "label": "礼乐制度"
+      },
+      {
+       "def": "《论语》篇名",
+       "label": "礼乐制度"
+      }
+     ]
+    },
+    {
+     "headword": "雍彻",
+     "pinyin": "yōng chè",
+     "senses": [
+      {
+       "def": "以《雍》诗撤祭之礼，喻礼制的僭越",
+       "examples": [
+        "相维辟公，天子穆穆，奚取于三家之堂"
+       ],
+       "label": "礼乐制度"
+      }
+     ]
+    },
+    {
+     "headword": "恻隐",
+     "senses": [
+      {
+       "def": "同情怜悯之心",
+       "examples": [
+        "恻隐之心，仁之端也"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "羞恶",
+     "pinyin": "xiū è",
+     "senses": [
+      {
+       "def": "羞耻憎恶之心",
+       "examples": [
+        "羞恶之心，义之端也"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "辞让",
+     "pinyin": "cí ràng",
+     "senses": [
+      {
+       "def": "谦逊推让之心",
+       "examples": [
+        "辞让之心，礼之端也"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "是非",
+     "pinyin": "shì fēi",
+     "senses": [
+      {
+       "def": "明辨是非之心",
+       "examples": [
+        "是非之心，智之端也"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "浩然",
+     "pinyin": "hào rán",
+     "senses": [
+      {
+       "def": "盛大刚正之貌",
+       "examples": [
+        "我善养吾浩然之气"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "知言",
+     "pinyin": "zhī yán",
+     "senses": [
+      {
+       "def": "善于辨析言辞之是非邪正",
+       "examples": [
+        "我知言，我善养吾浩然之气"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "性善",
+     "pinyin": "xìng shàn",
+     "senses": [
+      {
+       "def": "人性本善之说",
+       "examples": [
+        "人性之善也，犹水之就下也"
+       ],
+       "label": "哲学概念"
+      }
+     ]
+    },
+    {
+     "headword": "良知",
+     "pinyin": "liáng zhī",
+     "senses": [
+      {
+       "def": "与生俱来的善知善能",
+       "examples": [
+        "人之所不学而能者，其良能也"
+       ],
+       "label": "哲学概念"
+      }
+     ]
+    },
+    {
+     "headword": "良能",
+     "pinyin": "liáng néng",
+     "senses": [
+      {
+       "def": "不学而能的先天本能",
+       "examples": [
+        "所不虑而知者，其良知也"
+       ],
+       "label": "哲学概念"
+      }
+     ]
+    },
+    {
+     "headword": "独善",
+     "pinyin": "dú shàn",
+     "senses": [
+      {
+       "def": "独自修养完善自身",
+       "examples": [
+        "穷则独善其身，达则兼善天下"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "兼善",
+     "pinyin": "jiān shàn",
+     "senses": [
+      {
+       "def": "使天下人都受益、得善",
+       "examples": [
+        "穷则独善其身，达则兼善天下"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "王道",
+     "pinyin": "wáng dào",
+     "senses": [
+      {
+       "def": "以仁义治天下的政治主张",
+       "examples": [
+        "养生丧死无憾，王道之始也"
+       ],
+       "label": "政治概念"
+      }
+     ]
+    },
+    {
+     "headword": "霸道",
+     "pinyin": "bà dào",
+     "senses": [
+      {
+       "def": "凭武力权术治国的政治主张",
+       "examples": [
+        "以力假仁者霸"
+       ],
+       "label": "政治概念"
+      }
+     ]
+    },
+    {
+     "headword": "恒产",
+     "pinyin": "héng chǎn",
+     "senses": [
+      {
+       "def": "固定的产业、稳定的收入",
+       "examples": [
+        "民之为道也，有恒产者有恒心"
+       ],
+       "label": "政治概念"
+      }
+     ]
+    },
+    {
+     "headword": "恒心",
+     "pinyin": "héng xīn",
+     "senses": [
+      {
+       "def": "坚定的善心与操守",
+       "examples": [
+        "无恒产而有恒心者，惟士为能"
+       ],
+       "label": "政治概念"
+      }
+     ]
+    },
+    {
+     "headword": "天时",
+     "pinyin": "tiān shí",
+     "senses": [
+      {
+       "def": "自然气候时机",
+       "examples": [
+        "天时不如地利，地利不如人和"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "地利",
+     "pinyin": "dì lì",
+     "senses": [
+      {
+       "def": "地理上的有利条件",
+       "examples": [
+        "天时不如地利，地利不如人和"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "人和",
+     "pinyin": "rén hé",
+     "senses": [
+      {
+       "def": "人心归向、团结和睦",
+       "examples": [
+        "天时不如地利，地利不如人和"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "寡助",
+     "pinyin": "guǎ zhù",
+     "senses": [
+      {
+       "def": "帮助他的人少",
+       "examples": [
+        "失道者寡助"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "逍遥",
+     "senses": [
+      {
+       "def": "自由自在、无拘无束",
+       "examples": [
+        "彷徨乎无为其侧，逍遥乎寝卧其下"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "齐物",
+     "pinyin": "qí wù",
+     "senses": [
+      {
+       "def": "齐同万物，消除差别对立",
+       "examples": [
+        "天地与我并生，而万物与我为一"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "坐忘",
+     "pinyin": "zuò wàng",
+     "senses": [
+      {
+       "def": "静坐而忘掉一切物我差别",
+       "examples": [
+        "堕肢体，黜聪明，离形去知，同于大通，此谓坐忘"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "心斋",
+     "pinyin": "xīn zhāi",
+     "senses": [
+      {
+       "def": "排除杂念、使心虚静专一",
+       "examples": [
+        "唯道集虚。虚者，心斋也"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "大同",
+     "pinyin": "dà tóng",
+     "senses": [
+      {
+       "def": "天下为公的理想社会",
+       "examples": [
+        "大道之行也，天下为公"
+       ],
+       "label": "政治理想"
+      }
+     ]
+    },
+    {
+     "headword": "小康",
+     "pinyin": "xiǎo kāng",
+     "senses": [
+      {
+       "def": "家给人足、礼义修明的社会阶段",
+       "examples": [
+        "今大道既隐，天下为家，是谓小康"
+       ],
+       "label": "政治理想"
+      }
+     ]
+    },
+    {
+     "headword": "礼运",
+     "pinyin": "lǐ yùn",
+     "senses": [
+      {
+       "def": "礼的运行",
+       "examples": [
+        "故圣人以礼示之，故天下国家可得而正也"
+       ],
+       "label": "礼乐制度"
+      },
+      {
+       "def": "《礼记》篇名",
+       "label": "礼乐制度"
+      }
+     ]
+    },
+    {
+     "headword": "王化",
+     "pinyin": "wáng huà",
+     "senses": [
+      {
+       "def": "王者的德化教民",
+       "examples": [
+        "王道之始也"
+       ],
+       "label": "政治概念"
+      }
+     ]
+    },
+    {
+     "headword": "风雅",
+     "pinyin": "fēng yǎ",
+     "senses": [
+      {
+       "def": "《诗经》中国风、大雅小雅",
+       "examples": [
+        "风雅颂，赋比兴"
+       ],
+       "label": "文学概念"
+      },
+      {
+       "def": "引申为文雅",
+       "label": "文学概念"
+      }
+     ]
+    },
+    {
+     "headword": "比兴",
+     "pinyin": "bǐ xīng",
+     "senses": [
+      {
+       "def": "诗歌创作中的比喻起兴手法",
+       "examples": [
+        "赋比兴"
+       ],
+       "label": "文学概念"
+      }
+     ]
+    },
+    {
+     "headword": "知困",
+     "pinyin": "zhī kùn",
+     "senses": [
+      {
+       "def": "知道自己的不足与困惑",
+       "examples": [
+        "教然后知困"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "变通",
+     "pinyin": "biàn tōng",
+     "senses": [
+      {
+       "def": "变则通达、灵活应变",
+       "examples": [
+        "穷则变，变则通"
+       ],
+       "label": "易学概念"
+      }
+     ]
+    },
+    {
+     "headword": "耳顺",
+     "pinyin": "ěr shùn",
+     "senses": [
+      {
+       "def": "六十岁能听进各种不同意见",
+       "examples": [
+        "六十而耳顺"
+       ],
+       "label": "经典名句"
+      }
+     ]
+    },
+    {
+     "headword": "抱一",
+     "pinyin": "bào yī",
+     "senses": [
+      {
+       "def": "守持道这一根本",
+       "examples": [
+        "载营魄抱一，能无离乎"
+       ],
+       "label": "道家名句"
+      }
+     ]
+    },
+    {
+     "headword": "归根",
+     "pinyin": "guī gēn",
+     "senses": [
+      {
+       "def": "回归本根、返归本源",
+       "examples": [
+        "夫物芸芸，各复归其根"
+       ],
+       "label": "道家名句"
+      }
+     ]
+    },
+    {
+     "headword": "复命",
+     "pinyin": "fù mìng",
+     "senses": [
+      {
+       "def": "回归本命、复归本性",
+       "examples": [
+        "归根曰静，静曰复命"
+       ],
+       "label": "道家名句"
+      }
+     ]
+    },
+    {
+     "headword": "知常",
+     "pinyin": "zhī cháng",
+     "senses": [
+      {
+       "def": "认识恒常不变的规律",
+       "examples": [
+        "知常曰明。不知常，妄作凶"
+       ],
+       "label": "道家名句"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "native-classical",
+   "name": "古汉语常用字典",
+   "kind": "native",
+   "format": "builtin",
+   "version": "1.0",
+   "license": "本项目内置样例数据（基于自带 pinyin-dict / word-dict 词库程序化整理）",
+   "description": "古汉语视角的常用字词条目，义项标注用法类别，例句兼作用例书证。",
+   "entries": [
+    {
+     "headword": "之",
+     "pinyin": "zhī",
+     "senses": [
+      {
+       "def": "结构助词，的",
+       "label": "多义虚词"
+      },
+      {
+       "def": "取消句子独立性",
+       "label": "多义虚词"
+      },
+      {
+       "def": "宾语前置标志",
+       "label": "多义虚词"
+      },
+      {
+       "def": "也可作代词",
+       "citations": [
+        "学而时习之",
+        "夫子之道"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "乎",
+     "pinyin": "hū",
+     "senses": [
+      {
+       "def": "语气助词，表疑问或感叹",
+       "label": "多义虚词"
+      },
+      {
+       "def": "或介词，相当于‘于’",
+       "citations": [
+        "不亦乐乎",
+        "其皆出于此乎"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "者",
+     "pinyin": "zhě",
+     "senses": [
+      {
+       "pos": "助词",
+       "def": "构成名词性短语‘……的人/事物’",
+       "label": "多义虚词"
+      },
+      {
+       "def": "或表停顿",
+       "citations": [
+        "知者不惑",
+        "仁者安仁"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "也",
+     "pinyin": "yě",
+     "senses": [
+      {
+       "def": "语气助词，表判断、肯定或停顿",
+       "citations": [
+        "是知也",
+        "道也者不可须臾离也"
+       ],
+       "label": "句末语气词"
+      }
+     ]
+    },
+    {
+     "headword": "矣",
+     "pinyin": "yǐ",
+     "senses": [
+      {
+       "def": "语气助词，表已然或将然，相当于‘了’",
+       "citations": [
+        "鲜矣仁",
+        "则近道矣"
+       ],
+       "label": "句末语气词"
+      }
+     ]
+    },
+    {
+     "headword": "焉",
+     "pinyin": "yān",
+     "senses": [
+      {
+       "def": "兼词，相当于‘于之’、‘于此’",
+       "label": "多义虚词"
+      },
+      {
+       "def": "或语气助词",
+       "label": "多义虚词"
+      },
+      {
+       "def": "或疑问代词‘哪里’",
+       "citations": [
+        "见贤思齐焉",
+        "焉得知"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "哉",
+     "pinyin": "zāi",
+     "senses": [
+      {
+       "def": "语气助词，表感叹或反问，相当于‘呢、啊’",
+       "citations": [
+        "大哉问",
+        "岂虚言哉"
+       ],
+       "label": "句末语气词"
+      }
+     ]
+    },
+    {
+     "headword": "而",
+     "pinyin": "ér",
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "表顺承、转折、并列、修饰等关系",
+       "citations": [
+        "学而不思则罔",
+        "敏于事而慎于言"
+       ],
+       "label": "多义连词"
+      }
+     ]
+    },
+    {
+     "headword": "以",
+     "pinyin": "yǐ",
+     "senses": [
+      {
+       "pos": "介词",
+       "def": "用、拿、凭借、按照",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "连词",
+       "def": "表目的或结果",
+       "citations": [
+        "以德报怨",
+        "何以知之"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "于",
+     "pinyin": "yú",
+     "senses": [
+      {
+       "pos": "介词",
+       "def": "在、从、对、向、比、被等",
+       "citations": [
+        "敏于事而慎于言",
+        "青出于蓝"
+       ],
+       "label": "多义介词"
+      }
+     ]
+    },
+    {
+     "headword": "为",
+     "pinyin": "wèi",
+     "readings": [
+      "wèi",
+      "wéi"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "做、成为",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "介词",
+       "def": "替、为了、因为",
+       "citations": [
+        "为政以德",
+        "为人谋而不忠乎"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "则",
+     "pinyin": "zé",
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "就、那么、却",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "副词",
+       "def": "用于判断，就是",
+       "citations": [
+        "知之者不如好之者"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "乃",
+     "pinyin": "nǎi",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "于是、竟然、才",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "代词",
+       "def": "你的",
+       "citations": [
+        "乃不知有汉",
+        "家祭无忘告乃翁"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "且",
+     "pinyin": "qiě",
+     "readings": [
+      "qiě",
+      "jū"
+     ],
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "并且、而且",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "副词",
+       "def": "暂且、尚且",
+       "citations": [
+        "不义而富且贵",
+        "且夫天地之间"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "若",
+     "pinyin": "ruò",
+     "readings": [
+      "ruò",
+      "rě"
+     ],
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "如果",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "动词",
+       "def": "像、如同",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "代词",
+       "def": "你",
+       "citations": [
+        "若使民常畏死",
+        "其翼若垂天之云"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "虽",
+     "pinyin": "suī",
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "虽然",
+       "label": "让步连词"
+      },
+      {
+       "def": "即使、纵然",
+       "citations": [
+        "虽曰未学",
+        "虽愚必明"
+       ],
+       "label": "让步连词"
+      }
+     ]
+    },
+    {
+     "headword": "然",
+     "pinyin": "rán",
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "这样、如此",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "连词",
+       "def": "然而",
+       "label": "多义虚词"
+      },
+      {
+       "def": "词尾，‘……的样子’",
+       "citations": [
+        "洋洋乎如在其上",
+        "怵然为戒"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "故",
+     "pinyin": "gù",
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "所以",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "名词",
+       "def": "缘故",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "形容词",
+       "def": "旧的",
+       "citations": [
+        "故君子必慎其独也",
+        "温故而知新"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "犹",
+     "pinyin": "yóu",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "尚且、还",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "动词",
+       "def": "如同",
+       "citations": [
+        "其犹橐籥乎",
+        "犹有所不足"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "莫",
+     "pinyin": "mò",
+     "readings": [
+      "mò",
+      "mù"
+     ],
+     "senses": [
+      {
+       "def": "否定代词，没有谁、没有什么",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "副词",
+       "def": "不、不要",
+       "citations": [
+        "莫之能守",
+        "天下莫能知"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "弗",
+     "pinyin": "fú",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "不",
+       "citations": [
+        "弗措也",
+        "女弗能救与"
+       ],
+       "label": "否定副词"
+      }
+     ]
+    },
+    {
+     "headword": "无",
+     "pinyin": "wú",
+     "readings": [
+      "wú",
+      "mó"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "没有",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "副词",
+       "def": "不要",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "连词",
+       "def": "无论",
+       "citations": [
+        "无友不如己者",
+        "无入而不自得"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "非",
+     "pinyin": "fēi",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "不是",
+       "label": "否定词"
+      },
+      {
+       "pos": "动词",
+       "def": "非难、反对",
+       "citations": [
+        "非其鬼而祭之",
+        "非天子不议礼"
+       ],
+       "label": "否定词"
+      }
+     ]
+    },
+    {
+     "headword": "是",
+     "pinyin": "shì",
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "这、这样",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "动词",
+       "def": "表判断",
+       "citations": [
+        "是知也",
+        "是可忍也"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "斯",
+     "pinyin": "sī",
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "此、这",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "连词",
+       "def": "则、就",
+       "citations": [
+        "斯为美",
+        "斯可矣"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "此",
+     "pinyin": "cǐ",
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "这、这里",
+       "citations": [
+        "此三者",
+        "此之谓民之父母"
+       ],
+       "label": "指示代词"
+      }
+     ]
+    },
+    {
+     "headword": "彼",
+     "pinyin": "bǐ",
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "那、那个",
+       "label": "指示代词"
+      },
+      {
+       "def": "他、他们",
+       "citations": [
+        "彼为善之",
+        "彼竭我盈"
+       ],
+       "label": "指示代词"
+      }
+     ]
+    },
+    {
+     "headword": "夫",
+     "pinyin": "fū",
+     "readings": [
+      "fū",
+      "fú"
+     ],
+     "senses": [
+      {
+       "def": "发语词，表议论开始",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "代词",
+       "def": "那、这个",
+       "citations": [
+        "夫唯不争",
+        "夫孝者善继人之志"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "其",
+     "pinyin": "qí",
+     "readings": [
+      "qí",
+      "jī"
+     ],
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "他、它、那",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "副词",
+       "def": "表推测、反问、祈使",
+       "citations": [
+        "其为人也孝弟",
+        "其斯以为舜乎"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "所",
+     "pinyin": "suǒ",
+     "senses": [
+      {
+       "pos": "助词",
+       "def": "与动词构成‘所’字结构，表‘……的事物/人’",
+       "citations": [
+        "人之所恶",
+        "所恶于上毋以使下"
+       ],
+       "label": "特殊结构"
+      }
+     ]
+    },
+    {
+     "headword": "耳",
+     "pinyin": "ěr",
+     "senses": [
+      {
+       "def": "语气助词，相当于‘罢了’",
+       "citations": [
+        "直不百步耳"
+       ],
+       "label": "句末语气词"
+      }
+     ]
+    },
+    {
+     "headword": "尔",
+     "pinyin": "ěr",
+     "senses": [
+      {
+       "pos": "代词",
+       "def": "你",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "助词",
+       "def": "相当于‘然’",
+       "label": "多义虚词"
+      },
+      {
+       "def": "语气词，罢了",
+       "citations": [
+        "尔爱其羊",
+        "呼尔而与之"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "兮",
+     "pinyin": "xī",
+     "senses": [
+      {
+       "def": "语气助词，多用于诗歌，相当于‘啊’",
+       "citations": [
+        "巧笑倩兮美目盼兮"
+       ],
+       "label": "诗歌语气词"
+      }
+     ]
+    },
+    {
+     "headword": "云",
+     "pinyin": "yún",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "说",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "助词",
+       "def": "表转述，相当于‘说、如此’",
+       "citations": [
+        "诗云",
+        "人云亦云"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "曰",
+     "pinyin": "yuē",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "说、叫作",
+       "citations": [
+        "子曰",
+        "名之曰道"
+       ],
+       "label": "文言常用动词"
+      }
+     ]
+    },
+    {
+     "headword": "谓",
+     "pinyin": "wèi",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "对……说、叫作、认为",
+       "citations": [
+        "孔子谓季氏",
+        "是谓玄德"
+       ],
+       "label": "文言常用动词"
+      }
+     ]
+    },
+    {
+     "headword": "安",
+     "pinyin": "ān",
+     "senses": [
+      {
+       "def": "疑问代词，哪里、怎么",
+       "label": "多义词"
+      },
+      {
+       "pos": "形容词",
+       "def": "安定",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "使安定",
+       "citations": [
+        "安得广厦千万间",
+        "安而后能虑"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "恶",
+     "pinyin": "è",
+     "readings": [
+      "è",
+      "wù",
+      "ě",
+      "wū"
+     ],
+     "senses": [
+      {
+       "def": "疑问代词，哪里、怎么",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "厌恶",
+       "label": "多义词"
+      },
+      {
+       "pos": "名词",
+       "def": "丑恶",
+       "citations": [
+        "恶乎成名",
+        "恶不仁者"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "奚",
+     "pinyin": "xī",
+     "senses": [
+      {
+       "def": "疑问代词，什么、哪里、为什么",
+       "citations": [
+        "奚取于三家之堂",
+        "子奚不为政"
+       ],
+       "label": "疑问词"
+      }
+     ]
+    },
+    {
+     "headword": "胡",
+     "pinyin": "hú",
+     "senses": [
+      {
+       "def": "疑问代词，为什么、怎么",
+       "citations": [
+        "胡不慥慥尔"
+       ],
+       "label": "疑问词"
+      }
+     ]
+    },
+    {
+     "headword": "曷",
+     "senses": [
+      {
+       "def": "疑问代词，何、何时、何不",
+       "citations": [
+        "曷不委心任去留"
+       ],
+       "label": "疑问词"
+      }
+     ]
+    },
+    {
+     "headword": "盍",
+     "senses": [
+      {
+       "def": "兼词，何不",
+       "citations": [
+        "盍各言尔志"
+       ],
+       "label": "疑问词"
+      }
+     ]
+    },
+    {
+     "headword": "孰",
+     "pinyin": "shú",
+     "senses": [
+      {
+       "def": "疑问代词，谁、什么、哪一个",
+       "citations": [
+        "孰能浊以静之徐清",
+        "是可忍也孰不可忍也"
+       ],
+       "label": "疑问词"
+      }
+     ]
+    },
+    {
+     "headword": "何",
+     "pinyin": "hé",
+     "readings": [
+      "hé",
+      "hē",
+      "hè"
+     ],
+     "senses": [
+      {
+       "def": "疑问代词，什么、怎么、为什么",
+       "citations": [
+        "何谓也",
+        "何以行之哉"
+       ],
+       "label": "疑问词"
+      }
+     ]
+    },
+    {
+     "headword": "盖",
+     "pinyin": "gài",
+     "readings": [
+      "gài",
+      "gě",
+      "hé"
+     ],
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "大概、原来",
+       "label": "多义虚词"
+      },
+      {
+       "def": "发语词",
+       "label": "多义虚词"
+      },
+      {
+       "def": "通‘盍’，何不",
+       "citations": [
+        "盖有之矣",
+        "盖将自其变者而观之"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "唯",
+     "pinyin": "wéi",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "只、只有",
+       "label": "多义虚词"
+      },
+      {
+       "def": "语气词，表应答",
+       "citations": [
+        "唯仁者能好人",
+        "唯天下至诚"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "惟",
+     "pinyin": "wéi",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "只、只是",
+       "label": "多义虚词"
+      },
+      {
+       "def": "发语词",
+       "citations": [
+        "惟善以为宝",
+        "惟命不于常"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "维",
+     "pinyin": "wéi",
+     "senses": [
+      {
+       "pos": "助词",
+       "def": "句首或句中语气词",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "名词",
+       "def": "纲维",
+       "citations": [
+        "维天之命於穆不已"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "遂",
+     "pinyin": "suì",
+     "readings": [
+      "suì",
+      "suí"
+     ],
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "于是、就",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "动词",
+       "def": "成就、实现",
+       "citations": [
+        "功成事遂",
+        "遂迷不复得路"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "苟",
+     "pinyin": "gǒu",
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "如果、假如",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "副词",
+       "def": "苟且、随便",
+       "citations": [
+        "苟志于仁矣",
+        "苟不至德"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "倘",
+     "pinyin": "tǎng",
+     "readings": [
+      "tǎng",
+      "cháng"
+     ],
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "假如、如果",
+       "citations": [
+        "倘能如此"
+       ],
+       "label": "假设连词"
+      }
+     ]
+    },
+    {
+     "headword": "向",
+     "pinyin": "xiàng",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "从前、先前",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "朝向",
+       "citations": [
+        "向使三国各爱其地"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "使",
+     "pinyin": "shǐ",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "让、派遣",
+       "label": "多义词"
+      },
+      {
+       "pos": "连词",
+       "def": "假使",
+       "citations": [
+        "使民重死而不远徙",
+        "使夫智者不敢为也"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "即",
+     "pinyin": "jí",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "就、立即",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "连词",
+       "def": "即使",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "动词",
+       "def": "接近",
+       "citations": [
+        "即物而穷其理",
+        "即以其人之道还治其人之身"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "纵",
+     "pinyin": "zòng",
+     "readings": [
+      "zòng",
+      "zǒng"
+     ],
+     "senses": [
+      {
+       "pos": "连词",
+       "def": "即使、纵然",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "放纵",
+       "citations": [
+        "纵我不往"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "必",
+     "pinyin": "bì",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "一定、必定",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "连词",
+       "def": "如果一定",
+       "citations": [
+        "故君子必慎其独也",
+        "必先正其心"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "凡",
+     "pinyin": "fán",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "凡是、总共",
+       "label": "多义词"
+      },
+      {
+       "pos": "形容词",
+       "def": "平凡",
+       "citations": [
+        "凡有血气者",
+        "凡为天下国家有九经"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "皆",
+     "pinyin": "jiē",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "都、全",
+       "citations": [
+        "皆自明也",
+        "百姓皆谓我自然"
+       ],
+       "label": "范围副词"
+      }
+     ]
+    },
+    {
+     "headword": "悉",
+     "pinyin": "xī",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "都、全",
+       "label": "范围副词"
+      },
+      {
+       "pos": "动词",
+       "def": "详尽了解",
+       "citations": [
+        "悉以咨之"
+       ],
+       "label": "范围副词"
+      }
+     ]
+    },
+    {
+     "headword": "咸",
+     "pinyin": "xián",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "都、全",
+       "citations": [
+        "群贤毕至少长咸集"
+       ],
+       "label": "范围副词"
+      }
+     ]
+    },
+    {
+     "headword": "尽",
+     "pinyin": "jìn",
+     "readings": [
+      "jìn",
+      "jǐn"
+     ],
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "全部、都",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "竭尽",
+       "citations": [
+        "尽其性",
+        "尽美矣又尽善也"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "俱",
+     "pinyin": "jù",
+     "readings": [
+      "jù",
+      "jū"
+     ],
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "一起、都",
+       "citations": [
+        "风烟俱净"
+       ],
+       "label": "范围副词"
+      }
+     ]
+    },
+    {
+     "headword": "举",
+     "pinyin": "jǔ",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "举起、推举、全部",
+       "label": "多义词"
+      },
+      {
+       "pos": "副词",
+       "def": "全",
+       "citations": [
+        "举直错诸枉",
+        "举天下豪杰"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "毕",
+     "pinyin": "bì",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "全、都",
+       "label": "范围副词"
+      },
+      {
+       "pos": "动词",
+       "def": "完毕",
+       "citations": [
+        "群贤毕至"
+       ],
+       "label": "范围副词"
+      }
+     ]
+    },
+    {
+     "headword": "共",
+     "pinyin": "gòng",
+     "readings": [
+      "gòng",
+      "gōng"
+     ],
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "共同、一起",
+       "label": "多义词"
+      },
+      {
+       "def": "通‘拱’，环绕",
+       "citations": [
+        "众星共之",
+        "共观之"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "相",
+     "pinyin": "xiāng",
+     "readings": [
+      "xiāng",
+      "xiàng"
+     ],
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "互相",
+       "label": "多义词"
+      },
+      {
+       "pos": "名词",
+       "def": "丞相、相貌",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "观察",
+       "citations": [
+        "前后相随",
+        "相看两不厌"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "见",
+     "pinyin": "jiàn",
+     "readings": [
+      "jiàn",
+      "xiàn"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "看见、拜见",
+       "label": "多义词"
+      },
+      {
+       "def": "表被动，被",
+       "label": "多义词"
+      },
+      {
+       "def": "通‘现’，显现",
+       "citations": [
+        "见贤思齐",
+        "见乎蓍龟"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "被",
+     "pinyin": "bèi",
+     "readings": [
+      "bèi",
+      "pī"
+     ],
+     "senses": [
+      {
+       "pos": "介词",
+       "def": "表被动",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "通‘披’，穿着",
+       "citations": [
+        "被褐怀玉",
+        "信而见疑忠而被谤"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "诸",
+     "pinyin": "zhū",
+     "senses": [
+      {
+       "def": "兼词，之于、之乎",
+       "label": "多义虚词"
+      },
+      {
+       "pos": "形容词",
+       "def": "众多",
+       "citations": [
+        "举直错诸枉",
+        "施诸己而不愿"
+       ],
+       "label": "多义虚词"
+      }
+     ]
+    },
+    {
+     "headword": "邪",
+     "pinyin": "xié",
+     "readings": [
+      "xié",
+      "yá",
+      "yé",
+      "yú",
+      "xú"
+     ],
+     "senses": [
+      {
+       "def": "语气词，相当于‘耶’，表疑问或反问",
+       "citations": [
+        "非以其无私邪"
+       ],
+       "label": "句末语气词"
+      }
+     ]
+    },
+    {
+     "headword": "与",
+     "pinyin": "yǔ",
+     "readings": [
+      "yǔ",
+      "yù",
+      "yú"
+     ],
+     "senses": [
+      {
+       "def": "介词/连词，和、跟",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "给予、结交",
+       "label": "多义词"
+      },
+      {
+       "def": "通‘欤’",
+       "citations": [
+        "与朋友交",
+        "其诸异乎人之求之与"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "道",
+     "pinyin": "dào",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "道路、道理、学说",
+       "label": "核心实词"
+      },
+      {
+       "pos": "动词",
+       "def": "说",
+       "label": "核心实词"
+      },
+      {
+       "def": "通‘导’",
+       "citations": [
+        "朝闻道夕死可矣",
+        "道可道非常道"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "德",
+     "pinyin": "dé",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "道德、德行、恩德",
+       "label": "核心实词"
+      },
+      {
+       "pos": "动词",
+       "def": "感激",
+       "citations": [
+        "为政以德",
+        "上德不德是以有德"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "仁",
+     "pinyin": "rén",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "仁爱、仁德",
+       "label": "核心实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "仁慈",
+       "citations": [
+        "仁者爱人",
+        "克己复礼为仁"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "义",
+     "pinyin": "yì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "正义、道义",
+       "label": "核心实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "合宜的",
+       "citations": [
+        "君子喻于义",
+        "信近于义"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "礼",
+     "pinyin": "lǐ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "礼制、礼节",
+       "label": "核心实词"
+      },
+      {
+       "pos": "动词",
+       "def": "以礼相待",
+       "citations": [
+        "礼之用和为贵",
+        "君使臣以礼"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "智",
+     "pinyin": "zhì",
+     "senses": [
+      {
+       "def": "名词/形容词，智慧、聪明",
+       "label": "核心实词"
+      },
+      {
+       "def": "通‘知’",
+       "citations": [
+        "知者不惑",
+        "唯仁者能好人"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "信",
+     "pinyin": "xìn",
+     "readings": [
+      "xìn",
+      "shēn"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "诚信、信用",
+       "label": "核心实词"
+      },
+      {
+       "pos": "动词",
+       "def": "信任",
+       "citations": [
+        "言而有信",
+        "信近于义"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "忠",
+     "pinyin": "zhōng",
+     "senses": [
+      {
+       "def": "名词/形容词，忠诚、尽心竭力",
+       "citations": [
+        "为人谋而不忠乎",
+        "忠信重禄"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "恕",
+     "pinyin": "shù",
+     "senses": [
+      {
+       "def": "名词/动词，推己及人、宽恕",
+       "citations": [
+        "夫子之道忠恕而已矣",
+        "忠恕违道不远"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "孝",
+     "pinyin": "xiào",
+     "senses": [
+      {
+       "def": "名词/动词，孝顺、孝敬父母",
+       "citations": [
+        "其为人也孝弟",
+        "孝者所以事君也"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "悌",
+     "senses": [
+      {
+       "def": "名词/动词，敬爱兄长",
+       "citations": [
+        "孝弟也者其为仁之本与"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "廉",
+     "pinyin": "lián",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "廉洁、方正",
+       "citations": [
+        "廉而不刿"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "耻",
+     "pinyin": "chǐ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "耻辱",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "以……为耻",
+       "citations": [
+        "知耻近乎勇",
+        "耻躬之不逮也"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "勇",
+     "pinyin": "yǒng",
+     "senses": [
+      {
+       "def": "名词/形容词，勇敢、有勇气",
+       "citations": [
+        "见义不为无勇也",
+        "知耻近乎勇"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "温",
+     "pinyin": "wēn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "温和",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "温习",
+       "citations": [
+        "温故而知新",
+        "温良恭俭让"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "良",
+     "pinyin": "liáng",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "善良、良好、优秀",
+       "citations": [
+        "温良恭俭让"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "恭",
+     "pinyin": "gōng",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "恭敬、谦恭",
+       "citations": [
+        "恭近于礼",
+        "笃恭而天下平"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "俭",
+     "pinyin": "jiǎn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "节俭、俭朴",
+       "citations": [
+        "礼与其奢也宁俭",
+        "俭故能广"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "让",
+     "pinyin": "ràng",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "谦让、退让、责备",
+       "citations": [
+        "能以礼让为国乎"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "敬",
+     "pinyin": "jìng",
+     "senses": [
+      {
+       "def": "动词/形容词，尊敬、恭敬、谨慎",
+       "citations": [
+        "敬事而信",
+        "为人臣止于敬"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "谨",
+     "pinyin": "jǐn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "谨慎",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "谨守",
+       "citations": [
+        "谨而信",
+        "庸言之谨"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "慎",
+     "pinyin": "shèn",
+     "senses": [
+      {
+       "def": "动词/形容词，谨慎、慎重",
+       "citations": [
+        "故君子必慎其独也",
+        "慎终追远"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "诚",
+     "pinyin": "chéng",
+     "senses": [
+      {
+       "def": "形容词/副词，诚实、真诚、确实",
+       "citations": [
+        "诚者天之道也",
+        "诚之者人之道也"
+       ],
+       "label": "核心实词"
+      }
+     ]
+    },
+    {
+     "headword": "正",
+     "pinyin": "zhèng",
+     "readings": [
+      "zhèng",
+      "zhēng"
+     ],
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "端正、正直",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "匡正",
+       "citations": [
+        "欲正其心者先诚其意",
+        "正己而不求于人"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "修",
+     "pinyin": "xiū",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "修养、整治、修建",
+       "citations": [
+        "修身齐家",
+        "修其祖庙"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "齐",
+     "pinyin": "qí",
+     "readings": [
+      "qí",
+      "jì",
+      "zī",
+      "zhāi"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "整治、治理",
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "整齐",
+       "label": "常用实词"
+      },
+      {
+       "def": "通‘斋’",
+       "citations": [
+        "齐家治国",
+        "齐明盛服"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "治",
+     "pinyin": "zhì",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "治理、整治",
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "太平",
+       "citations": [
+        "治国平天下",
+        "天下大治"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "平",
+     "pinyin": "píng",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "平定、使太平",
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "平坦、公平",
+       "citations": [
+        "平天下",
+        "天下太平"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "格",
+     "pinyin": "gé",
+     "readings": [
+      "gé",
+      "gē"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "推究、穷至、纠正",
+       "citations": [
+        "致知在格物",
+        "格物致知"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "致",
+     "pinyin": "zhì",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "获得、达到、招致、表达",
+       "citations": [
+        "致知在格物",
+        "致中和"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "知",
+     "pinyin": "zhī",
+     "readings": [
+      "zhī",
+      "zhì"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "知道、了解、掌管",
+       "label": "常用实词"
+      },
+      {
+       "def": "通‘智’",
+       "citations": [
+        "知止而后有定",
+        "温故而知新"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "意",
+     "pinyin": "yì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "意念、心意、意思",
+       "citations": [
+        "欲诚其意者先致其知"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "心",
+     "pinyin": "xīn",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "内心、心思、本心",
+       "citations": [
+        "正其心",
+        "心不在焉"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "身",
+     "pinyin": "shēn",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "身体、自身、亲身",
+       "citations": [
+        "修其身",
+        "正己而不求于人"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "家",
+     "pinyin": "jiā",
+     "readings": [
+      "jiā",
+      "jia",
+      "jie"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "家庭、家族",
+       "citations": [
+        "齐其家",
+        "宜其家人"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "国",
+     "pinyin": "guó",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "国家、国都、封地",
+       "citations": [
+        "治国在齐其家",
+        "国有道其言足以兴"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "君",
+     "pinyin": "jūn",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "君主、君子、尊称",
+       "citations": [
+        "为人君止于仁",
+        "君子成人之美"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "臣",
+     "pinyin": "chén",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "臣子、官吏",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "臣服",
+       "citations": [
+        "为人臣止于敬",
+        "天下莫能臣也"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "民",
+     "pinyin": "mín",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "百姓、人民",
+       "citations": [
+        "民之父母",
+        "使民以时"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "子",
+     "pinyin": "zǐ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "儿子、子女、对人的尊称",
+       "citations": [
+        "为人子止于孝",
+        "子曰"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "父",
+     "pinyin": "fù",
+     "readings": [
+      "fù",
+      "fǔ"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "父亲、父辈",
+       "citations": [
+        "事父母能竭其力",
+        "父作之子述之"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "母",
+     "pinyin": "mǔ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "母亲、本源",
+       "citations": [
+        "有万物之母",
+        "贵食母"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "兄",
+     "pinyin": "xiōng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "兄长",
+       "citations": [
+        "友于兄弟",
+        "宜兄宜弟"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "弟",
+     "pinyin": "dì",
+     "readings": [
+      "dì",
+      "tì",
+      "tuí"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "弟弟",
+       "label": "常用实词"
+      },
+      {
+       "def": "通‘悌’",
+       "citations": [
+        "弟子入则孝",
+        "兄弟既翕"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "朋",
+     "pinyin": "péng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "朋友、同门",
+       "citations": [
+        "有朋自远方来",
+        "朋友之交"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "友",
+     "pinyin": "yǒu",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "朋友",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "亲近、结交",
+       "citations": [
+        "与朋友交",
+        "无友不如己者"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "师",
+     "pinyin": "shī",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "老师、军队",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "学习、效法",
+       "citations": [
+        "温故而知新可以为师矣",
+        "师之所处荆棘生焉"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "贤",
+     "pinyin": "xián",
+     "senses": [
+      {
+       "def": "名词/形容词，贤德、贤能",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "以……为贤",
+       "citations": [
+        "见贤思齐焉",
+        "贤贤易色"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "圣",
+     "pinyin": "shèng",
+     "senses": [
+      {
+       "def": "形容词/名词，圣明、圣贤",
+       "citations": [
+        "圣人无常心",
+        "虽圣人亦有所不知"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "士",
+     "pinyin": "shì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "读书人、士人、武士",
+       "citations": [
+        "士志于道",
+        "士之报礼重"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "侯",
+     "pinyin": "hóu",
+     "readings": [
+      "hóu",
+      "hòu"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "诸侯、侯爵",
+       "citations": [
+        "侯王若能守之",
+        "怀诸侯则天下畏之"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "王",
+     "pinyin": "wáng",
+     "readings": [
+      "wáng",
+      "wàng"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "君王",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "称王",
+       "citations": [
+        "王天下有三重焉"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "霸",
+     "pinyin": "bà",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "霸主",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "称霸",
+       "citations": [
+        "霸者之民欢虞如也"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "学",
+     "pinyin": "xué",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "学习、求学",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "学问、学说",
+       "citations": [
+        "学而时习之",
+        "博学之审问之"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "习",
+     "pinyin": "xí",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "温习、练习",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "习惯",
+       "citations": [
+        "学而时习之",
+        "传不习乎"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "思",
+     "pinyin": "sī",
+     "readings": [
+      "sī",
+      "sāi"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "思考、思念、希望",
+       "citations": [
+        "学而不思则罔",
+        "见贤思齐焉"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "言",
+     "pinyin": "yán",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "说、谈论",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "言语、言论",
+       "citations": [
+        "先行其言而后从之",
+        "言有宗事有君"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "命",
+     "pinyin": "mìng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "天命、命令、命运",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "命名",
+       "citations": [
+        "五十而知天命",
+        "天命之谓性"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "性",
+     "pinyin": "xìng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "本性、天性、性情",
+       "citations": [
+        "天命之谓性",
+        "尽其性"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "情",
+     "pinyin": "qíng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "情感、实情、情况",
+       "citations": [
+        "无情者不得尽其辞"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "欲",
+     "pinyin": "yù",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "欲望",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "想要、希望",
+       "citations": [
+        "无欲以观其妙",
+        "欲正其心者先诚其意"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "物",
+     "pinyin": "wù",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "事物、万物、外物",
+       "citations": [
+        "物有本末",
+        "格物致知"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "事",
+     "pinyin": "shì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "事情、事务",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "侍奉、从事",
+       "citations": [
+        "事父母能竭其力",
+        "事有终始"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "理",
+     "pinyin": "lǐ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "道理、事理、纹理",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "治理",
+       "citations": [
+        "即物而穷其理",
+        "文理密察"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "本",
+     "pinyin": "běn",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "根本、本源",
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "本来的",
+       "citations": [
+        "物有本末",
+        "君子务本"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "末",
+     "pinyin": "mò",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "末端、枝节",
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "次要的",
+       "citations": [
+        "德者本也财者末也"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "终",
+     "pinyin": "zhōng",
+     "senses": [
+      {
+       "def": "名词/动词，结束、终了",
+       "label": "常用实词"
+      },
+      {
+       "pos": "副词",
+       "def": "终究",
+       "citations": [
+        "事有终始",
+        "慎终追远"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "始",
+     "pinyin": "shǐ",
+     "senses": [
+      {
+       "def": "名词/动词，开始、起初",
+       "citations": [
+        "无名天地之始",
+        "物有本末事有终始"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "先",
+     "pinyin": "xiān",
+     "senses": [
+      {
+       "def": "副词/动词，先后、首先",
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "先前的",
+       "citations": [
+        "知所先后",
+        "先慎乎德"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "后",
+     "pinyin": "hòu",
+     "senses": [
+      {
+       "pos": "副词",
+       "def": "后来、以后",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "把……放在后面",
+       "citations": [
+        "后其身而身先",
+        "先天下之忧而忧"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "中",
+     "pinyin": "zhōng",
+     "readings": [
+      "zhōng",
+      "zhòng"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "中间、中正",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "符合",
+       "citations": [
+        "执其两端用其中于民",
+        "发而皆中节谓之和"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "和",
+     "pinyin": "hé",
+     "readings": [
+      "hé",
+      "hè",
+      "huó",
+      "huò",
+      "hú"
+     ],
+     "senses": [
+      {
+       "def": "名词/形容词，和谐、适中",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "应和",
+       "citations": [
+        "发而皆中节谓之和",
+        "礼之用和为贵"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "庸",
+     "pinyin": "yōng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "平常、中正",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "用",
+       "citations": [
+        "中庸之为德也",
+        "庸德之行"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "常",
+     "pinyin": "cháng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "规律、常态",
+       "label": "常用实词"
+      },
+      {
+       "pos": "副词",
+       "def": "常常",
+       "citations": [
+        "复命曰常知常曰明",
+        "道可道非常道"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "变",
+     "pinyin": "biàn",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "变化、改变",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "变故",
+       "citations": [
+        "不变塞焉",
+        "动则变"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "权",
+     "pinyin": "quán",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "权变、权柄",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "权衡",
+       "citations": [
+        "执中无权犹执一也"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "经",
+     "pinyin": "jīng",
+     "readings": [
+      "jīng",
+      "jìng"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "经典、常道",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "治理",
+       "citations": [
+        "经纶天下之大经",
+        "凡为天下国家有九经"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "亲",
+     "pinyin": "qīn",
+     "readings": [
+      "qīn",
+      "qìng"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "亲人、父母",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "亲近",
+       "citations": [
+        "亲亲为大",
+        "亲其亲"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "疏",
+     "pinyin": "shū",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "疏远、稀疏",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "疏浚",
+       "citations": [
+        "亲疏尊卑之体"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "远",
+     "pinyin": "yuǎn",
+     "readings": [
+      "yuǎn",
+      "yuàn"
+     ],
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "遥远",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "远离",
+       "citations": [
+        "远耻辱也",
+        "近之则不厌"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "近",
+     "pinyin": "jìn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "接近",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "靠近",
+       "citations": [
+        "信近于义",
+        "好学近乎知"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "内",
+     "pinyin": "nèi",
+     "readings": [
+      "nèi",
+      "nà"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "内部、内心",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "通‘纳’",
+       "citations": [
+        "内省不疚",
+        "外本内末"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "外",
+     "pinyin": "wài",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "外部、外面",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "疏远",
+       "citations": [
+        "外其身而身存",
+        "不愿乎其外"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "上",
+     "pinyin": "shàng",
+     "readings": [
+      "shàng",
+      "shǎng",
+      "shang"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "上面、上位",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "向上、崇尚",
+       "citations": [
+        "上老老而民兴孝",
+        "在上位不陵下"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "下",
+     "pinyin": "xià",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "下面、下位",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "向下",
+       "citations": [
+        "在下位不援上",
+        "为天下谿"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "左",
+     "pinyin": "zuǒ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "左边",
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "偏邪",
+       "citations": [
+        "所恶于左毋以交于右"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "右",
+     "pinyin": "yòu",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "右边",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "尊崇、佑助",
+       "citations": [
+        "左右逢源"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "前",
+     "pinyin": "qián",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "前面",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "向前",
+       "citations": [
+        "所恶于前毋以先后",
+        "前后相随"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "大",
+     "pinyin": "dà",
+     "readings": [
+      "dà",
+      "dài"
+     ],
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "大、宏大",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "重视",
+       "citations": [
+        "大哉圣人之道",
+        "故大德必得其位"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "小",
+     "pinyin": "xiǎo",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "小、微小",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "轻视",
+       "citations": [
+        "语小天下莫能破焉",
+        "小德川流"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "多",
+     "pinyin": "duō",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "多、众多",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "称赞",
+       "citations": [
+        "多闻阙疑",
+        "生之者众食之者寡"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "少",
+     "pinyin": "shǎo",
+     "readings": [
+      "shǎo",
+      "shào"
+     ],
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "少、不多",
+       "label": "常用实词"
+      },
+      {
+       "pos": "副词",
+       "def": "稍、略",
+       "citations": [
+        "少私寡欲",
+        "少而好学"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "长",
+     "pinyin": "cháng",
+     "readings": [
+      "cháng",
+      "zhǎng"
+     ],
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "长、长久",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "长者",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "生长",
+       "citations": [
+        "天长地久",
+        "上长长而民兴弟"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "幼",
+     "pinyin": "yòu",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "幼小",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "幼儿",
+       "citations": [
+        "幼吾幼以及人之幼"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "尊",
+     "pinyin": "zūn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "尊贵",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "尊崇",
+       "citations": [
+        "尊贤为大",
+        "尊德性而道问学"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "卑",
+     "pinyin": "bēi",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "卑贱、低下",
+       "citations": [
+        "自卑而尊人"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "贵",
+     "pinyin": "guì",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "尊贵、贵重",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "重视",
+       "citations": [
+        "贵以贱为本",
+        "不贵难得之货"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "贱",
+     "pinyin": "jiàn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "卑贱、低贱",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "轻视",
+       "citations": [
+        "贫与贱是人之所恶也",
+        "贱货而贵德"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "贫",
+     "pinyin": "pín",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "贫穷、贫乏",
+       "citations": [
+        "贫而无谄",
+        "素贫贱行乎贫贱"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "富",
+     "pinyin": "fù",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "富裕、富有",
+       "citations": [
+        "富而好礼者也",
+        "富润屋德润身"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "危",
+     "pinyin": "wēi",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "危险、危急",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "危害",
+       "citations": [
+        "危邦不入",
+        "居安思危"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "存",
+     "pinyin": "cún",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "存在、保存、思念",
+       "citations": [
+        "其存心也",
+        "存乎人者"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "亡",
+     "pinyin": "wáng",
+     "readings": [
+      "wáng",
+      "wú"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "灭亡、逃亡、丢失",
+       "label": "常用实词"
+      },
+      {
+       "def": "通‘无’",
+       "citations": [
+        "国家将亡必有妖孽",
+        "亡人无以为宝"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "得",
+     "pinyin": "dé",
+     "readings": [
+      "dé",
+      "děi",
+      "de"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "得到、获得",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "心得",
+       "citations": [
+        "虑而后能得",
+        "得道多助"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "失",
+     "pinyin": "shī",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "失去、丢失",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "过失",
+       "citations": [
+        "失诸正鹄反求诸其身",
+        "失众则失国"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "成",
+     "pinyin": "chéng",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "成就、完成、形成",
+       "citations": [
+        "成己仁也",
+        "功成而不处"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "败",
+     "pinyin": "bài",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "失败、打败",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "败坏",
+       "citations": [
+        "为者败之执者失之"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "利",
+     "pinyin": "lì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "利益",
+       "label": "多义词"
+      },
+      {
+       "pos": "形容词",
+       "def": "锋利",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "有利于",
+       "citations": [
+        "君子喻于义小人喻于利",
+        "善利万物而不争"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "害",
+     "pinyin": "hài",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "祸害",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "危害",
+       "citations": [
+        "天之道利而不害",
+        "万物并育而不相害"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "福",
+     "pinyin": "fú",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "福气",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "赐福",
+       "citations": [
+        "祸兮福之所倚",
+        "福祸将至"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "祸",
+     "pinyin": "huò",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "灾祸",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "降祸",
+       "citations": [
+        "祸莫大于不知足",
+        "祸福将至善必先知之"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "生",
+     "pinyin": "shēng",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "出生、生长、生存",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "生命",
+       "citations": [
+        "生之者众",
+        "天地所以能长且久者"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "死",
+     "pinyin": "sǐ",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "死亡",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "死地",
+       "citations": [
+        "死而不亡者寿",
+        "民不畏死奈何以死惧之"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "寿",
+     "pinyin": "shòu",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "寿命、长寿",
+       "citations": [
+        "必得其寿",
+        "死而不亡者寿"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "夭",
+     "pinyin": "yāo",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "夭折、短命",
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "茂盛",
+       "citations": [
+        "桃之夭夭"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "荣",
+     "pinyin": "róng",
+     "senses": [
+      {
+       "def": "名词/形容词，荣耀",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "使茂盛",
+       "citations": [
+        "宠辱若惊",
+        "虽有荣观燕处超然"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "辱",
+     "pinyin": "rǔ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "耻辱",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "侮辱",
+       "citations": [
+        "宠辱若惊",
+        "事君数斯辱矣"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "誉",
+     "pinyin": "yù",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "声誉",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "称赞",
+       "citations": [
+        "蚤有誉于天下",
+        "功成事遂百姓皆谓我自然"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "毁",
+     "pinyin": "huǐ",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "毁坏、诽谤",
+       "citations": [
+        "既明且哲以保其身"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "名",
+     "pinyin": "míng",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "名称、名声",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "命名、闻名",
+       "citations": [
+        "名可名非常名",
+        "必得其名"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "报",
+     "pinyin": "bào",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "报答、回报、报告",
+       "citations": [
+        "报怨以德",
+        "士之报礼重"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "应",
+     "pinyin": "yìng",
+     "readings": [
+      "yìng",
+      "yīng"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "应和、响应、应付",
+       "citations": [
+        "不召而自来",
+        "感而应之"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "感",
+     "pinyin": "gǎn",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "感动、感念、感应",
+       "citations": [
+        "感时花溅泪"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "明",
+     "pinyin": "míng",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "明亮、明白",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "彰明",
+       "label": "多义词"
+      },
+      {
+       "pos": "名词",
+       "def": "智慧",
+       "citations": [
+        "明明德",
+        "知常曰明"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "虚",
+     "pinyin": "xū",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "空虚、虚假",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "使空虚",
+       "citations": [
+        "虚其心实其腹",
+        "致虚极守静笃"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "实",
+     "pinyin": "shí",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "充实、实在",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "果实、实情",
+       "citations": [
+        "实其腹",
+        "处其实不居其华"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "真",
+     "pinyin": "zhēn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "真实、真诚",
+       "citations": [
+        "其精甚真",
+        "质真若渝"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "伪",
+     "pinyin": "wěi",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "虚假、伪诈",
+       "citations": [
+        "智慧出有大伪"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "善",
+     "pinyin": "shàn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "善良、美好",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "擅长、善待",
+       "citations": [
+        "上善若水",
+        "善建者不拔"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "美",
+     "pinyin": "měi",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "美好、美丽",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "赞美",
+       "citations": [
+        "天下皆知美之为美",
+        "尽美矣又尽善也"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "丑",
+     "pinyin": "chǒu",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "丑陋、丑恶",
+       "citations": [
+        "美丑之辨"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "文",
+     "pinyin": "wén",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "文采、文章、文化",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "文饰",
+       "citations": [
+        "文质彬彬",
+        "郁郁乎文哉"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "武",
+     "pinyin": "wǔ",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "武力、武功",
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "勇武",
+       "citations": [
+        "文武之道",
+        "慎武不战"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "质",
+     "pinyin": "zhì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "本质、质朴",
+       "label": "多义词"
+      },
+      {
+       "pos": "动词",
+       "def": "质问",
+       "citations": [
+        "文质彬彬然后君子",
+        "质诸鬼神而无疑"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "野",
+     "pinyin": "yě",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "田野",
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "粗野",
+       "citations": [
+        "质胜文则野"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "巧",
+     "pinyin": "qiǎo",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "灵巧、巧妙",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "技巧",
+       "citations": [
+        "巧言令色",
+        "大巧若拙"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "拙",
+     "pinyin": "zhuō",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "笨拙、质朴",
+       "citations": [
+        "大巧若拙"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "刚",
+     "pinyin": "gāng",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "刚强、刚直",
+       "citations": [
+        "柔胜刚弱胜强",
+        "发强刚毅"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "柔",
+     "pinyin": "róu",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "柔弱、温柔",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "怀柔",
+       "citations": [
+        "天下之至柔",
+        "柔远人也"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "强",
+     "pinyin": "qiáng",
+     "readings": [
+      "qiáng",
+      "qiǎng",
+      "jiàng"
+     ],
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "强大",
+       "label": "多义词"
+      },
+      {
+       "pos": "副词",
+       "def": "勉强",
+       "citations": [
+        "弱之胜强",
+        "虽柔必强"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "弱",
+     "pinyin": "ruò",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "弱小、柔弱",
+       "citations": [
+        "弱其志强其骨",
+        "弱者道之用"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "静",
+     "pinyin": "jìng",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "安静、宁静",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "使平静",
+       "citations": [
+        "致虚极守静笃",
+        "定而后能静"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "动",
+     "pinyin": "dòng",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "行动、活动、感动",
+       "citations": [
+        "不动而变无为而成",
+        "动乎四体"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "毅",
+     "pinyin": "yì",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "坚毅、刚毅",
+       "citations": [
+        "发强刚毅足以有执也"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "木",
+     "pinyin": "mù",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "树木、木材",
+       "label": "多义词"
+      },
+      {
+       "pos": "形容词",
+       "def": "质朴迟钝",
+       "citations": [
+        "合抱之木生于毫末",
+        "刚毅木讷"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "讷",
+     "pinyin": "nè",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "言语迟钝，引申为谨慎寡言",
+       "citations": [
+        "君子欲讷于言而敏于行"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "敏",
+     "pinyin": "mǐn",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "敏捷、聪敏、勤勉",
+       "citations": [
+        "敏于事而慎于言",
+        "君子欲讷于言而敏于行"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "惠",
+     "pinyin": "huì",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "恩惠",
+       "label": "常用实词"
+      },
+      {
+       "pos": "形容词",
+       "def": "仁爱",
+       "citations": [
+        "小人怀惠",
+        "惠而不费"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "直",
+     "pinyin": "zhí",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "正直、笔直",
+       "label": "多义词"
+      },
+      {
+       "pos": "副词",
+       "def": "径直、只是",
+       "citations": [
+        "举直错诸枉",
+        "直不百步耳"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "谅",
+     "pinyin": "liàng",
+     "senses": [
+      {
+       "pos": "形容词",
+       "def": "诚信、固执",
+       "citations": [
+        "友直友谅友多闻"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "闻",
+     "pinyin": "wén",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "听见、听说",
+       "label": "多义词"
+      },
+      {
+       "pos": "名词",
+       "def": "名声、见闻",
+       "citations": [
+        "多闻阙疑",
+        "朝闻道夕死可矣"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "识",
+     "pinyin": "shí",
+     "readings": [
+      "shí",
+      "zhì"
+     ],
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "认识、知道、记得",
+       "label": "多义词"
+      },
+      {
+       "pos": "名词",
+       "def": "见识",
+       "citations": [
+        "多识于鸟兽草木之名"
+       ],
+       "label": "多义词"
+      }
+     ]
+    },
+    {
+     "headword": "谋",
+     "pinyin": "móu",
+     "senses": [
+      {
+       "pos": "动词",
+       "def": "谋划、图谋",
+       "label": "常用实词"
+      },
+      {
+       "pos": "名词",
+       "def": "计谋",
+       "citations": [
+        "为人谋而不忠乎",
+        "繟然而善谋"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "略",
+     "pinyin": "lüè",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "谋略、策略",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "夺取",
+       "citations": [
+        "雄才大略"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "策",
+     "pinyin": "cè",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "计策、马鞭",
+       "label": "常用实词"
+      },
+      {
+       "pos": "动词",
+       "def": "鞭策",
+       "citations": [
+        "束手无策"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "术",
+     "pinyin": "shù",
+     "readings": [
+      "shù",
+      "shú",
+      "zhú"
+     ],
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "方法、策略、技艺",
+       "citations": [
+        "治人之术"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "何以",
+     "pinyin": "hé yǐ",
+     "senses": [
+      {
+       "def": "疑问短语，用什么、凭什么、为什么",
+       "citations": [
+        "何以行之哉",
+        "吾何以知天下然哉"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "是以",
+     "pinyin": "shì yǐ",
+     "senses": [
+      {
+       "def": "因此、所以",
+       "citations": [
+        "是以圣人为腹不为目",
+        "是以君子无所不用其极"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "于是",
+     "pinyin": "yú shì",
+     "senses": [
+      {
+       "def": "于是、在这时、在这件事上",
+       "citations": [
+        "于是叹焉"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "至于",
+     "pinyin": "zhì yú",
+     "senses": [
+      {
+       "def": "到了、竟至于",
+       "label": "固定结构"
+      },
+      {
+       "pos": "连词",
+       "def": "引出另一话题",
+       "citations": [
+        "至于用力之久",
+        "及其至也虽圣人有所不知"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "足以",
+     "pinyin": "zú yǐ",
+     "senses": [
+      {
+       "def": "足够用来、完全可以",
+       "citations": [
+        "足以有临也",
+        "其言足以兴"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "然而",
+     "pinyin": "rán ér",
+     "senses": [
+      {
+       "def": "这样却、但是",
+       "citations": [
+        "然而不王者未之有也"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "虽然",
+     "pinyin": "suī rán",
+     "senses": [
+      {
+       "def": "虽然如此、即使这样",
+       "citations": [
+        "虽然犹有未树也"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "若夫",
+     "pinyin": "ruò fū",
+     "senses": [
+      {
+       "def": "发语词，至于、说到",
+       "citations": [
+        "若夫淫雨霏霏"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "其诸",
+     "pinyin": "qí zhū",
+     "senses": [
+      {
+       "def": "表揣测语气，大概、莫非",
+       "citations": [
+        "其诸异乎人之求之与"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "之谓",
+     "pinyin": "zhī wèi",
+     "senses": [
+      {
+       "def": "叫做、说的就是",
+       "citations": [
+        "此之谓絜矩之道",
+        "是谓玄德"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "而已",
+     "pinyin": "ér yǐ",
+     "senses": [
+      {
+       "def": "罢了",
+       "citations": [
+        "夫子之道忠恕而已矣"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "也已",
+     "pinyin": "yě yǐ",
+     "senses": [
+      {
+       "def": "语气词连用，加强肯定",
+       "citations": [
+        "可谓好学也已"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "也夫",
+     "pinyin": "yě fū",
+     "senses": [
+      {
+       "def": "语气词连用，表感叹",
+       "citations": [
+        "道其不行矣夫"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "也哉",
+     "pinyin": "yě zāi",
+     "senses": [
+      {
+       "def": "语气词连用，表反问兼感叹",
+       "citations": [
+        "岂不快哉"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "乎哉",
+     "pinyin": "hū zāi",
+     "senses": [
+      {
+       "def": "语气词连用，表反问",
+       "citations": [
+        "吾岂若使是君为尧舜之君哉"
+       ],
+       "label": "固定结构"
+      }
+     ]
+    },
+    {
+     "headword": "天下",
+     "pinyin": "tiān xià",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "普天之下、国家、天下人",
+       "citations": [
+        "平天下",
+        "天下莫能与之争"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "小人",
+     "pinyin": "xiǎo rén",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "品行低下者",
+       "label": "常用实词"
+      },
+      {
+       "def": "地位低者",
+       "label": "常用实词"
+      },
+      {
+       "def": "谦称",
+       "citations": [
+        "君子喻于义小人喻于利",
+        "小人乐其乐而利其利"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "大人",
+     "pinyin": "dà rén",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "德行高尚者、尊长",
+       "citations": [
+        "大德者必受命"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "庶人",
+     "pinyin": "shù rén",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "平民百姓",
+       "citations": [
+        "自天子以至于庶人"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "大夫",
+     "pinyin": "dà fū",
+     "senses": [
+      {
+       "pos": "名词",
+       "def": "官职名、士大夫阶层",
+       "citations": [
+        "达乎诸侯大夫",
+        "敬大臣也"
+       ],
+       "label": "常用实词"
+      }
+     ]
+    },
+    {
+     "headword": "君子",
+     "pinyin": "jūn zǐ",
+     "senses": [
+      {
+       "def": "有德行的、有修养的人",
+       "label": "常用词"
+      },
+      {
+       "def": "亦指上位者",
+       "citations": [
+        "君子坦荡荡，小人长戚戚"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "中庸",
+     "pinyin": "zhōng yōng",
+     "senses": [
+      {
+       "def": "中正平和、不偏不倚之道",
+       "label": "经典概念"
+      },
+      {
+       "def": "《礼记》篇名",
+       "citations": [
+        "君子中庸，小人反中庸"
+       ],
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "慎独",
+     "pinyin": "shèn dú",
+     "senses": [
+      {
+       "def": "独处时也谨慎自律，不欺暗室",
+       "citations": [
+        "君子必慎其独也"
+       ],
+       "label": "修身概念"
+      }
+     ]
+    },
+    {
+     "headword": "无为",
+     "pinyin": "wú wèi",
+     "senses": [
+      {
+       "def": "道家主张，顺应自然，不强加妄为",
+       "citations": [
+        "无为而无不为"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "自然",
+     "pinyin": "zì rán",
+     "senses": [
+      {
+       "def": "自然而然、本然如此的状态",
+       "citations": [
+        "人法地，地法天，天法道，道法自然"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "格物",
+     "pinyin": "gé wù",
+     "senses": [
+      {
+       "def": "推究事物的原理",
+       "citations": [
+        "致知在格物"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "致知",
+     "pinyin": "zhì zhī",
+     "senses": [
+      {
+       "def": "获得知识、达到穷尽事理之知",
+       "citations": [
+        "致知在格物"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "诚意",
+     "pinyin": "chéng yì",
+     "senses": [
+      {
+       "def": "使心意真诚，不自欺",
+       "citations": [
+        "欲正其心者，先诚其意"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "正心",
+     "pinyin": "zhèng xīn",
+     "senses": [
+      {
+       "def": "使心端正，不受忿懥恐惧等情绪所蔽",
+       "citations": [
+        "欲正其心者，先诚其意"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "修身",
+     "pinyin": "xiū shēn",
+     "senses": [
+      {
+       "def": "修养自身品德",
+       "citations": [
+        "自天子以至于庶人，壹是皆以修身为本"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "齐家",
+     "pinyin": "qí jiā",
+     "senses": [
+      {
+       "def": "治理好自己的家庭宗族",
+       "citations": [
+        "身修而后家齐"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "治国",
+     "pinyin": "zhì guó",
+     "senses": [
+      {
+       "def": "治理国家",
+       "citations": [
+        "家齐而后国治"
+       ],
+       "label": "八条目"
+      }
+     ]
+    },
+    {
+     "headword": "明德",
+     "pinyin": "míng dé",
+     "senses": [
+      {
+       "def": "光明正大的德性",
+       "citations": [
+        "大学之道，在明明德"
+       ],
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "亲民",
+     "pinyin": "qīn mín",
+     "senses": [
+      {
+       "def": "亲近民众",
+       "label": "三纲领"
+      },
+      {
+       "def": "一说‘亲’作‘新’，新民，使民众自新",
+       "citations": [
+        "在亲民，在止于至善"
+       ],
+       "label": "三纲领"
+      }
+     ]
+    },
+    {
+     "headword": "至善",
+     "pinyin": "zhì shàn",
+     "senses": [
+      {
+       "def": "最高的善，极致的善境",
+       "citations": [
+        "在止于至善"
+       ],
+       "label": "三纲领"
+      }
+     ]
+    },
+    {
+     "headword": "絜矩",
+     "pinyin": "jié jǔ",
+     "senses": [
+      {
+       "def": "絜，度量",
+       "label": "经典概念"
+      },
+      {
+       "def": "矩，规则。以己度人、推己及人之道",
+       "citations": [
+        "是以君子有絜矩之道也"
+       ],
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "中和",
+     "pinyin": "zhōng hé",
+     "senses": [
+      {
+       "def": "喜怒哀乐未发谓之中，发而皆中节谓之和",
+       "citations": [
+        "致中和，天地位焉，万物育焉"
+       ],
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "孝悌",
+     "senses": [
+      {
+       "def": "孝顺父母，敬爱兄长",
+       "citations": [
+        "孝悌也者，其为仁之本与"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "忠信",
+     "pinyin": "zhōng xìn",
+     "senses": [
+      {
+       "def": "忠诚守信",
+       "citations": [
+        "主忠信，无友不如己者"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "仁义",
+     "pinyin": "rén yì",
+     "senses": [
+      {
+       "def": "仁爱和道义，儒家核心道德",
+       "citations": [
+        "仁义礼智，非由外铄我也"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "礼乐",
+     "pinyin": "lǐ lè",
+     "senses": [
+      {
+       "def": "礼仪与音乐，儒家教化之具",
+       "citations": [
+        "人而不仁，如礼何"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "天命",
+     "pinyin": "tiān mìng",
+     "senses": [
+      {
+       "def": "上天的意志与赋予的使命",
+       "label": "经典概念"
+      },
+      {
+       "def": "亦指自然规律",
+       "citations": [
+        "五十而知天命"
+       ],
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "天性",
+     "pinyin": "tiān xìng",
+     "senses": [
+      {
+       "def": "人天生的本性",
+       "citations": [
+        "天命之谓性"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "率性",
+     "pinyin": "lǜ xìng",
+     "senses": [
+      {
+       "def": "顺着本性而行",
+       "citations": [
+        "率性之谓道"
+       ],
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "修道",
+     "pinyin": "xiū dào",
+     "senses": [
+      {
+       "def": "修明、整饬人伦道义",
+       "citations": [
+        "修道之谓教"
+       ],
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "教化",
+     "pinyin": "jiào huà",
+     "senses": [
+      {
+       "def": "教育感化",
+       "citations": [
+        "修道之谓教"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "玄德",
+     "pinyin": "xuán dé",
+     "senses": [
+      {
+       "def": "幽深玄妙的德性",
+       "citations": [
+        "生而不有，为而不恃，长而不宰，是谓玄德"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "道德",
+     "pinyin": "dào dé",
+     "senses": [
+      {
+       "def": "道与德",
+       "label": "经典概念"
+      },
+      {
+       "def": "合称为人所应遵循的规范",
+       "citations": [
+        "道生之，德畜之"
+       ],
+       "label": "经典概念"
+      }
+     ]
+    },
+    {
+     "headword": "上善",
+     "pinyin": "shàng shàn",
+     "senses": [
+      {
+       "def": "最高的善，最高的德行",
+       "citations": [
+        "上善若水"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "若水",
+     "pinyin": "ruò shuǐ",
+     "senses": [
+      {
+       "def": "如水一般利万物而不争",
+       "citations": [
+        "上善若水，水善利万物而不争"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "万物",
+     "pinyin": "wàn wù",
+     "senses": [
+      {
+       "def": "宇宙间的一切事物",
+       "citations": [
+        "万物作焉而不辞"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "天地",
+     "pinyin": "tiān dì",
+     "senses": [
+      {
+       "def": "天与地，自然界",
+       "citations": [
+        "天地不仁，以万物为刍狗"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "阴阳",
+     "pinyin": "yīn yáng",
+     "senses": [
+      {
+       "def": "中国哲学中对立统一的两种气",
+       "citations": [
+        "万物负阴而抱阳，冲气以为和"
+       ],
+       "label": "哲学概念"
+      }
+     ]
+    },
+    {
+     "headword": "玄牝",
+     "pinyin": "xuán pìn",
+     "senses": [
+      {
+       "def": "道之别名，喻深奥的生育万物之门",
+       "citations": [
+        "谷神不死，是谓玄牝"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "谷神",
+     "pinyin": "gǔ shén",
+     "senses": [
+      {
+       "def": "道体虚空幽深、生生不息之喻",
+       "citations": [
+        "谷神不死，是谓玄牝"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "刍狗",
+     "pinyin": "chú gǒu",
+     "senses": [
+      {
+       "def": "祭祀用的草扎之狗，喻无情感、顺自然",
+       "citations": [
+        "天地不仁，以万物为刍狗"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "恍惚",
+     "pinyin": "huǎng hū",
+     "senses": [
+      {
+       "def": "道之存在若有若无、似有似无的状态",
+       "citations": [
+        "是谓无状之状，无物之象，是谓惚恍"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "希言",
+     "pinyin": "xī yán",
+     "senses": [
+      {
+       "def": "少言",
+       "label": "道家概念"
+      },
+      {
+       "def": "以少言为贵",
+       "citations": [
+        "希言自然"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "贵身",
+     "pinyin": "guì shēn",
+     "senses": [
+      {
+       "def": "以身为贵，重视自身修养",
+       "citations": [
+        "贵以身为天下，若可寄天下"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "知足",
+     "pinyin": "zhī zú",
+     "senses": [
+      {
+       "def": "知道满足，安于所已有",
+       "citations": [
+        "知足者富"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "知止",
+     "pinyin": "zhī zhǐ",
+     "senses": [
+      {
+       "def": "知道适可而止",
+       "citations": [
+        "知止不殆，可以长久"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "不争",
+     "pinyin": "bù zhēng",
+     "senses": [
+      {
+       "def": "不与人争，顺自然而行",
+       "citations": [
+        "夫唯不争，故天下莫能与之争"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "守柔",
+     "pinyin": "shǒu róu",
+     "senses": [
+      {
+       "def": "持守柔弱之道",
+       "citations": [
+        "守柔曰强"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "见素",
+     "pinyin": "jiàn sù",
+     "senses": [
+      {
+       "def": "显现本色，纯朴无华",
+       "citations": [
+        "见素抱朴，少私寡欲"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "抱朴",
+     "pinyin": "bào pǔ",
+     "senses": [
+      {
+       "def": "持守本真质朴",
+       "citations": [
+        "见素抱朴，少私寡欲"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "寡欲",
+     "pinyin": "guǎ yù",
+     "senses": [
+      {
+       "def": "减少私欲",
+       "citations": [
+        "见素抱朴，少私寡欲"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "大成",
+     "pinyin": "dà chéng",
+     "senses": [
+      {
+       "def": "极大的成就",
+       "label": "道家概念"
+      },
+      {
+       "def": "亦指大德之人",
+       "citations": [
+        "大成若缺，其用不弊"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "大盈",
+     "pinyin": "dà yíng",
+     "senses": [
+      {
+       "def": "最充实的东西",
+       "citations": [
+        "大盈若冲，其用不穷"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "大直",
+     "pinyin": "dà zhí",
+     "senses": [
+      {
+       "def": "最正直的东西，看似弯曲",
+       "citations": [
+        "大直若屈，大巧若拙，大辩若讷"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "大巧",
+     "pinyin": "dà qiǎo",
+     "senses": [
+      {
+       "def": "最高的巧，看似笨拙",
+       "citations": [
+        "大直若屈，大巧若拙"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "大辩",
+     "pinyin": "dà biàn",
+     "senses": [
+      {
+       "def": "最高的辩才，看似木讷",
+       "citations": [
+        "大辩若讷"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "玄同",
+     "pinyin": "xuán tóng",
+     "senses": [
+      {
+       "def": "混同玄妙之境界，消除差别对立",
+       "citations": [
+        "和其光，同其尘，是谓玄同"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "长生",
+     "pinyin": "cháng shēng",
+     "senses": [
+      {
+       "def": "长久存在、寿命绵长",
+       "citations": [
+        "天地所以能长且久者，以其不自生，故能长生"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "忠恕",
+     "pinyin": "zhōng shù",
+     "senses": [
+      {
+       "def": "尽己之心为忠，推己及人为恕",
+       "citations": [
+        "夫子之道，忠恕而已矣"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "三省",
+     "pinyin": "sān shěng",
+     "senses": [
+      {
+       "def": "多次反省自己",
+       "citations": [
+        "吾日三省吾身"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "为政",
+     "pinyin": "wèi zhèng",
+     "senses": [
+      {
+       "def": "治理政事",
+       "citations": [
+        "为政以德"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "北辰",
+     "pinyin": "běi chén",
+     "senses": [
+      {
+       "def": "北极星，喻德政之君",
+       "citations": [
+        "为政以德，譬如北辰，居其所而众星共之"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "八佾",
+     "pinyin": "bā yì",
+     "senses": [
+      {
+       "def": "古代天子用的一种乐舞队列",
+       "label": "礼乐制度"
+      },
+      {
+       "def": "《论语》篇名",
+       "citations": [
+        "八佾舞于庭，是可忍也，孰不可忍也"
+       ],
+       "label": "礼乐制度"
+      }
+     ]
+    },
+    {
+     "headword": "雍彻",
+     "pinyin": "yōng chè",
+     "senses": [
+      {
+       "def": "以《雍》诗撤祭之礼，喻礼制的僭越",
+       "citations": [
+        "相维辟公，天子穆穆，奚取于三家之堂"
+       ],
+       "label": "礼乐制度"
+      }
+     ]
+    },
+    {
+     "headword": "恻隐",
+     "senses": [
+      {
+       "def": "同情怜悯之心",
+       "citations": [
+        "恻隐之心，仁之端也"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "羞恶",
+     "pinyin": "xiū è",
+     "senses": [
+      {
+       "def": "羞耻憎恶之心",
+       "citations": [
+        "羞恶之心，义之端也"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "辞让",
+     "pinyin": "cí ràng",
+     "senses": [
+      {
+       "def": "谦逊推让之心",
+       "citations": [
+        "辞让之心，礼之端也"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "是非",
+     "pinyin": "shì fēi",
+     "senses": [
+      {
+       "def": "明辨是非之心",
+       "citations": [
+        "是非之心，智之端也"
+       ],
+       "label": "儒家伦理"
+      }
+     ]
+    },
+    {
+     "headword": "浩然",
+     "pinyin": "hào rán",
+     "senses": [
+      {
+       "def": "盛大刚正之貌",
+       "citations": [
+        "我善养吾浩然之气"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "知言",
+     "pinyin": "zhī yán",
+     "senses": [
+      {
+       "def": "善于辨析言辞之是非邪正",
+       "citations": [
+        "我知言，我善养吾浩然之气"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "性善",
+     "pinyin": "xìng shàn",
+     "senses": [
+      {
+       "def": "人性本善之说",
+       "citations": [
+        "人性之善也，犹水之就下也"
+       ],
+       "label": "哲学概念"
+      }
+     ]
+    },
+    {
+     "headword": "良知",
+     "pinyin": "liáng zhī",
+     "senses": [
+      {
+       "def": "与生俱来的善知善能",
+       "citations": [
+        "人之所不学而能者，其良能也"
+       ],
+       "label": "哲学概念"
+      }
+     ]
+    },
+    {
+     "headword": "良能",
+     "pinyin": "liáng néng",
+     "senses": [
+      {
+       "def": "不学而能的先天本能",
+       "citations": [
+        "所不虑而知者，其良知也"
+       ],
+       "label": "哲学概念"
+      }
+     ]
+    },
+    {
+     "headword": "独善",
+     "pinyin": "dú shàn",
+     "senses": [
+      {
+       "def": "独自修养完善自身",
+       "citations": [
+        "穷则独善其身，达则兼善天下"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "兼善",
+     "pinyin": "jiān shàn",
+     "senses": [
+      {
+       "def": "使天下人都受益、得善",
+       "citations": [
+        "穷则独善其身，达则兼善天下"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "王道",
+     "pinyin": "wáng dào",
+     "senses": [
+      {
+       "def": "以仁义治天下的政治主张",
+       "citations": [
+        "养生丧死无憾，王道之始也"
+       ],
+       "label": "政治概念"
+      }
+     ]
+    },
+    {
+     "headword": "霸道",
+     "pinyin": "bà dào",
+     "senses": [
+      {
+       "def": "凭武力权术治国的政治主张",
+       "citations": [
+        "以力假仁者霸"
+       ],
+       "label": "政治概念"
+      }
+     ]
+    },
+    {
+     "headword": "恒产",
+     "pinyin": "héng chǎn",
+     "senses": [
+      {
+       "def": "固定的产业、稳定的收入",
+       "citations": [
+        "民之为道也，有恒产者有恒心"
+       ],
+       "label": "政治概念"
+      }
+     ]
+    },
+    {
+     "headword": "恒心",
+     "pinyin": "héng xīn",
+     "senses": [
+      {
+       "def": "坚定的善心与操守",
+       "citations": [
+        "无恒产而有恒心者，惟士为能"
+       ],
+       "label": "政治概念"
+      }
+     ]
+    },
+    {
+     "headword": "天时",
+     "pinyin": "tiān shí",
+     "senses": [
+      {
+       "def": "自然气候时机",
+       "citations": [
+        "天时不如地利，地利不如人和"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "地利",
+     "pinyin": "dì lì",
+     "senses": [
+      {
+       "def": "地理上的有利条件",
+       "citations": [
+        "天时不如地利，地利不如人和"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "人和",
+     "pinyin": "rén hé",
+     "senses": [
+      {
+       "def": "人心归向、团结和睦",
+       "citations": [
+        "天时不如地利，地利不如人和"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "寡助",
+     "pinyin": "guǎ zhù",
+     "senses": [
+      {
+       "def": "帮助他的人少",
+       "citations": [
+        "失道者寡助"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "逍遥",
+     "senses": [
+      {
+       "def": "自由自在、无拘无束",
+       "citations": [
+        "彷徨乎无为其侧，逍遥乎寝卧其下"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "齐物",
+     "pinyin": "qí wù",
+     "senses": [
+      {
+       "def": "齐同万物，消除差别对立",
+       "citations": [
+        "天地与我并生，而万物与我为一"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "坐忘",
+     "pinyin": "zuò wàng",
+     "senses": [
+      {
+       "def": "静坐而忘掉一切物我差别",
+       "citations": [
+        "堕肢体，黜聪明，离形去知，同于大通，此谓坐忘"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "心斋",
+     "pinyin": "xīn zhāi",
+     "senses": [
+      {
+       "def": "排除杂念、使心虚静专一",
+       "citations": [
+        "唯道集虚。虚者，心斋也"
+       ],
+       "label": "道家概念"
+      }
+     ]
+    },
+    {
+     "headword": "大同",
+     "pinyin": "dà tóng",
+     "senses": [
+      {
+       "def": "天下为公的理想社会",
+       "citations": [
+        "大道之行也，天下为公"
+       ],
+       "label": "政治理想"
+      }
+     ]
+    },
+    {
+     "headword": "小康",
+     "pinyin": "xiǎo kāng",
+     "senses": [
+      {
+       "def": "家给人足、礼义修明的社会阶段",
+       "citations": [
+        "今大道既隐，天下为家，是谓小康"
+       ],
+       "label": "政治理想"
+      }
+     ]
+    },
+    {
+     "headword": "礼运",
+     "pinyin": "lǐ yùn",
+     "senses": [
+      {
+       "def": "礼的运行",
+       "label": "礼乐制度"
+      },
+      {
+       "def": "《礼记》篇名",
+       "citations": [
+        "故圣人以礼示之，故天下国家可得而正也"
+       ],
+       "label": "礼乐制度"
+      }
+     ]
+    },
+    {
+     "headword": "王化",
+     "pinyin": "wáng huà",
+     "senses": [
+      {
+       "def": "王者的德化教民",
+       "citations": [
+        "王道之始也"
+       ],
+       "label": "政治概念"
+      }
+     ]
+    },
+    {
+     "headword": "风雅",
+     "pinyin": "fēng yǎ",
+     "senses": [
+      {
+       "def": "《诗经》中国风、大雅小雅",
+       "label": "文学概念"
+      },
+      {
+       "def": "引申为文雅",
+       "citations": [
+        "风雅颂，赋比兴"
+       ],
+       "label": "文学概念"
+      }
+     ]
+    },
+    {
+     "headword": "比兴",
+     "pinyin": "bǐ xīng",
+     "senses": [
+      {
+       "def": "诗歌创作中的比喻起兴手法",
+       "citations": [
+        "赋比兴"
+       ],
+       "label": "文学概念"
+      }
+     ]
+    },
+    {
+     "headword": "知困",
+     "pinyin": "zhī kùn",
+     "senses": [
+      {
+       "def": "知道自己的不足与困惑",
+       "citations": [
+        "教然后知困"
+       ],
+       "label": "常用词"
+      }
+     ]
+    },
+    {
+     "headword": "变通",
+     "pinyin": "biàn tōng",
+     "senses": [
+      {
+       "def": "变则通达、灵活应变",
+       "citations": [
+        "穷则变，变则通"
+       ],
+       "label": "易学概念"
+      }
+     ]
+    },
+    {
+     "headword": "耳顺",
+     "pinyin": "ěr shùn",
+     "senses": [
+      {
+       "def": "六十岁能听进各种不同意见",
+       "citations": [
+        "六十而耳顺"
+       ],
+       "label": "经典名句"
+      }
+     ]
+    },
+    {
+     "headword": "抱一",
+     "pinyin": "bào yī",
+     "senses": [
+      {
+       "def": "守持道这一根本",
+       "citations": [
+        "载营魄抱一，能无离乎"
+       ],
+       "label": "道家名句"
+      }
+     ]
+    },
+    {
+     "headword": "归根",
+     "pinyin": "guī gēn",
+     "senses": [
+      {
+       "def": "回归本根、返归本源",
+       "citations": [
+        "夫物芸芸，各复归其根"
+       ],
+       "label": "道家名句"
+      }
+     ]
+    },
+    {
+     "headword": "复命",
+     "pinyin": "fù mìng",
+     "senses": [
+      {
+       "def": "回归本命、复归本性",
+       "citations": [
+        "归根曰静，静曰复命"
+       ],
+       "label": "道家名句"
+      }
+     ]
+    },
+    {
+     "headword": "知常",
+     "pinyin": "zhī cháng",
+     "senses": [
+      {
+       "def": "认识恒常不变的规律",
+       "citations": [
+        "知常曰明。不知常，妄作凶"
+       ],
+       "label": "道家名句"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

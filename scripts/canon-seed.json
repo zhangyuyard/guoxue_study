@@ -1,0 +1,37 @@
+{
+  "_comment": "canon 本地种子：用于校补权威开源语料（北师大通假字资源库）未覆盖、但经典中明确且可考据的通假/读音。所有条目须注明可溯来源，绝不臆造。优先级低于 canon 主库命中（同 work_id+char 时主库在前，种子在后，去重保留首条）。",
+  "tongjia": [
+    {
+      "work_id": "lunyu",
+      "char": "说",
+      "original": "悦",
+      "note": "同“悦”，喜悦。如《论语·学而》“学而时习之，不亦说乎”。《论语集注》（朱熹）：“说，音悦，欣喜也。”",
+      "sources": ["《论语集注》（朱熹）·《论语》"],
+      "verified": true
+    },
+    {
+      "work_id": "lunyu-xueer",
+      "char": "说",
+      "original": "悦",
+      "note": "同“悦”，喜悦。“不亦说乎”即“不亦悦乎”。",
+      "sources": ["《论语集注》（朱熹）·《论语·学而》"],
+      "verified": true
+    }
+  ],
+  "reading": [
+    {
+      "work_id": "lunyu",
+      "char": "说",
+      "reading": "yuè",
+      "sources": ["《论语集注》（朱熹）·《论语》"],
+      "verified": true
+    },
+    {
+      "work_id": "lunyu-xueer",
+      "char": "说",
+      "reading": "yuè",
+      "sources": ["《论语集注》（朱熹）·《论语·学而》"],
+      "verified": true
+    }
+  ]
+}

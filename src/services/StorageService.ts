@@ -1,0 +1,689 @@
+/**
+ * 本地存储服务（StorageService）
+ * 基于 react-native-quick-sqlite 的同步 CRUD：
+ *   - highlights 划线表
+ *   - notes 笔记表
+ *   - bookmarks 收藏表
+ *   - recitation_progress 背诵进度表
+ *   - segments_fts FTS5 全文搜索虚拟表
+ * 时间戳统一 ISO 8601 UTC；主键 TEXT 类型。
+ */
+import type {
+  Bookmark,
+  BookmarkType,
+  Highlight,
+  Note,
+  RecitationMode,
+  RecitationProgress,
+  ServiceResult,
+} from '@/types';
+
+import { TextLibraryService } from '@/services/TextLibraryService';
+import { open } from 'react-native-quick-sqlite';
+
+type DB = ReturnType<typeof open>;
+
+/** 数据库名（SQLCipher 加密开启） */
+const DB_NAME = 'guoxue.db';
+
+/** 数据库单例（惰性初始化） */
+let db: DB | null = null;
+
+// ---------- 工具函数 ----------
+
+/** 生成带前缀的 ID */
+export function genId(prefix: string): string {
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `${prefix}-${ts}-${rand}`;
+}
+
+/** 当前时间（ISO 8601 UTC） */
+export function nowISO(): string {
+  return new Date().toISOString();
+}
+
+/** 背诵进度记录 ID：bookId:chapterId:mode */
+export function recitationKey(
+  bookId: string,
+  chapterId: string,
+  mode: RecitationMode,
+): string {
+  return `${bookId}:${chapterId}:${mode}`;
+}
+
+// ---------- 数据库初始化 ----------
+
+/** 获取数据库实例（不存在则打开并建表） */
+function getDb(): DB | null {
+  if (db) {
+    return db;
+  }
+  try {
+    db = open({ name: DB_NAME });
+    return db;
+  } catch (e) {
+    db = null;
+    return null;
+  }
+}
+
+/**
+ * 查询辅助：quick-sqlite 8.x 连接对象无 select 方法，
+ * 统一经 execute 执行并取 rows._array 作为行数组。
+ * 执行失败时抛出异常，由调用方外层 try-catch 统一捕获。
+ */
+function selectRows(
+  instance: DB,
+  sql: string,
+  params: (string | number)[] = [],
+): Record<string, unknown>[] {
+  const res = instance.execute(sql, params);
+  return (res.rows?._array ?? []) as Record<string, unknown>[];
+}
+
+const CREATE_HIGHLIGHTS = `
+  CREATE TABLE IF NOT EXISTS highlights (
+    id TEXT PRIMARY KEY NOT NULL,
+    book_id TEXT NOT NULL,
+    chapter_id TEXT NOT NULL,
+    segment_id TEXT NOT NULL,
+    start_offset INTEGER NOT NULL,
+    end_offset INTEGER NOT NULL,
+    color TEXT NOT NULL,
+    text TEXT NOT NULL,
+    note_id TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_highlights_segment ON highlights (segment_id);
+  CREATE INDEX IF NOT EXISTS idx_highlights_chapter ON highlights (chapter_id);
+`;
+
+const CREATE_NOTES = `
+  CREATE TABLE IF NOT EXISTS notes (
+    id TEXT PRIMARY KEY NOT NULL,
+    book_id TEXT NOT NULL,
+    chapter_id TEXT NOT NULL,
+    segment_id TEXT NOT NULL,
+    start_offset INTEGER NOT NULL,
+    end_offset INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    highlight_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_notes_segment ON notes (segment_id);
+  CREATE INDEX IF NOT EXISTS idx_notes_chapter ON notes (chapter_id);
+`;
+
+const CREATE_BOOKMARKS = `
+  CREATE TABLE IF NOT EXISTS bookmarks (
+    id TEXT PRIMARY KEY NOT NULL,
+    type TEXT NOT NULL,
+    book_id TEXT,
+    chapter_id TEXT,
+    segment_id TEXT,
+    text TEXT,
+    tags_json TEXT NOT NULL DEFAULT '[]',
+    note TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_bookmarks_type ON bookmarks (type);
+`;
+
+const CREATE_RECITATION = `
+  CREATE TABLE IF NOT EXISTS recitation_progress (
+    id TEXT PRIMARY KEY NOT NULL,
+    book_id TEXT NOT NULL,
+    chapter_id TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL,
+    progress INTEGER NOT NULL DEFAULT 0,
+    last_practiced_at TEXT
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_recitation_unique
+    ON recitation_progress (book_id, chapter_id, mode);
+`;
+
+const CREATE_FTS = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS segments_fts USING fts5(
+    segment_id UNINDEXED,
+    book_id UNINDEXED,
+    chapter_id UNINDEXED,
+    book_title UNINDEXED,
+    chapter_title UNINDEXED,
+    text,
+    tokenize = 'unicode61'
+  );
+`;
+
+/** 初始化数据库：建表 + 全文索引 */
+export function initDatabase(): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 初始化失败：无法打开数据库' };
+  }
+  try {
+    // 执行失败会抛出异常，由 catch 统一捕获
+    for (const sql of [CREATE_HIGHLIGHTS, CREATE_NOTES, CREATE_BOOKMARKS, CREATE_RECITATION, CREATE_FTS]) {
+      instance.execute(sql);
+    }
+    // 旧库迁移（P1-12）：bookmarks 补 note 列；列已存在时 ALTER 会抛错，忽略即可
+    try {
+      instance.execute('ALTER TABLE bookmarks ADD COLUMN note TEXT');
+    } catch {
+      // 列已存在：静默跳过
+    }
+    // 旧库迁移（P2-07 间隔复习）：recitation_progress 补 completed_at /
+    // review_level / next_due_at 三列；列已存在时静默跳过
+    for (const sql of [
+      'ALTER TABLE recitation_progress ADD COLUMN completed_at TEXT',
+      'ALTER TABLE recitation_progress ADD COLUMN review_level INTEGER',
+      'ALTER TABLE recitation_progress ADD COLUMN next_due_at TEXT',
+    ]) {
+      try {
+        instance.execute(sql);
+      } catch {
+        // 列已存在：静默跳过
+      }
+    }
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `建表失败：${(e as Error).message}` };
+  }
+}
+
+/** 将全部经典文本段落写入 FTS5 索引（幂等，可重复调用） */
+export function ensureFtsIndex(): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    // 确保表存在
+    const initRes = initDatabase();
+    if (!initRes.success) {
+      return initRes;
+    }
+    const segRes = TextLibraryService.allSegments();
+    if (!segRes.success || !segRes.data) {
+      return { success: false, error: '无法读取文本库' };
+    }
+    for (const book of TextLibraryService.getBooks().data ?? []) {
+      for (const chapter of book.chapters) {
+        for (const seg of chapter.segments) {
+          instance.execute(
+            `INSERT OR REPLACE INTO segments_fts
+             (segment_id, book_id, chapter_id, book_title, chapter_title, text)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [seg.id, book.id, chapter.id, book.title, chapter.title, seg.text],
+          );
+        }
+      }
+    }
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+// ---------- 划线 ----------
+
+function rowToHighlight(row: Record<string, unknown>): Highlight {
+  return {
+    id: String(row.id),
+    bookId: String(row.book_id),
+    chapterId: String(row.chapter_id),
+    segmentId: String(row.segment_id),
+    startOffset: Number(row.start_offset),
+    endOffset: Number(row.end_offset),
+    color: String(row.color) as Highlight['color'],
+    text: String(row.text),
+    noteId: row.note_id ? String(row.note_id) : undefined,
+    createdAt: String(row.created_at),
+  };
+}
+
+export function saveHighlight(h: Highlight): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    instance.execute(
+      `INSERT OR REPLACE INTO highlights
+       (id, book_id, chapter_id, segment_id, start_offset, end_offset, color, text, note_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        h.id,
+        h.bookId,
+        h.chapterId,
+        h.segmentId,
+        h.startOffset,
+        h.endOffset,
+        h.color,
+        h.text,
+        h.noteId ?? null,
+        h.createdAt,
+      ],
+    );
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `保存划线失败：${(e as Error).message}` };
+  }
+}
+
+/** 获取划线列表（可按 bookId / chapterId 过滤） */
+export function getHighlights(
+  bookId?: string,
+  chapterId?: string,
+): ServiceResult<Highlight[]> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    let sql = 'SELECT * FROM highlights WHERE 1 = 1';
+    const params: (string | number)[] = [];
+    if (bookId) {
+      sql += ' AND book_id = ?';
+      params.push(bookId);
+    }
+    if (chapterId) {
+      sql += ' AND chapter_id = ?';
+      params.push(chapterId);
+    }
+    sql += ' ORDER BY created_at DESC';
+    const rows = selectRows(instance, sql, params);
+    return {
+      success: true,
+      data: rows.map((r) => rowToHighlight(r)),
+    };
+  } catch (e) {
+    return { success: false, error: `查询划线失败：${(e as Error).message}` };
+  }
+}
+
+export function deleteHighlight(id: string): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    instance.execute('DELETE FROM highlights WHERE id = ?', [id]);
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `删除划线失败：${(e as Error).message}` };
+  }
+}
+
+// ---------- 笔记 ----------
+
+function rowToNote(row: Record<string, unknown>): Note {
+  return {
+    id: String(row.id),
+    bookId: String(row.book_id),
+    chapterId: String(row.chapter_id),
+    segmentId: String(row.segment_id),
+    startOffset: Number(row.start_offset),
+    endOffset: Number(row.end_offset),
+    content: String(row.content),
+    highlightId: row.highlight_id ? String(row.highlight_id) : undefined,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+export function saveNote(n: Note): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    instance.execute(
+      `INSERT OR REPLACE INTO notes
+       (id, book_id, chapter_id, segment_id, start_offset, end_offset, content, highlight_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        n.id,
+        n.bookId,
+        n.chapterId,
+        n.segmentId,
+        n.startOffset,
+        n.endOffset,
+        n.content,
+        n.highlightId ?? null,
+        n.createdAt,
+        n.updatedAt,
+      ],
+    );
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `保存笔记失败：${(e as Error).message}` };
+  }
+}
+
+/** 更新笔记内容 */
+export function updateNote(id: string, content: string): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    instance.execute(
+      'UPDATE notes SET content = ?, updated_at = ? WHERE id = ?',
+      [content, nowISO(), id],
+    );
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `更新笔记失败：${(e as Error).message}` };
+  }
+}
+
+/** 获取笔记列表（可按 bookId / chapterId 过滤） */
+export function getNotes(
+  bookId?: string,
+  chapterId?: string,
+): ServiceResult<Note[]> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    let sql = 'SELECT * FROM notes WHERE 1 = 1';
+    const params: (string | number)[] = [];
+    if (bookId) {
+      sql += ' AND book_id = ?';
+      params.push(bookId);
+    }
+    if (chapterId) {
+      sql += ' AND chapter_id = ?';
+      params.push(chapterId);
+    }
+    sql += ' ORDER BY updated_at DESC';
+    const rows = selectRows(instance, sql, params);
+    return {
+      success: true,
+      data: rows.map((r) => rowToNote(r)),
+    };
+  } catch (e) {
+    return { success: false, error: `查询笔记失败：${(e as Error).message}` };
+  }
+}
+
+export function deleteNote(id: string): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    instance.execute('DELETE FROM notes WHERE id = ?', [id]);
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `删除笔记失败：${(e as Error).message}` };
+  }
+}
+
+// ---------- 收藏 ----------
+
+function rowToBookmark(row: Record<string, unknown>): Bookmark {
+  let tags: string[] = [];
+  try {
+    const parsed = JSON.parse(String(row.tags_json ?? '[]'));
+    if (Array.isArray(parsed)) {
+      tags = parsed.map(String);
+    }
+  } catch {
+    tags = [];
+  }
+  return {
+    id: String(row.id),
+    type: String(row.type) as BookmarkType,
+    bookId: row.book_id ? String(row.book_id) : undefined,
+    chapterId: row.chapter_id ? String(row.chapter_id) : undefined,
+    segmentId: row.segment_id ? String(row.segment_id) : undefined,
+    text: row.text ? String(row.text) : undefined,
+    tags,
+    note: row.note ? String(row.note) : undefined,
+    createdAt: String(row.created_at),
+  };
+}
+
+export function saveBookmark(b: Bookmark): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    instance.execute(
+      `INSERT OR REPLACE INTO bookmarks
+       (id, type, book_id, chapter_id, segment_id, text, tags_json, note, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        b.id,
+        b.type,
+        b.bookId ?? null,
+        b.chapterId ?? null,
+        b.segmentId ?? null,
+        b.text ?? null,
+        JSON.stringify(b.tags ?? []),
+        b.note ?? null,
+        b.createdAt,
+      ],
+    );
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `保存收藏失败：${(e as Error).message}` };
+  }
+}
+
+/** 获取收藏列表（可按 type 过滤） */
+export function getBookmarks(type?: BookmarkType): ServiceResult<Bookmark[]> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    let sql = 'SELECT * FROM bookmarks';
+    const params: (string | number)[] = [];
+    if (type) {
+      sql += ' WHERE type = ?';
+      params.push(type);
+    }
+    sql += ' ORDER BY created_at DESC';
+    const rows = selectRows(instance, sql, params);
+    return {
+      success: true,
+      data: rows.map((r) => rowToBookmark(r)),
+    };
+  } catch (e) {
+    return { success: false, error: `查询收藏失败：${(e as Error).message}` };
+  }
+}
+
+/** 更新收藏标签 */
+export function updateBookmarkTags(id: string, tags: string[]): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    instance.execute(
+      'UPDATE bookmarks SET tags_json = ? WHERE id = ?',
+      [JSON.stringify(tags ?? []), id],
+    );
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `更新收藏标签失败：${(e as Error).message}` };
+  }
+}
+
+/** 更新收藏标签与备注（P1-12 收藏编辑弹层保存入口） */
+export function updateBookmarkMeta(
+  id: string,
+  tags: string[],
+  note?: string,
+): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    instance.execute(
+      'UPDATE bookmarks SET tags_json = ?, note = ? WHERE id = ?',
+      [JSON.stringify(tags ?? []), note ?? null, id],
+    );
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `更新收藏失败：${(e as Error).message}` };
+  }
+}
+
+export function deleteBookmark(id: string): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    instance.execute('DELETE FROM bookmarks WHERE id = ?', [id]);
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `删除收藏失败：${(e as Error).message}` };
+  }
+}
+
+// ---------- 背诵进度 ----------
+
+function rowToRecitation(row: Record<string, unknown>): RecitationProgress {
+  return {
+    id: String(row.id),
+    bookId: String(row.book_id),
+    chapterId: String(row.chapter_id),
+    mode: String(row.mode) as RecitationMode,
+    status: String(row.status) as RecitationProgress['status'],
+    progress: Number(row.progress),
+    lastPracticedAt: row.last_practiced_at
+      ? String(row.last_practiced_at)
+      : undefined,
+    // P2-07 复习调度字段：旧数据（列不存在 / 值为 NULL）保持 undefined
+    completedAt: row.completed_at ? String(row.completed_at) : undefined,
+    reviewLevel:
+      row.review_level === null || row.review_level === undefined
+        ? undefined
+        : Number(row.review_level),
+    nextDueAt: row.next_due_at ? String(row.next_due_at) : undefined,
+  };
+}
+
+/** 保存背诵进度（按 bookId:chapterId:mode 幂等 upsert） */
+export function saveRecitation(r: RecitationProgress): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    const id = recitationKey(r.bookId, r.chapterId, r.mode);
+    instance.execute(
+      `INSERT OR REPLACE INTO recitation_progress
+       (id, book_id, chapter_id, mode, status, progress, last_practiced_at,
+        completed_at, review_level, next_due_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        r.bookId,
+        r.chapterId,
+        r.mode,
+        r.status,
+        r.progress,
+        r.lastPracticedAt ?? null,
+        r.completedAt ?? null,
+        r.reviewLevel ?? null,
+        r.nextDueAt ?? null,
+      ],
+    );
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `保存背诵进度失败：${(e as Error).message}` };
+  }
+}
+
+/** 获取某章节的背诵进度 */
+export function getRecitation(
+  bookId: string,
+  chapterId: string,
+  mode: RecitationMode,
+): ServiceResult<RecitationProgress | null> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    const id = recitationKey(bookId, chapterId, mode);
+    const rows = selectRows(instance, 'SELECT * FROM recitation_progress WHERE id = ?', [id]);
+    const row = rows[0];
+    return {
+      success: true,
+      data: row ? rowToRecitation(row) : null,
+    };
+  } catch (e) {
+    return { success: false, error: `查询背诵进度失败：${(e as Error).message}` };
+  }
+}
+
+/** 获取全部背诵进度 */
+export function getRecitationList(): ServiceResult<RecitationProgress[]> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    const rows = selectRows(
+      instance,
+      'SELECT * FROM recitation_progress ORDER BY last_practiced_at DESC',
+    );
+    return {
+      success: true,
+      data: rows.map((r) => rowToRecitation(r)),
+    };
+  } catch (e) {
+    return { success: false, error: `查询背诵进度失败：${(e as Error).message}` };
+  }
+}
+
+export function deleteRecitation(id: string): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    instance.execute('DELETE FROM recitation_progress WHERE id = ?', [id]);
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `删除背诵进度失败：${(e as Error).message}` };
+  }
+}
+
+export const StorageService = {
+  initDatabase,
+  ensureFtsIndex,
+  genId,
+  nowISO,
+  saveHighlight,
+  getHighlights,
+  deleteHighlight,
+  saveNote,
+  updateNote,
+  getNotes,
+  deleteNote,
+  saveBookmark,
+  getBookmarks,
+  updateBookmarkTags,
+  updateBookmarkMeta,
+  deleteBookmark,
+  saveRecitation,
+  getRecitation,
+  getRecitationList,
+  deleteRecitation,
+};
+
+export default StorageService;
