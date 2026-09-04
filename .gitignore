@@ -12,6 +12,9 @@ ios/Pods/
 ios/build/
 ios/*.xcworkspace/xcuserdata/
 
+# 发布构建产物（体积大且每次打包都会变，仓库只留源码与文档）
+deliverables/android/
+
 # 依赖
 node_modules/
 
