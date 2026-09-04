@@ -284,7 +284,6 @@ describe('syncReminderFromStores 每日目标提醒（P1-09）', () => {
   test('有到期项时复习提醒优先（即使目标未达成，正文仍为复习文案）', async () => {
     useSettingsStore.setState({ reminderEnabled: true, dailyGoalEnabled: true, dailyGoalCount: 5 });
     const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const futureIso = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
     useRecitationStore.setState({
       list: [
         // 1 条到期（触发复习提醒）+ 1 条今日完成（计入目标进度）

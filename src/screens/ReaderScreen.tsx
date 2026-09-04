@@ -77,6 +77,7 @@ import {
   type PaginatedPage,
 } from '@/utils/pagination';
 import type { HighlightedSegment } from '@/utils/highlight';
+import { computeScrollInitialRows } from '@/utils/readerScroll';
 
 // ============ 类型定义 ============
 
@@ -1402,6 +1403,24 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     return rows;
   }, [continuousChapters, toDisplayText, toDisplaySegment]);
 
+  /**
+   * 滚动模式初始渲染行数（BugFix：导入书在滚动模式下无法即时滚动）。
+   * 旧实现固定 initialNumToRender=30（按行数）：导入书单段可达 MAX_SEGMENT_CHARS
+   * =2500 字，且默认全文注音（PinyinText 逐字渲染，每字一个字格），30 行首帧最多
+   * 同步挂载 7.5 万字格，JS 线程被压死 → 打开导入书后长时间无法滚动。
+   * 现按「打开章的内容量（码点数）」预算计算：内置书短段落仍渲染 30 行（行为不变），
+   * 导入书大段落只渲染预算内行数，其余交给 FlatList 窗口化随滚动增量渲染。
+   * 依赖仅 chapter：切章时列表重置、该值随之重算；拼接增删章不影响打开章，
+   * 避免中途改变 initialNumToRender 扰动 VirtualizedList 的渲染窗口。
+   * 深段落定位超出初始窗口时由 LOCATE_TIMEOUT_MS 超时兜底（既定可接受降级）。
+   */
+  const scrollInitialRows = useMemo(() => {
+    const counts = chapter
+      ? [0, ...chapter.segments.map((s) => Array.from(s.text).length)]
+      : [];
+    return computeScrollInitialRows(counts);
+  }, [chapter]);
+
   /** 连续滚动涉及的全部段落（供选词码点基准覆盖后续章节） */
   const continuousSegments = useMemo<TextSegment[]>(() => {
     const list: TextSegment[] = [];
@@ -2164,8 +2183,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           data={continuousRows}
           keyExtractor={(item) => item.id}
           renderItem={renderRow}
-          // 目标段落定位：一次性渲染足够多的段落以保证 onLayout 触发
-          initialNumToRender={30}
+          // 目标段落定位：一次性渲染足够多的段落以保证 onLayout 触发。
+          // 行数按打开章内容量预算计算（scrollInitialRows）：内置书仍为 30 行，
+          // 导入书大段落按字符预算收缩，避免首帧逐字注音渲染压死 JS 线程。
+          initialNumToRender={scrollInitialRows}
           contentContainerStyle={styles.content}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}

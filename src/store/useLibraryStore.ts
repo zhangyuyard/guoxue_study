@@ -32,7 +32,26 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
 
   loadBooks: async () => {
     set({ loading: true });
-    // 先装载用户上传书籍（sqlite 异步），再统一读取书目
+    // 阶段一（同步、轻量）：先上屏内置书目，书架立即可用（BugFix：启动无响应）。
+    // 此时用户书尚未注册进 TextLibraryService，getBooks() 仅返回内置经典；
+    // 本会话中已注册过的用户书也会一并返回（重复调用场景，行为幂等）。
+    const firstBooksRes = TextLibraryService.getBooks();
+    const firstCatRes = TextLibraryService.getCategories();
+    if (firstBooksRes.success && firstBooksRes.data) {
+      set({
+        books: firstBooksRes.data,
+        categories: firstCatRes.success && firstCatRes.data ? firstCatRes.data : [],
+        error: undefined,
+      });
+    }
+    // 让出 JS 线程（macrotask）：用户书装载为 SQLite 全量读 + JSON 反解，
+    // 书多/书大时同步耗时明显，不能阻塞首帧渲染与交互。不用微任务——
+    // 微任务仍会在首帧渲染前跑完，起不到让出线程的作用。
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    // 阶段二：装载用户上传书籍后整体刷新。
+    // 最终状态与旧实现一致：内置 + 用户书全量、loading 收敛为 false。
     await UserBookService.loadAndRegisterAll();
     const booksRes = TextLibraryService.getBooks();
     const catRes = TextLibraryService.getCategories();

@@ -1,10 +1,20 @@
 /**
  * 应用根组件（T05 完整应用壳）
  * 结构：GestureHandlerRootView → SafeAreaProvider → NavigationContainer（日/夜主题）→ RootNavigator
- * 启动初始化：StorageService.initDatabase()（SQLite 建表，含 FTS 虚拟表；
- * FTS 数据由 SearchService 首次搜索时惰性填充）+ useLibraryStore.loadBooks()（预载文本库）
- * + DictEngine.init()（字典双 db 部署：assets → native_dict.db 拷贝与 user_version 比对升级）。
- * 字典初始化失败不阻断启动（降级为字典 Tab 显示「引擎未就绪」态，仅 console.warn）。
+ * 启动初始化（BugFix：打开 App 长时间无法响应——启动时序策略）：
+ * 分为「首屏必需」与「可延后」两级，核心原则是 JS 线程在首帧前只做轻量同步工作：
+ * 1) 首屏必需（effect 内同步、轻量）：
+ *    - StorageService.initDatabase()：SQLite 建表（幂等 DDL，含 FTS 虚拟表；
+ *      FTS 数据由 SearchService 首次搜索时惰性填充）；
+ *    - useLibraryStore.loadBooks()：两段式装载——内置书目同步上屏（书架立即可用），
+ *      用户书装载在其内部让出线程（macrotask）后才执行，不阻塞首帧；
+ *    - DictEngine.init()：字典双 db 部署（assets → native_dict.db 拷贝与 user_version
+ *      比对升级；异步，不阻断启动；失败降级为字典 Tab「引擎未就绪」态，仅 console.warn）。
+ * 2) 可延后任务（scheduleStartupTasks 逐个延后，每个任务独占一个 macrotask，
+ *    任务间让出 JS 线程给渲染与触摸事件）：背诵列表 → 复习提醒同步 → 成就重算。
+ *    顺序即依赖顺序：提醒同步读背诵列表；成就重算内部自刷背诵/收藏/笔记三个
+ *    SQLite store（设计为自刷新，可整体延后）。最终状态与旧「同步串行」实现
+ *    完全一致——数据全量加载、提醒照常同步、成就照常重算，只是不再阻塞首帧交互。
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
@@ -27,6 +37,7 @@ import { useRecitationStore } from '@/store/useRecitationStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getColors } from '@/theme';
 import type { ThemeMode } from '@/types';
+import { scheduleStartupTasks } from '@/utils/startupTasks';
 
 /** 由应用主题色生成 React Navigation 主题 */
 function buildNavigationTheme(mode: ThemeMode): NavigationTheme {
@@ -51,21 +62,38 @@ function App(): React.JSX.Element {
   const loadBooks = useLibraryStore((s) => s.loadBooks);
   const [ready, setReady] = useState(false);
 
-  // 启动初始化：SQLite 建表 + 预载文本库（同步）+ 字典引擎部署（异步，不阻断启动）
+  // 启动初始化：见文件头「启动初始化」说明（首屏必需同步做，重活逐个延后）
   useEffect(() => {
+    // —— 首屏必需（同步、轻量）——
     StorageService.initDatabase();
     loadBooks();
     DictEngine.init().catch((err: unknown) => {
       // 降级：字典 Tab 显示「引擎未就绪」态，应用其余功能不受影响
       console.warn('[App] 字典引擎初始化失败：', err);
     });
-    // B4 复习提醒：启动时按当前设置与到期数同步/取消每日提醒
-    // （loadRecitationList 为同步读取，随后 syncReminderFromStores 内部防重入）
-    useRecitationStore.getState().loadRecitationList();
-    syncReminderFromStores();
-    // P2-06 成就：启动时重算（内部幂等，仅新解锁项落账；成就不可逆）
-    useAchievementStore.getState().recompute();
+    // 首屏必需项已就绪（同步部分均为轻量操作），立即放行首帧；
+    // 重活不再挡在 setReady 之前（旧实现的卡死根因）
     setReady(true);
+    // —— 可延后任务（每个任务独占一个 macrotask，任务间让出 JS 线程）——
+    // ① 背诵列表（SQLite 同步读）→ ② 复习提醒同步（读背诵/设置/目标数据，
+    //    内部防重入）→ ③ 成就重算（内部自刷背诵/收藏/笔记，幂等，仅新解锁项落账）。
+    // 卸载/effect 重跑时取消未执行任务，避免重复调度。
+    return scheduleStartupTasks([
+      {
+        key: 'loadRecitationList',
+        run: () => useRecitationStore.getState().loadRecitationList(),
+      },
+      {
+        key: 'syncReminderFromStores',
+        run: () => {
+          void syncReminderFromStores();
+        },
+      },
+      {
+        key: 'recomputeAchievements',
+        run: () => useAchievementStore.getState().recompute(),
+      },
+    ]);
   }, [loadBooks]);
 
   const navigationTheme = useMemo(() => buildNavigationTheme(theme), [theme]);

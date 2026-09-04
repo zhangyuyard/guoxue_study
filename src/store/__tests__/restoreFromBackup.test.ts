@@ -10,7 +10,7 @@ import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { useNoteStore } from '@/store/useNoteStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { useAchievementStore } from '@/store/useAchievementStore';
-import type { RecitationProgress, Bookmark, Note } from '@/types';
+import type { RecitationProgress, Note } from '@/types';
 
 function makeProgress(overrides: Partial<RecitationProgress> = {}): RecitationProgress {
   return {
