@@ -32,6 +32,7 @@ import { useNoteStore } from '@/store/useNoteStore';
 import { useRecitationStore } from '@/store/useRecitationStore';
 import { useLibraryStore } from '@/store/useLibraryStore';
 import { useReaderStore } from '@/store/useReaderStore';
+import { useReadingOverrideStore } from '@/store/useReadingOverrideStore';
 import { StorageService } from '@/services/StorageService';
 import { UserBookService } from '@/services/UserBookService';
 import {
@@ -204,6 +205,10 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
         useBookmarkStore.getState().restoreFromBackup(parsed.data.bookmarks);
         useNoteStore.getState().restoreFromBackup(parsed.data.notes);
         useAchievementStore.getState().restoreFromBackup(parsed.data.achievements);
+        // 用户读音纠正恢复（合并语义：按 char+context 幂等覆盖，设备独有的纠正保留）
+        useReadingOverrideStore.getState().restoreFromBackup(
+          parsed.data.readingOverrides,
+        );
         // 用户书恢复：备份中的书按 id 幂等覆盖，设备独有的书保留（合并语义）
         await UserBookService.restoreUserBooks(parsed.data.userBooks);
         // 恢复后刷新书架（新增/覆盖的用户书需重新上屏；两段式装载，内置书目先立即可用）
@@ -243,7 +248,8 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
         // 采集快照：设置走白名单函数字段（避免把方法序列化进备份）；
         // 用户书经 UserBookService 读取（内存列表与 db 一致，见 getAllBooks 注释）；
         // 划线经 StorageService 全量读取（getHighlights 无参 = 全表）；
-        // 续读位置取 useReaderStore 持久化字段 lastRead
+        // 续读位置取 useReaderStore 持久化字段 lastRead；
+        // 读音纠正取 useReadingOverrideStore（用户劳动成果，随备份走）
         const settingsState = useSettingsStore.getState();
         const snapshot = {
           settings: pickSettingsSnapshot(settingsState as unknown as Record<string, unknown>),
@@ -254,6 +260,7 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
           userBooks: UserBookService.getAllBooks(),
           highlights: StorageService.getHighlights().data ?? [],
           lastRead: useReaderStore.getState().lastRead,
+          readingOverrides: useReadingOverrideStore.getState().overrides,
         };
         const text = buildBackup(snapshot);
         const fileName = `guoxue-backup-${formatBackupStamp(new Date())}.json`;

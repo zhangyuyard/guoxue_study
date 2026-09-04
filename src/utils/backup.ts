@@ -36,6 +36,11 @@ export interface BackupData {
   highlights: unknown[];
   /** 续读位置（v1 扩展字段；旧备份缺失，解析时容错为 null） */
   lastRead: BackupLastRead | null;
+  /**
+   * 用户读音纠正列表（v1 扩展字段；旧备份缺失，解析时容错为空数组）。
+   * 用户劳动成果，恢复走合并语义（不删设备已有纠正）。
+   */
+  readingOverrides: unknown[];
 }
 
 /** 续读位置（与 useReaderStore 持久化的 lastRead 同构） */
@@ -129,6 +134,7 @@ export function buildBackup(snapshot: BackupSnapshot): string {
       userBooks: snapshot.userBooks,
       highlights: snapshot.highlights,
       lastRead: snapshot.lastRead,
+      readingOverrides: snapshot.readingOverrides,
     },
   };
   return JSON.stringify(payload, null, 2);
@@ -199,6 +205,14 @@ export function parseBackup(text: string): ParsedBackup {
   if (data.highlights !== undefined && !Array.isArray(data.highlights)) {
     throw new Error('备份文件格式错误：data.highlights 应为数组');
   }
+  // readingOverrides 为 v1 扩展的可选字段：旧备份缺失 → 空数组（不报错，向后兼容）；
+  // 新备份提供该字段 → 必须为数组（非法报错，与 userBooks 等字段的口径一致）
+  if (
+    data.readingOverrides !== undefined &&
+    !Array.isArray(data.readingOverrides)
+  ) {
+    throw new Error('备份文件格式错误：data.readingOverrides 应为数组');
+  }
   // lastRead 为 v1 扩展的可选字段：缺失/显式 null → null（不报错）；
   // 存在时逐字段最小校验（bookId/chapterId 必填字符串，segmentId 可选字符串）
   if (data.lastRead !== undefined && data.lastRead !== null) {
@@ -229,6 +243,7 @@ export function parseBackup(text: string): ParsedBackup {
       userBooks: (data.userBooks ?? []) as unknown[],
       highlights: (data.highlights ?? []) as unknown[],
       lastRead: (data.lastRead ?? null) as BackupLastRead | null,
+      readingOverrides: (data.readingOverrides ?? []) as unknown[],
     },
   };
 }
@@ -236,7 +251,7 @@ export function parseBackup(text: string): ParsedBackup {
 /**
  * 汇总备份数据规模（导入确认弹窗 / 完成提示共用），例如：
  * 「设置 16 项、背诵进度 12 条、收藏 8 条、笔记 5 条、成就 3 项、用户书籍 2 本、
- * 划线 20 条、续读位置 1 处」。
+ * 划线 20 条、续读位置 1 处、读音纠正 3 条」。
  * 旧备份缺失的扩展字段解析已容错（highlights 为空数组 / lastRead 为 null），
  * 此处划线显示 0 条；无续读位置时不显示该类目。
  */
@@ -253,5 +268,6 @@ export function summarizeBackup(data: BackupData): string {
   if (data.lastRead) {
     parts.push('续读位置 1 处');
   }
+  parts.push(`读音纠正 ${data.readingOverrides.length} 条`);
   return parts.join('、');
 }

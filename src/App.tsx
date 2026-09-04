@@ -11,7 +11,7 @@
  *    - DictEngine.init()：字典双 db 部署（assets → native_dict.db 拷贝与 user_version
  *      比对升级；异步，不阻断启动；失败降级为字典 Tab「引擎未就绪」态，仅 console.warn）。
  * 2) 可延后任务（scheduleStartupTasks 逐个延后，每个任务独占一个 macrotask，
- *    任务间让出 JS 线程给渲染与触摸事件）：背诵列表 → 复习提醒同步 → 成就重算。
+ *    任务间让出 JS 线程给渲染与触摸事件）：用户读音纠正注入 → 背诵列表 → 复习提醒同步 → 成就重算。
  *    顺序即依赖顺序：提醒同步读背诵列表；成就重算内部自刷背诵/收藏/笔记三个
  *    SQLite store（设计为自刷新，可整体延后）。最终状态与旧「同步串行」实现
  *    完全一致——数据全量加载、提醒照常同步、成就照常重算，只是不再阻塞首帧交互。
@@ -29,10 +29,12 @@ import {
 
 import RootNavigator from '@/navigation/RootNavigator';
 import { DictEngine } from '@/services/dict/DictEngine';
+import { setReadingOverrideProvider } from '@/services/PinyinService';
 import { StorageService } from '@/services/StorageService';
 import { syncReminderFromStores } from '@/services/ReviewReminderService';
 import { useAchievementStore } from '@/store/useAchievementStore';
 import { useLibraryStore } from '@/store/useLibraryStore';
+import { useReadingOverrideStore } from '@/store/useReadingOverrideStore';
 import { useRecitationStore } from '@/store/useRecitationStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getColors } from '@/theme';
@@ -79,6 +81,17 @@ function App(): React.JSX.Element {
     //    内部防重入）→ ③ 成就重算（内部自刷背诵/收藏/笔记，幂等，仅新解锁项落账）。
     // 卸载/effect 重跑时取消未执行任务，避免重复调度。
     return scheduleStartupTasks([
+      {
+        // 用户读音纠正注入读音仲裁链最顶端（provider 内部实时读 store state，
+        // persist 水合后自动生效；重复注入幂等，effect 重跑无副作用）
+        key: 'injectReadingOverrideProvider',
+        run: () => {
+          setReadingOverrideProvider({
+            resolve: (char, context) =>
+              useReadingOverrideStore.getState().getOverride(char, context),
+          });
+        },
+      },
       {
         key: 'loadRecitationList',
         run: () => useRecitationStore.getState().loadRecitationList(),

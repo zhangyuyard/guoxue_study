@@ -74,6 +74,9 @@ function makeSnapshot(): BackupSnapshot {
     userBooks: [makeUserBook()],
     highlights: [makeHighlight()],
     lastRead: { bookId: 'book1', chapterId: 'ch1', segmentId: 'seg-1' },
+    readingOverrides: [
+      { id: 'ro-1', char: '王', context: '以德行仁者王。', reading: 'wàng', createdAt: '2026-03-15T04:00:00.000Z' },
+    ],
   };
 }
 
@@ -260,6 +263,7 @@ describe('parseBackup 校验与错误文案', () => {
       userBooks: [],
       highlights: [],
       lastRead: null,
+      readingOverrides: [],
     });
   });
 
@@ -411,10 +415,10 @@ describe('parseBackup：lastRead 可选字段（v1 扩展）', () => {
 });
 
 describe('summarizeBackup', () => {
-  test('汇总八类数据规模（含用户书籍 / 划线 / 续读位置）', () => {
+  test('汇总九类数据规模（含用户书籍 / 划线 / 续读位置 / 读音纠正）', () => {
     const parsed = parseBackup(buildBackup(makeSnapshot()));
     expect(summarizeBackup(parsed.data)).toBe(
-      '设置 3 项、背诵进度 1 条、收藏 1 条、笔记 1 条、成就 1 项、用户书籍 1 本、划线 1 条、续读位置 1 处',
+      '设置 3 项、背诵进度 1 条、收藏 1 条、笔记 1 条、成就 1 项、用户书籍 1 本、划线 1 条、续读位置 1 处、读音纠正 1 条',
     );
   });
 

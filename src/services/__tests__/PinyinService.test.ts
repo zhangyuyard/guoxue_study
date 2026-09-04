@@ -11,10 +11,12 @@ import type { PinyinAnnotation } from '@/types';
 import {
   annotate,
   getExternalReadingProvider,
+  getReadingOverrideProvider,
   getPolyphoneReadings,
   isRareChar,
   resolvePolyphone,
   setExternalReadingProvider,
+  setReadingOverrideProvider,
   type ReadingProvider,
 } from '@/services/PinyinService';
 
@@ -31,6 +33,7 @@ const TEXT = '学而时习之，不亦说乎';
 
 afterAll(() => {
   setExternalReadingProvider(null);
+  setReadingOverrideProvider(null);
 });
 
 describe('PinyinService 导出签名兼容（§8.6）', () => {
@@ -158,5 +161,94 @@ describe('繁体文本注解（修复：繁体字误判生僻字→满屏下划�
   test('繁体下多音字语境规则按简体匹配（說乎→yuè，而非回退 shuō）', () => {
     // 修复前：logicText 未归一化，繁体「說乎」匹配不到规则 pattern「说乎」，回退 default=shuō
     expect(pinyinOf(res.data!, '說')).toBe('yuè');
+  });
+});
+
+describe('用户读音纠正注入点（setReadingOverrideProvider）', () => {
+  afterEach(() => {
+    setReadingOverrideProvider(null);
+    setExternalReadingProvider(null);
+  });
+
+  test('默认未注入：getReadingOverrideProvider 为 null，行为不变', () => {
+    expect(getReadingOverrideProvider()).toBeNull();
+    const baseline = annotate(TEXT, 'full');
+    expect(pinyinOf(baseline.data!, '说')).toBe('yuè');
+  });
+
+  test('override 命中为仲裁链最顶端：优先于外部字典与内置规则，且 readingVerified=true', () => {
+    const external: ReadingProvider = {
+      getReadings: () => [],
+      resolve: () => 'shuì',
+    };
+    setExternalReadingProvider(external);
+    setReadingOverrideProvider({
+      resolve: (char, context) =>
+        char === '说' && context.includes('说乎') ? 'shuō' : null,
+    });
+    const res = annotate(TEXT, 'full');
+    const shuo = res.data!.find((a) => a.char === '说')!;
+    expect(shuo.pinyin).toBe('shuō');
+    expect(shuo.readingVerified).toBe(true);
+  });
+
+  test('override 未命中返回 null → 回退外部字典 / 内置规则（行为与基准一致）', () => {
+    setReadingOverrideProvider({ resolve: () => null });
+    const baseline = annotate(TEXT, 'full');
+    const res = annotate(TEXT, 'full');
+    expect(res.data).toEqual(baseline.data);
+    expect(pinyinOf(res.data!, '说')).toBe('yuè');
+  });
+
+  test('setReadingOverrideProvider(null) 移除后输出与无纠正时代完全一致', () => {
+    setReadingOverrideProvider({ resolve: () => 'shuō' });
+    const withOverride = annotate(TEXT, 'full');
+    expect(pinyinOf(withOverride.data!, '说')).toBe('shuō');
+    setReadingOverrideProvider(null);
+    expect(getReadingOverrideProvider()).toBeNull();
+    const without = annotate(TEXT, 'full');
+    expect(pinyinOf(without.data!, '说')).toBe('yuè');
+  });
+});
+
+describe('resolvePolyphone 位置感知匹配（^/$ 锚定）', () => {
+  test('向后兼容：无锚定 pattern 仍为整句子串匹配', () => {
+    expect(resolvePolyphone('说', '不亦说乎')).toBe('yuè');
+    expect(resolvePolyphone('乐', '礼乐皆得')).toBe('yuè');
+    expect(resolvePolyphone('中', '中庸之为德')).toBe('zhōng');
+  });
+
+  test('^ 前缀锚定：该字之前紧邻文本以锚定内容结尾（图穷而匕首见 → xiàn）', () => {
+    // 无锚定 pattern 均不命中（「图穷匕见」因子间有「而」而不匹配），锚定生效
+    expect(resolvePolyphone('见', '图穷而匕首见')).toBe('xiàn');
+    // 前缀不满足锚定 → 回退 default
+    expect(resolvePolyphone('见', '看见山')).toBe('jiàn');
+  });
+
+  test('$ 后缀锚定：该字之后紧邻文本以锚定内容开头（朝于齐 → cháo）', () => {
+    // 旧实现：无锚定时「朝于齐」无 pattern 命中，回退 default=zhāo
+    expect(resolvePolyphone('朝', '朝于齐')).toBe('cháo');
+    expect(resolvePolyphone('朝', '朝闻道')).toBe('zhāo');
+  });
+
+  test('多次出现任一位置命中：如「学而时习之，不亦说乎」', () => {
+    // 说 在句首出现（无 pattern 命中），句中出现「说乎」→ 任一命中即命中
+    expect(resolvePolyphone('说', '说与不亦说乎')).toBe('yuè');
+  });
+
+  test('最长 pattern 胜出（含锚定内容长度比较）', () => {
+    // 无锚定「将相」(长2) 胜过前缀锚定「^将」(长1)，两者同音
+    expect(resolvePolyphone('相', '王侯将相')).toBe('xiàng');
+    expect(resolvePolyphone('将', '将相宁有种乎')).toBe('jiàng');
+  });
+
+  test('无命中回退 default', () => {
+    expect(resolvePolyphone('朝', '无命中语境')).toBe('zhāo');
+  });
+
+  test('位置感知随 annotate 生效：繁体正文经简体归一化后同样命中锚定 pattern', () => {
+    const res = annotate('圖窮而匕首見', 'full');
+    const jian = res.data!.find((a) => a.char === '見')!;
+    expect(jian.pinyin).toBe('xiàn');
   });
 });

@@ -7,7 +7,7 @@
  * - 划线：命中段的汉字叠加半透明背景（可选）
  * 性能：React.memo + useMemo 预计算渲染数组；off 模式直接渲染纯文本。
  */
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -23,6 +23,7 @@ import { usePinyin } from '@/hooks/usePinyin';
 import { getPolyphoneReadings } from '@/services/PinyinService';
 import { ConversionService } from '@/services/ConversionService';
 import { GuyinService, GUYIN_ATTRIBUTION, type GuyinEntry } from '@/services/GuyinService';
+import { useReadingOverrideStore } from '@/store/useReadingOverrideStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getColors, highlightColors, type ThemeColors } from '@/theme';
 import {
@@ -31,7 +32,8 @@ import {
   getLineHeightPx,
 } from '@/theme/typography';
 import { buildHighlightedSegments } from '@/utils/highlight';
-import { getPinyinPairs, isCJKChar } from '@/utils/pinyin';
+import { clearPinyinCache, getPinyinPairs, isCJKChar } from '@/utils/pinyin';
+import { toSimplified } from '@/utils/conversion';
 
 // ---------- 渲染单元数据模型 ----------
 
@@ -237,6 +239,8 @@ interface PolyphonePopupData {
   readingVerified?: boolean;
   /** 古音拟音（Baxter-Sagart 命中时填写，展示中古/上古两行） */
   guyin?: GuyinEntry;
+  /** 用户已纠正的读音（char+context 命中时填写，浮窗展示「恢复默认」入口） */
+  overrideReading?: string;
 }
 
 /** 浮窗样式（依赖主题与字号） */
@@ -278,17 +282,24 @@ interface PolyphonePopupProps {
   styles: PopupStyles;
   accentColor: string;
   onClose: () => void;
+  /** 点选候选读音回调（用户读音纠正；未提供则读音只读展示） */
+  onSelectReading?: (reading: string) => void;
+  /** 恢复系统默认（删除该字该句的读音纠正；仅存在纠正时展示） */
+  onResetReading?: () => void;
 }
 
 /**
  * 多音字读音浮窗：透明 Modal 居中小卡片，展示「字 + 全部候选读音」。
  * 当前语境读音用强调色加粗标识；点击卡片外任意区域关闭。
+ * 提供 onSelectReading 时候选读音可点选（用户读音纠正闭环入口）。
  */
 const PolyphonePopup = React.memo(function PolyphonePopup({
   data,
   styles,
   accentColor,
   onClose,
+  onSelectReading,
+  onResetReading,
 }: PolyphonePopupProps) {
   return (
     <Modal
@@ -317,6 +328,7 @@ const PolyphonePopup = React.memo(function PolyphonePopup({
                     reading === data.current ? styles.currentReading : null,
                     reading === data.current ? { color: accentColor } : null,
                   ]}
+                  onPress={onSelectReading ? () => onSelectReading(reading) : undefined}
                 >
                   {reading}
                 </Text>
@@ -330,6 +342,18 @@ const PolyphonePopup = React.memo(function PolyphonePopup({
           ) : data.readingSources && data.readingSources.length > 0 ? (
             <Text style={styles.tongjiaSource} numberOfLines={3}>
               {`读音源：${data.readingSources.join(' · ')}`}
+            </Text>
+          ) : null}
+          {data.overrideReading ? (
+            <Text
+              style={[styles.tongjiaSource, { color: accentColor }]}
+              onPress={onResetReading}
+            >
+              {`已按你的纠正读作 ${data.overrideReading} · 点此恢复默认`}
+            </Text>
+          ) : onSelectReading ? (
+            <Text style={styles.tongjiaSource}>
+              点选读音纠正本句注音
             </Text>
           ) : null}
           {data.guyin ? (
@@ -476,7 +500,10 @@ function PinyinTextBase({
   const colors: ThemeColors = getColors(theme);
 
   // 内部自动注音（外部传入 annotations 时优先生效）
-  const { annotations: selfAnnotations } = usePinyin(text, pinyinMode, { workId, bookId });
+  const { annotations: selfAnnotations, annotate } = usePinyin(text, pinyinMode, {
+    workId,
+    bookId,
+  });
   const source = annotations ?? selfAnnotations;
 
   const pairs = useMemo(() => getPinyinPairs(source), [source]);
@@ -615,6 +642,21 @@ function PinyinTextBase({
   const [tongjiaPopup, setTongjiaPopup] = useState<TongjiaPopupData | null>(null);
   const closePolyphonePopup = useCallback(() => setPolyphonePopup(null), []);
   const closeTongjiaPopup = useCallback(() => setTongjiaPopup(null), []);
+
+  // ---------- 用户读音纠正闭环 ----------
+  // 订阅纠正列表（引用变化触发重渲染 + 重注音；纠正增删为低频操作）
+  const overrides = useReadingOverrideStore((s) => s.overrides);
+  const prevOverrideRef = useRef(overrides);
+  useEffect(() => {
+    // 跳过首挂载；纠正列表变化后清注音缓存并强制重算（useMemo 版本号 bump）
+    if (prevOverrideRef.current === overrides) {
+      return;
+    }
+    prevOverrideRef.current = overrides;
+    clearPinyinCache();
+    annotate();
+  }, [overrides, annotate]);
+
   const handlePolyphonePress = useCallback((cell: CharCellData) => {
     const readings = getPolyphoneReadings(cell.char);
     if (readings.length === 0) {
@@ -624,6 +666,11 @@ function PinyinTextBase({
     const list = readings.includes(cell.pinyin) ? readings : [cell.pinyin, ...readings];
     // 古音拟音（Baxter-Sagart）：命中才附带，浮窗古音区块按需显示
     const guyin = GuyinService.getGuyin(cell.char) ?? undefined;
+    // 用户已纠正的读音（按简体逻辑字 + 简体整句语境查询）
+    const logicChar = toSimplified(cell.char);
+    const context = toSimplified(text);
+    const overrideReading =
+      useReadingOverrideStore.getState().getOverride(logicChar, context) ?? undefined;
     setPolyphonePopup({
       char: cell.char,
       readings: list,
@@ -631,8 +678,37 @@ function PinyinTextBase({
       readingSources: cell.readingSources,
       readingVerified: cell.readingVerified,
       guyin,
+      overrideReading,
     });
-  }, []);
+  }, [text]);
+  /** 点选候选读音：写入纠正（同 char+context 幂等覆盖）并触发重注音 */
+  const handleSelectReading = useCallback(
+    (reading: string) => {
+      const logicChar = toSimplified(polyphonePopup?.char ?? '');
+      if (!logicChar) {
+        return;
+      }
+      useReadingOverrideStore
+        .getState()
+        .addOverride(logicChar, toSimplified(text), reading);
+      // store 订阅 effect 会清缓存并重注音；此处立即关闭浮窗
+      setPolyphonePopup(null);
+    },
+    [polyphonePopup, text],
+  );
+  /** 恢复系统默认：删除该字该句的读音纠正并触发重注音 */
+  const handleResetReading = useCallback(() => {
+    const logicChar = toSimplified(polyphonePopup?.char ?? '');
+    if (!logicChar) {
+      return;
+    }
+    const store = useReadingOverrideStore.getState();
+    const entry = store.getOverrideEntry(logicChar, toSimplified(text));
+    if (entry) {
+      store.removeOverride(entry.id);
+    }
+    setPolyphonePopup(null);
+  }, [polyphonePopup, text]);
   const handleTongjiaPress = useCallback((cell: CharCellData) => {
     if (!cell.tongjia) {
       return;
@@ -841,6 +917,8 @@ function PinyinTextBase({
           styles={popupStyles}
           accentColor={colors.accent}
           onClose={closePolyphonePopup}
+          onSelectReading={handleSelectReading}
+          onResetReading={handleResetReading}
         />
       ) : null}
       {tongjiaPopup ? (
