@@ -62,6 +62,12 @@ interface ReaderState extends ReaderPersist {
    * 仅恢复流程调用；null 表示备份无续读位置（旧备份兼容，清空现值）。
    */
   restoreLastRead: (lastRead: ReaderPersist['lastRead']) => void;
+  /**
+   * 清除指向指定书籍的续读位置（删书级联清理，BugFix 孤儿数据）：
+   * lastRead 指向已删书时，书架「继续阅读」点击后会加载失败。
+   * 仅当 lastRead 属于该书时置 null，他书/无位置不受影响。
+   */
+  clearLastReadForBook: (bookId: string) => void;
   /** 清空阅读器状态 */
   clearReader: () => void;
 }
@@ -144,6 +150,12 @@ export const useReaderStore = create<ReaderState>()(
       clearAnnotationCache: () => set({ annotationCache: {} }),
 
       restoreLastRead: (lastRead: ReaderPersist['lastRead']) => set({ lastRead }),
+
+      clearLastReadForBook: (bookId) => {
+        if (get().lastRead?.bookId === bookId) {
+          set({ lastRead: null });
+        }
+      },
 
       clearReader: () =>
         set({

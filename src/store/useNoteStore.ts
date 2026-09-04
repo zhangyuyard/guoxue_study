@@ -31,6 +31,8 @@ interface NoteState {
   updateNoteContent: (id: string, content: string) => void;
   /** 删除笔记 */
   removeNote: (id: string) => void;
+  /** 删除指定书籍的全部笔记（删书级联清理，BugFix 孤儿数据） */
+  removeByBook: (bookId: string) => void;
   /**
    * 备份恢复（P2-15）：整体替换为备份列表并持久化（SQLite）。
    * 非法条目（缺 id / 定位字段 / content）静默跳过。
@@ -93,6 +95,21 @@ export const useNoteStore = create<NoteState>()((set, get) => ({
     const res = StorageService.deleteNote(id);
     if (res.success) {
       set((state) => ({ notes: state.notes.filter((n) => n.id !== id) }));
+    } else {
+      set({ error: res.error ?? '删除笔记失败' });
+    }
+  },
+
+  removeByBook: (bookId) => {
+    // 空 bookId 直接跳过：StorageService 层会拒绝，这里提前短路避免误删
+    if (!bookId) {
+      return;
+    }
+    const res = StorageService.deleteNotesByBook(bookId);
+    if (res.success) {
+      set((state) => ({
+        notes: state.notes.filter((n) => n.bookId !== bookId),
+      }));
     } else {
       set({ error: res.error ?? '删除笔记失败' });
     }

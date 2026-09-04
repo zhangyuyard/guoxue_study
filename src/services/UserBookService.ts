@@ -14,6 +14,10 @@ import { open } from 'react-native-quick-sqlite';
 import type { Book, ServiceResult } from '@/types';
 import { TextLibraryService } from '@/services/TextLibraryService';
 import { StorageService } from '@/services/StorageService';
+import { useRecitationStore } from '@/store/useRecitationStore';
+import { useBookmarkStore } from '@/store/useBookmarkStore';
+import { useNoteStore } from '@/store/useNoteStore';
+import { useReaderStore } from '@/store/useReaderStore';
 import { isLocalPath, toLocalPath } from '@/utils/localPath';
 import { decodeTextBytes } from '@/utils/textEncoding';
 import { decodeUtf8 } from '@/utils/utf8';
@@ -638,6 +642,39 @@ export async function importBook(
   return { success: true, data: book };
 }
 
+/**
+ * 删书后的级联清理（BugFix 孤儿数据）。
+ * 依据：makeUserBookId 基于时间戳，重导入同一文件会得到新 bookId，
+ * 残留的用户数据永远无法重新挂接到书，属永久死数据：
+ *   - 背诵进度：继续计入成就（recite-、coverage-、streak- 系列）与学习统计，
+ *     「已在 X 部书中留下足迹」会包含已删书；
+ *   - 收藏/笔记：列表页出现指向已删书的死条目（note-* 成就计数虚高）；
+ *   - 续读位置：书架「继续阅读」点进已删书会加载失败。
+ * 划线（highlights）刻意不清理：阅读页本就按段落渲染，删书后划线自然
+ * 不再显示，且划线条目在收藏场景无独立展示页，清理收益低——若后续
+ * 出现划线聚合展示页，再随该需求一并清理。
+ * 容错：书已删除成功，各步清理失败仅记日志、不阻断删除主结果
+ * （与 FTS 清理同策略；冷启动后各数据域加载自库中，无更差后果）。
+ * 成就 recompute 幂等，残留计数会在下次触发（App 启动/背诵完成）自动回落。
+ */
+function cascadeCleanupAfterDelete(id: string): void {
+  const steps: Array<[string, () => void]> = [
+    ['背诵进度', () => useRecitationStore.getState().removeProgressByBook(id)],
+    ['收藏', () => useBookmarkStore.getState().removeByBook(id)],
+    ['笔记', () => useNoteStore.getState().removeByBook(id)],
+    ['续读位置', () => useReaderStore.getState().clearLastReadForBook(id)],
+  ];
+  for (const [label, run] of steps) {
+    try {
+      run();
+    } catch (e) {
+      console.warn(
+        `删书级联清理失败（${label}，不影响删除结果）：${(e as Error).message}`,
+      );
+    }
+  }
+}
+
 /** 删除一本用户书（划线/笔记按 segmentId 存储，将随段落失效而不再显示） */
 export async function deleteBook(id: string): Promise<ServiceResult<null>> {
   if (!isUserBook(id)) {
@@ -662,6 +699,9 @@ export async function deleteBook(id: string): Promise<ServiceResult<null>> {
   // 搜索仍会命中（点进去加载失败）。清理失败同样不阻断删除结果：
   // 书已不在文本库中，下次冷启动 ensureFtsIndex 的死索引自愈会兜底清除。
   StorageService.deleteFtsForBook(id);
+  // BugFix：级联清理孤儿用户数据（背诵进度/收藏/笔记/续读位置）——
+  // 重导入同文件生成新 bookId，残留数据永远挂不回，详见 cascadeCleanupAfterDelete。
+  cascadeCleanupAfterDelete(id);
   return { success: true, data: null };
 }
 

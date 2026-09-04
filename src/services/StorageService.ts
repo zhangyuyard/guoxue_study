@@ -650,6 +650,29 @@ export function deleteNote(id: string): ServiceResult<boolean> {
   }
 }
 
+/**
+ * 删除指定书籍的全部笔记（按 book_id 级联清理）。
+ * BugFix：用户书删除后其笔记会成为孤儿——重导入同一文件会生成新 bookId
+ * （时间戳），旧笔记永远无法重新挂接，只会在笔记列表页形成死条目。
+ * 供 UserBookService.deleteBook 在书籍删除成功后调用。
+ * 空 bookId 直接拒绝（防御 DELETE ... WHERE book_id = '' 误删）。
+ */
+export function deleteNotesByBook(bookId: string): ServiceResult<boolean> {
+  if (!bookId) {
+    return { success: false, error: 'bookId 不能为空' };
+  }
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    instance.execute('DELETE FROM notes WHERE book_id = ?', [bookId]);
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `删除笔记失败：${(e as Error).message}` };
+  }
+}
+
 // ---------- 收藏 ----------
 
 function rowToBookmark(row: Record<string, unknown>): Bookmark {
@@ -772,6 +795,29 @@ export function deleteBookmark(id: string): ServiceResult<boolean> {
   }
   try {
     instance.execute('DELETE FROM bookmarks WHERE id = ?', [id]);
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `删除收藏失败：${(e as Error).message}` };
+  }
+}
+
+/**
+ * 删除指定书籍的全部收藏（按 book_id 级联清理）。
+ * BugFix：用户书删除后其收藏会成为孤儿——重导入同一文件会生成新 bookId
+ * （时间戳），旧收藏永远无法重新挂接，只会在收藏列表页形成死条目。
+ * 供 UserBookService.deleteBook 在书籍删除成功后调用。
+ * 空 bookId 直接拒绝（防御 DELETE ... WHERE book_id = '' 误删）。
+ */
+export function deleteBookmarksByBook(bookId: string): ServiceResult<boolean> {
+  if (!bookId) {
+    return { success: false, error: 'bookId 不能为空' };
+  }
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    instance.execute('DELETE FROM bookmarks WHERE book_id = ?', [bookId]);
     return { success: true, data: true };
   } catch (e) {
     return { success: false, error: `删除收藏失败：${(e as Error).message}` };
@@ -905,11 +951,13 @@ export const StorageService = {
   updateNote,
   getNotes,
   deleteNote,
+  deleteNotesByBook,
   saveBookmark,
   getBookmarks,
   updateBookmarkTags,
   updateBookmarkMeta,
   deleteBookmark,
+  deleteBookmarksByBook,
   saveRecitation,
   getRecitation,
   getRecitationList,

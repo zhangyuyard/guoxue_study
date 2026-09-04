@@ -29,6 +29,8 @@ interface BookmarkState {
   }) => void;
   /** 删除收藏 */
   removeBookmark: (id: string) => void;
+  /** 删除指定书籍的全部收藏（删书级联清理，BugFix 孤儿数据） */
+  removeByBook: (bookId: string) => void;
   /** 更新收藏标签 */
   updateTags: (id: string, tags: string[]) => void;
   /** 更新收藏标签与备注（P1-12 收藏编辑弹层保存入口） */
@@ -80,6 +82,21 @@ export const useBookmarkStore = create<BookmarkState>()((set, get) => ({
     if (res.success) {
       set((state) => ({
         bookmarks: state.bookmarks.filter((b) => b.id !== id),
+      }));
+    } else {
+      set({ error: res.error ?? '删除收藏失败' });
+    }
+  },
+
+  removeByBook: (bookId) => {
+    // 空 bookId 直接跳过：StorageService 层会拒绝，这里提前短路避免误删
+    if (!bookId) {
+      return;
+    }
+    const res = StorageService.deleteBookmarksByBook(bookId);
+    if (res.success) {
+      set((state) => ({
+        bookmarks: state.bookmarks.filter((b) => b.bookId !== bookId),
       }));
     } else {
       set({ error: res.error ?? '删除收藏失败' });
