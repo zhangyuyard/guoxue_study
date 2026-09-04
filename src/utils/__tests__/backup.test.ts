@@ -4,8 +4,8 @@
  *   - pickSettingsSnapshot：设置白名单采集
  *   - buildBackup → parseBackup：往返一致
  *   - parseBackup：各字段最小结构校验与中文错误文案
- *   - userBooks：v1 扩展可选字段（缺失容错 / 非法报错 / 正常透传）
- *   - summarizeBackup：规模汇总（含用户书籍计数）
+ *   - userBooks / highlights / lastRead：v1 扩展可选字段（缺失容错 / 非法报错 / 正常透传）
+ *   - summarizeBackup：规模汇总（含用户书籍 / 划线 / 续读位置计数）
  */
 import {
   BACKUP_VERSION,
@@ -38,6 +38,21 @@ function makeUserBook(id = 'user-backup-1'): Record<string, unknown> {
   };
 }
 
+/** 构造一条最小划线（备份聚合用） */
+function makeHighlight(id = 'hl-1'): Record<string, unknown> {
+  return {
+    id,
+    bookId: 'book1',
+    chapterId: 'ch1',
+    segmentId: 'seg-1',
+    startOffset: 0,
+    endOffset: 5,
+    color: 'yellow',
+    text: '学而时习之',
+    createdAt: '2026-03-15T00:00:00.000Z',
+  };
+}
+
 /** 构造一份最小备份快照 */
 function makeSnapshot(): BackupSnapshot {
   return {
@@ -57,6 +72,8 @@ function makeSnapshot(): BackupSnapshot {
     notes: [{ id: 'note-1', bookId: 'book1', chapterId: 'ch1', segmentId: 'seg-1', startOffset: 0, endOffset: 3, content: '温故知新' }],
     achievements: { 'recite-10': '2026-03-15T03:00:00.000Z' },
     userBooks: [makeUserBook()],
+    highlights: [makeHighlight()],
+    lastRead: { bookId: 'book1', chapterId: 'ch1', segmentId: 'seg-1' },
   };
 }
 
@@ -126,6 +143,22 @@ describe('buildBackup → parseBackup 往返', () => {
     };
     expect(root.data.userBooks).toHaveLength(1);
     expect(root.data.userBooks[0].id).toBe('user-backup-1');
+  });
+
+  test('highlights 与 lastRead 随快照透传进 JSON（聚合断言）', () => {
+    const root = JSON.parse(buildBackup(makeSnapshot())) as {
+      data: {
+        highlights: Array<{ id: string; color: string }>;
+        lastRead: { bookId: string; chapterId: string; segmentId?: string };
+      };
+    };
+    expect(root.data.highlights).toHaveLength(1);
+    expect(root.data.highlights[0].id).toBe('hl-1');
+    expect(root.data.lastRead).toEqual({
+      bookId: 'book1',
+      chapterId: 'ch1',
+      segmentId: 'seg-1',
+    });
   });
 });
 
@@ -225,6 +258,8 @@ describe('parseBackup 校验与错误文案', () => {
       notes: [],
       achievements: {},
       userBooks: [],
+      highlights: [],
+      lastRead: null,
     });
   });
 
@@ -269,21 +304,130 @@ describe('parseBackup 校验与错误文案', () => {
   });
 });
 
+describe('parseBackup：highlights 可选字段（v1 扩展）', () => {
+  test('旧备份缺失 → 容错为空数组（不报错）', () => {
+    const text = JSON.stringify({
+      version: 1,
+      data: { settings: {}, recitation: [], bookmarks: [], notes: [], achievements: {} },
+    });
+    expect(parseBackup(text).data.highlights).toEqual([]);
+  });
+
+  test('提供但非数组（字符串/对象/数字）→ 报错并指名字段', () => {
+    const base = { settings: {}, recitation: [], bookmarks: [], notes: [], achievements: {} };
+    for (const bad of ['oops', {}, 42]) {
+      const text = JSON.stringify({
+        version: 1,
+        data: { ...base, highlights: bad },
+      });
+      expect(() => parseBackup(text)).toThrow('data.highlights 应为数组');
+    }
+  });
+
+  test('正常数组 → 原样透传', () => {
+    const hl = makeHighlight('hl-passthrough');
+    const text = JSON.stringify({
+      version: 1,
+      data: {
+        settings: {},
+        recitation: [],
+        bookmarks: [],
+        notes: [],
+        achievements: {},
+        highlights: [hl],
+      },
+    });
+    expect(parseBackup(text).data.highlights).toEqual([hl]);
+  });
+});
+
+describe('parseBackup：lastRead 可选字段（v1 扩展）', () => {
+  const base = { settings: {}, recitation: [], bookmarks: [], notes: [], achievements: {} };
+
+  test('旧备份缺失 → 容错为 null（不报错）', () => {
+    const text = JSON.stringify({ version: 1, data: base });
+    expect(parseBackup(text).data.lastRead).toBeNull();
+  });
+
+  test('显式 null → 容错为 null（不报错）', () => {
+    const text = JSON.stringify({ version: 1, data: { ...base, lastRead: null } });
+    expect(parseBackup(text).data.lastRead).toBeNull();
+  });
+
+  test('非对象（字符串/数组/数字）→ 报错', () => {
+    for (const bad of ['oops', [], 42]) {
+      const text = JSON.stringify({ version: 1, data: { ...base, lastRead: bad } });
+      expect(() => parseBackup(text)).toThrow('data.lastRead 应为对象');
+    }
+  });
+
+  test('缺 bookId / chapterId → 报错并指名字段', () => {
+    const noBookId = JSON.stringify({
+      version: 1,
+      data: { ...base, lastRead: { chapterId: 'ch1' } },
+    });
+    expect(() => parseBackup(noBookId)).toThrow('data.lastRead.bookId 应为字符串');
+    const noChapterId = JSON.stringify({
+      version: 1,
+      data: { ...base, lastRead: { bookId: 'book1' } },
+    });
+    expect(() => parseBackup(noChapterId)).toThrow('data.lastRead.chapterId 应为字符串');
+  });
+
+  test('bookId / chapterId 非字符串 → 报错并指名字段', () => {
+    const badBookId = JSON.stringify({
+      version: 1,
+      data: { ...base, lastRead: { bookId: 1, chapterId: 'ch1' } },
+    });
+    expect(() => parseBackup(badBookId)).toThrow('data.lastRead.bookId 应为字符串');
+    const badChapterId = JSON.stringify({
+      version: 1,
+      data: { ...base, lastRead: { bookId: 'book1', chapterId: null } },
+    });
+    expect(() => parseBackup(badChapterId)).toThrow('data.lastRead.chapterId 应为字符串');
+  });
+
+  test('segmentId 非字符串 → 报错', () => {
+    const text = JSON.stringify({
+      version: 1,
+      data: { ...base, lastRead: { bookId: 'book1', chapterId: 'ch1', segmentId: 9 } },
+    });
+    expect(() => parseBackup(text)).toThrow('data.lastRead.segmentId 应为字符串');
+  });
+
+  test('正常（含 segmentId）→ 原样透传', () => {
+    const lastRead = { bookId: 'book1', chapterId: 'ch1', segmentId: 'seg-1' };
+    const text = JSON.stringify({ version: 1, data: { ...base, lastRead } });
+    expect(parseBackup(text).data.lastRead).toEqual(lastRead);
+  });
+
+  test('正常（缺 segmentId，回章首语义）→ 透传且无 segmentId 字段', () => {
+    const lastRead = { bookId: 'book1', chapterId: 'ch1' };
+    const text = JSON.stringify({ version: 1, data: { ...base, lastRead } });
+    const restored = parseBackup(text).data.lastRead;
+    expect(restored).toEqual(lastRead);
+    expect(restored && 'segmentId' in restored).toBe(false);
+  });
+});
+
 describe('summarizeBackup', () => {
-  test('汇总六类数据规模（含用户书籍计数）', () => {
+  test('汇总八类数据规模（含用户书籍 / 划线 / 续读位置）', () => {
     const parsed = parseBackup(buildBackup(makeSnapshot()));
     expect(summarizeBackup(parsed.data)).toBe(
-      '设置 3 项、背诵进度 1 条、收藏 1 条、笔记 1 条、成就 1 项、用户书籍 1 本',
+      '设置 3 项、背诵进度 1 条、收藏 1 条、笔记 1 条、成就 1 项、用户书籍 1 本、划线 1 条、续读位置 1 处',
     );
   });
 
-  test('旧备份（无 userBooks 字段）→ 用户书籍显示 0 本', () => {
+  test('旧备份（扩展字段缺失）→ 划线 0 条，且不显示续读位置', () => {
     const parsed = parseBackup(
       JSON.stringify({
         version: 1,
         data: { settings: {}, recitation: [], bookmarks: [], notes: [], achievements: {} },
       }),
     );
-    expect(summarizeBackup(parsed.data)).toContain('用户书籍 0 本');
+    const summary = summarizeBackup(parsed.data);
+    expect(summary).toContain('用户书籍 0 本');
+    expect(summary).toContain('划线 0 条');
+    expect(summary).not.toContain('续读位置');
   });
 });

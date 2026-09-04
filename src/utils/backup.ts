@@ -1,6 +1,6 @@
 /**
  * 本地备份/恢复纯函数模块（P2-15，本地版）
- * 聚合 设置 / 背诵进度 / 收藏 / 笔记 / 成就 五类数据为带版本号的 JSON。
+ * 聚合 设置 / 背诵进度 / 收藏 / 笔记 / 成就 / 用户书籍 / 划线 / 续读位置为带版本号的 JSON。
  * 只做纯数据构造与校验，不触碰 RNFS / DocumentPicker（IO 由 UI 层负责），
  * 与 exporters / dailyGoal 同一纯函数套路，便于单测锁定格式与错误文案。
  *
@@ -32,6 +32,18 @@ export interface BackupData {
   achievements: Record<string, string>;
   /** 用户书籍 Book 结构列表（v1 扩展字段；旧备份缺失，解析时容错为空数组） */
   userBooks: unknown[];
+  /** 划线 Highlight 结构列表（v1 扩展字段；旧备份缺失，解析时容错为空数组） */
+  highlights: unknown[];
+  /** 续读位置（v1 扩展字段；旧备份缺失，解析时容错为 null） */
+  lastRead: BackupLastRead | null;
+}
+
+/** 续读位置（与 useReaderStore 持久化的 lastRead 同构） */
+export interface BackupLastRead {
+  bookId: string;
+  chapterId: string;
+  /** 上次阅读到的段落（段落级续读；缺失 = 回章首） */
+  segmentId?: string;
 }
 
 /** buildBackup 的输入（与 BackupData 同构；由 UI 层从各 store 采集） */
@@ -115,6 +127,8 @@ export function buildBackup(snapshot: BackupSnapshot): string {
       notes: snapshot.notes,
       achievements: snapshot.achievements,
       userBooks: snapshot.userBooks,
+      highlights: snapshot.highlights,
+      lastRead: snapshot.lastRead,
     },
   };
   return JSON.stringify(payload, null, 2);
@@ -180,6 +194,27 @@ export function parseBackup(text: string): ParsedBackup {
   if (data.userBooks !== undefined && !Array.isArray(data.userBooks)) {
     throw new Error('备份文件格式错误：data.userBooks 应为数组');
   }
+  // highlights 为 v1 扩展的可选字段：旧备份缺失 → 空数组（不报错，向后兼容）；
+  // 新备份提供该字段 → 必须为数组（非法报错，与 userBooks 等字段的口径一致）
+  if (data.highlights !== undefined && !Array.isArray(data.highlights)) {
+    throw new Error('备份文件格式错误：data.highlights 应为数组');
+  }
+  // lastRead 为 v1 扩展的可选字段：缺失/显式 null → null（不报错）；
+  // 存在时逐字段最小校验（bookId/chapterId 必填字符串，segmentId 可选字符串）
+  if (data.lastRead !== undefined && data.lastRead !== null) {
+    if (!isPlainObject(data.lastRead)) {
+      throw new Error('备份文件格式错误：data.lastRead 应为对象');
+    }
+    if (typeof data.lastRead.bookId !== 'string') {
+      throw new Error('备份文件格式错误：data.lastRead.bookId 应为字符串');
+    }
+    if (typeof data.lastRead.chapterId !== 'string') {
+      throw new Error('备份文件格式错误：data.lastRead.chapterId 应为字符串');
+    }
+    if (data.lastRead.segmentId !== undefined && typeof data.lastRead.segmentId !== 'string') {
+      throw new Error('备份文件格式错误：data.lastRead.segmentId 应为字符串');
+    }
+  }
 
   // 只挑已知字段重组（未知字段忽略），保证返回类型可信
   return {
@@ -192,14 +227,18 @@ export function parseBackup(text: string): ParsedBackup {
       notes: data.notes as unknown[],
       achievements: data.achievements as Record<string, string>,
       userBooks: (data.userBooks ?? []) as unknown[],
+      highlights: (data.highlights ?? []) as unknown[],
+      lastRead: (data.lastRead ?? null) as BackupLastRead | null,
     },
   };
 }
 
 /**
  * 汇总备份数据规模（导入确认弹窗 / 完成提示共用），例如：
- * 「设置 16 项、背诵进度 12 条、收藏 8 条、笔记 5 条、成就 3 项、用户书籍 2 本」。
- * 旧备份无 userBooks 字段时解析已容错为空数组，此处显示「用户书籍 0 本」。
+ * 「设置 16 项、背诵进度 12 条、收藏 8 条、笔记 5 条、成就 3 项、用户书籍 2 本、
+ * 划线 20 条、续读位置 1 处」。
+ * 旧备份缺失的扩展字段解析已容错（highlights 为空数组 / lastRead 为 null），
+ * 此处划线显示 0 条；无续读位置时不显示该类目。
  */
 export function summarizeBackup(data: BackupData): string {
   const parts = [
@@ -209,6 +248,10 @@ export function summarizeBackup(data: BackupData): string {
     `笔记 ${data.notes.length} 条`,
     `成就 ${Object.keys(data.achievements).length} 项`,
     `用户书籍 ${data.userBooks.length} 本`,
+    `划线 ${data.highlights.length} 条`,
   ];
+  if (data.lastRead) {
+    parts.push('续读位置 1 处');
+  }
   return parts.join('、');
 }

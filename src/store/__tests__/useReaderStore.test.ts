@@ -237,3 +237,48 @@ describe('P1-17 段落级续读（lastRead.segmentId 持久化与兼容）', () 
     expect(state.lastRead && 'segmentId' in state.lastRead).toBe(false);
   });
 });
+
+describe('restoreLastRead（备份恢复续读位置）', () => {
+  beforeEach(() => {
+    resetStore();
+  });
+
+  test('写入校验过的续读位置（含 segmentId），运行态 bookId/chapterId 不受影响', () => {
+    useReaderStore.setState({ bookId: 'book-x', chapterId: 'chap-x', segmentId: 'seg-x' });
+
+    useReaderStore.getState().restoreLastRead({
+      bookId: 'book-1',
+      chapterId: 'chap-1',
+      segmentId: 'seg-1',
+    });
+
+    const state = useReaderStore.getState();
+    expect(state.lastRead).toEqual({
+      bookId: 'book-1',
+      chapterId: 'chap-1',
+      segmentId: 'seg-1',
+    });
+    // 恢复仅写 lastRead 持久化字段，不触碰当前阅读运行态
+    expect(state.bookId).toBe('book-x');
+    expect(state.chapterId).toBe('chap-x');
+    expect(state.segmentId).toBe('seg-x');
+  });
+
+  test('写入无段落进度（回章首语义）的续读位置', () => {
+    useReaderStore.getState().restoreLastRead({ bookId: 'book-2', chapterId: 'chap-2' });
+
+    const state = useReaderStore.getState();
+    expect(state.lastRead).toEqual({ bookId: 'book-2', chapterId: 'chap-2' });
+    expect(state.lastRead && 'segmentId' in state.lastRead).toBe(false);
+  });
+
+  test('传 null 清空续读位置（旧备份兼容语义）', () => {
+    useReaderStore.setState({
+      lastRead: { bookId: 'book-1', chapterId: 'chap-1', segmentId: 'seg-1' },
+    });
+
+    useReaderStore.getState().restoreLastRead(null);
+
+    expect(useReaderStore.getState().lastRead).toBeNull();
+  });
+});

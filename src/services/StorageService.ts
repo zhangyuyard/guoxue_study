@@ -435,6 +435,114 @@ export function deleteHighlight(id: string): ServiceResult<boolean> {
   }
 }
 
+/** 划线颜色合法值（备份恢复逐条校验用） */
+const HIGHLIGHT_COLORS: readonly string[] = ['yellow', 'green', 'blue'];
+
+/**
+ * restoreHighlights 单条恢复的最小校验与归一化：
+ * id/bookId/chapterId/segmentId 须为非空字符串，偏移须为有限数且 0 ≤ start ≤ end，
+ * color 须为合法枚举，text 须为字符串；noteId 缺失归一化为 undefined，
+ * createdAt 缺失补当前时间。非法条目返回 null（由调用方跳过计数）。
+ */
+function normalizeRestoreHighlight(item: unknown): Highlight | null {
+  if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+    return null;
+  }
+  const raw = item as Record<string, unknown>;
+  const isNonEmptyString = (v: unknown): v is string =>
+    typeof v === 'string' && v.length > 0;
+  if (
+    !isNonEmptyString(raw.id) ||
+    !isNonEmptyString(raw.bookId) ||
+    !isNonEmptyString(raw.chapterId) ||
+    !isNonEmptyString(raw.segmentId)
+  ) {
+    return null;
+  }
+  const startOffset = Number(raw.startOffset);
+  const endOffset = Number(raw.endOffset);
+  if (
+    !Number.isFinite(startOffset) ||
+    !Number.isFinite(endOffset) ||
+    startOffset < 0 ||
+    endOffset < startOffset
+  ) {
+    return null;
+  }
+  if (!HIGHLIGHT_COLORS.includes(String(raw.color))) {
+    return null;
+  }
+  if (typeof raw.text !== 'string') {
+    return null;
+  }
+  return {
+    id: raw.id,
+    bookId: raw.bookId,
+    chapterId: raw.chapterId,
+    segmentId: raw.segmentId,
+    startOffset,
+    endOffset,
+    color: raw.color as Highlight['color'],
+    text: raw.text,
+    noteId: typeof raw.noteId === 'string' ? raw.noteId : undefined,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : nowISO(),
+  };
+}
+
+/**
+ * 批量恢复划线（备份导入）：逐条最小校验 → INSERT OR REPLACE 幂等写入。
+ * 非法条目静默跳过并计数（与五类 restoreFromBackup 的跳过惯例一致）；
+ * 同 id 重复恢复按备份内容覆盖（幂等），不产生重复行。
+ * 划线全量读取复用 getHighlights()（无参 = 全表），不另设 API。
+ */
+export function restoreHighlights(
+  items: unknown[],
+): ServiceResult<{ restored: number; skipped: number }> {
+  if (!Array.isArray(items)) {
+    return { success: false, error: 'highlights 应为数组' };
+  }
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  try {
+    const initRes = initDatabase();
+    if (!initRes.success) {
+      return { success: false, error: initRes.error ?? '初始化数据库失败' };
+    }
+    let restored = 0;
+    let skipped = 0;
+    for (const item of items) {
+      const h = normalizeRestoreHighlight(item);
+      if (!h) {
+        skipped += 1;
+        continue;
+      }
+      instance.execute(
+        `INSERT OR REPLACE INTO highlights
+         (id, book_id, chapter_id, segment_id, start_offset, end_offset, color, text, note_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          h.id,
+          h.bookId,
+          h.chapterId,
+          h.segmentId,
+          h.startOffset,
+          h.endOffset,
+          h.color,
+          h.text,
+          h.noteId ?? null,
+          h.createdAt,
+        ],
+      );
+      restored += 1;
+    }
+    return { success: true, data: { restored, skipped } };
+  } catch (e) {
+    return { success: false, error: `恢复划线失败：${(e as Error).message}` };
+  }
+}
+
 // ---------- 笔记 ----------
 
 function rowToNote(row: Record<string, unknown>): Note {
@@ -792,6 +900,7 @@ export const StorageService = {
   saveHighlight,
   getHighlights,
   deleteHighlight,
+  restoreHighlights,
   saveNote,
   updateNote,
   getNotes,

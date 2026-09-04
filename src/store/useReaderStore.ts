@@ -57,6 +57,11 @@ interface ReaderState extends ReaderPersist {
   getAnnotation: (segmentId: string) => PinyinAnnotation[] | undefined;
   /** 清除全部注音缓存 */
   clearAnnotationCache: () => void;
+  /**
+   * 备份恢复：写入已校验的续读位置（persist 中间件自动同步持久化）。
+   * 仅恢复流程调用；null 表示备份无续读位置（旧备份兼容，清空现值）。
+   */
+  restoreLastRead: (lastRead: ReaderPersist['lastRead']) => void;
   /** 清空阅读器状态 */
   clearReader: () => void;
 }
@@ -137,6 +142,8 @@ export const useReaderStore = create<ReaderState>()(
       },
 
       clearAnnotationCache: () => set({ annotationCache: {} }),
+
+      restoreLastRead: (lastRead: ReaderPersist['lastRead']) => set({ lastRead }),
 
       clearReader: () =>
         set({

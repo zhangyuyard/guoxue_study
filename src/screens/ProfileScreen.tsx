@@ -31,6 +31,8 @@ import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { useNoteStore } from '@/store/useNoteStore';
 import { useRecitationStore } from '@/store/useRecitationStore';
 import { useLibraryStore } from '@/store/useLibraryStore';
+import { useReaderStore } from '@/store/useReaderStore';
+import { StorageService } from '@/services/StorageService';
 import { UserBookService } from '@/services/UserBookService';
 import {
   buildBackup,
@@ -189,11 +191,13 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
 
   /**
    * 执行恢复：各 store restoreFromBackup（整体替换并持久化）→
-   * 用户书恢复（合并语义：只增改不删）→ 刷新书架 → 成就重算 → 完成提示。
-   * IO 异常不崩溃（try-catch 兜底提示）。
+   * 用户书恢复（合并语义：只增改不删）→ 刷新书架 → 成就重算 →
+   * 划线恢复（幂等写入，非法条目跳过）→ 续读位置恢复 → 完成提示。
+   * IO 异常不崩溃（try-catch 兜底提示）；划线/续读恢复失败降级，不阻断其它类目。
    */
   const applyBackupRestore = useCallback((parsed: ParsedBackup) => {
     void (async () => {
+      let restoreWarning = '';
       try {
         useSettingsStore.getState().restoreFromBackup(parsed.data.settings);
         useRecitationStore.getState().restoreFromBackup(parsed.data.recitation);
@@ -206,10 +210,29 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
         await useLibraryStore.getState().loadBooks();
         // 恢复后按新数据重算成就（幂等；备份里没有的成就按当前数据补齐解锁）
         useAchievementStore.getState().recompute();
-        Alert.alert('导入成功', `已恢复数据：\n${summarizeBackup(parsed.data)}`);
       } catch (e) {
         Alert.alert('导入失败', `恢复数据时出错：${(e as Error).message ?? '未知错误'}`);
+        return;
       }
+      // 划线恢复：逐条幂等写入（非法条目已在 Service 内跳过计数）；失败降级提示
+      try {
+        const hlRes = StorageService.restoreHighlights(parsed.data.highlights);
+        if (!hlRes.success) {
+          restoreWarning = `\n\n划线恢复失败：${hlRes.error ?? '未知错误'}`;
+        }
+      } catch {
+        restoreWarning = '\n\n划线恢复失败：未知错误';
+      }
+      // 续读位置恢复：解析层已校验，仅非 null 时写入（旧备份缺失则保留设备现值）；
+      // 阅读页下次打开时生效，不强制跳转。失败降级，不阻断完成弹窗
+      if (parsed.data.lastRead) {
+        try {
+          useReaderStore.getState().restoreLastRead(parsed.data.lastRead);
+        } catch {
+          // 降级：续读位置恢复失败不影响其它类目
+        }
+      }
+      Alert.alert('导入成功', `已恢复数据：\n${summarizeBackup(parsed.data)}${restoreWarning}`);
     })();
   }, []);
 
@@ -218,7 +241,9 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
     void (async () => {
       try {
         // 采集快照：设置走白名单函数字段（避免把方法序列化进备份）；
-        // 用户书经 UserBookService 读取（内存列表与 db 一致，见 getAllBooks 注释）
+        // 用户书经 UserBookService 读取（内存列表与 db 一致，见 getAllBooks 注释）；
+        // 划线经 StorageService 全量读取（getHighlights 无参 = 全表）；
+        // 续读位置取 useReaderStore 持久化字段 lastRead
         const settingsState = useSettingsStore.getState();
         const snapshot = {
           settings: pickSettingsSnapshot(settingsState as unknown as Record<string, unknown>),
@@ -227,6 +252,8 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
           notes: useNoteStore.getState().notes,
           achievements: useAchievementStore.getState().unlockedAt,
           userBooks: UserBookService.getAllBooks(),
+          highlights: StorageService.getHighlights().data ?? [],
+          lastRead: useReaderStore.getState().lastRead,
         };
         const text = buildBackup(snapshot);
         const fileName = `guoxue-backup-${formatBackupStamp(new Date())}.json`;
@@ -279,7 +306,7 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
 
       Alert.alert(
         '确认导入',
-        `将导入以下数据：\n\n${summarizeBackup(parsed.data)}\n\n导入会覆盖现有同类数据（设置、背诵进度、收藏、笔记、成就），且无法撤销。`,
+        `将导入以下数据：\n\n${summarizeBackup(parsed.data)}\n\n导入会覆盖现有同类数据（设置、背诵进度、收藏、笔记、成就、划线、续读位置），且无法撤销。`,
         [
           { text: '取消', style: 'cancel' },
           {
@@ -432,7 +459,7 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
           <View style={styles.settingLabelBox}>
             <Text style={[styles.settingLabel, { color: colors.text }]}>导出备份</Text>
             <Text style={[styles.settingHint, { color: colors.pinyin }]}>
-              设置 / 背诵进度 / 收藏 / 笔记 / 成就 / 用户书籍 → 本地 JSON 文件
+              设置 / 背诵进度 / 收藏 / 笔记 / 成就 / 用户书籍 / 划线 / 续读位置 → 本地 JSON 文件
             </Text>
           </View>
           <Text style={[styles.settingValue, { color: colors.textSecondary }]}>导出 ›</Text>
