@@ -10,6 +10,7 @@ import { join } from 'path';
 import { parseTxtBook } from '@/services/UserBookService';
 import {
   computeScrollInitialRows,
+  isWithinPreloadWindow,
   SCROLL_INITIAL_ROWS_DEFAULTS,
 } from '@/utils/readerScroll';
 
@@ -121,8 +122,36 @@ describe('源码结构断言：ReaderScreen 初始行数必须按预算计算', 
 
   test('已导入 computeScrollInitialRows 并按首章内容量计算', () => {
     expect(source).toMatch(
-      /import \{ computeScrollInitialRows \} from '@\/utils\/readerScroll';/,
+      /import \{[^}]*computeScrollInitialRows[^}]*\} from '@\/utils\/readerScroll';/,
     );
     expect(source).toMatch(/computeScrollInitialRows\(counts\)/);
+  });
+});
+
+describe('isWithinPreloadWindow：距末尾不足预载窗口的统一口径', () => {
+  const SCREENS = 2;
+
+  test('内容不足一屏（道德经级短章）→ true（应追加下一章）', () => {
+    // 内容 600px、视口 800px：无可滚动区间也必须判定为「距末尾不足窗口」
+    expect(isWithinPreloadWindow(600, 800, 0, SCREENS)).toBe(true);
+  });
+
+  test('内容恰填满窗口（3 屏）→ false（停止级联追加，收敛）', () => {
+    // content - view - offset = 2*view 恰好等于阈值 → 不追加
+    expect(isWithinPreloadWindow(2400, 800, 0, SCREENS)).toBe(false);
+    expect(isWithinPreloadWindow(2399, 800, 0, SCREENS)).toBe(true);
+  });
+
+  test('偏移推进后判定随之变化（滚动中的预加载口径不变）', () => {
+    // 距末尾 = 3200 - 800 - 2000 = 400 < 1600 → true
+    expect(isWithinPreloadWindow(3200, 800, 2000, SCREENS)).toBe(true);
+    // 距末尾 = 5200 - 800 - 2000 = 2400 ≥ 1600 → false
+    expect(isWithinPreloadWindow(5200, 800, 2000, SCREENS)).toBe(false);
+  });
+
+  test('视口 / 内容未量出（≤0）→ false（守卫，不误触发追加）', () => {
+    expect(isWithinPreloadWindow(600, 0, 0, SCREENS)).toBe(false);
+    expect(isWithinPreloadWindow(0, 800, 0, SCREENS)).toBe(false);
+    expect(isWithinPreloadWindow(-1, 800, 0, SCREENS)).toBe(false);
   });
 });

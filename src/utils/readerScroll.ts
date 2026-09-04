@@ -43,6 +43,34 @@ export const SCROLL_INITIAL_ROWS_DEFAULTS = {
 } as const;
 
 /**
+ * 判断「距内容末尾是否不足预载窗口」（连续滚动向后追加下一章的统一口径）。
+ *
+ * 背景（BugFix：短章经典滚动模式停在第一章、无法滚动）：《道德经》等内置经典
+ * 每章仅一段几十字，单章内容不足一屏 → FlatList 无可滚动区间，物理上产生不了
+ * onScroll；RN 的 onEndReached 在内容不满一屏时不触发（Android 长期已知问题）、
+ * 追加后仍不满一屏时也不重触发。于是「追加下一章」必须有不依赖滚动事件的
+ * 兜底触发点（onContentSizeChange / FlatList onLayout），且其判定口径必须与
+ * handleScroll（onScroll）完全一致——统一收敛到本函数，避免多处口径漂移。
+ *
+ * @param contentHeight 内容总高（px；≤0 视为未量出，返回 false）
+ * @param viewHeight 视口高（px；≤0 视为未量出，返回 false）
+ * @param scrollOffset 当前滚动偏移（px）
+ * @param preloadScreens 预载窗口（屏高倍数）
+ * @returns 距末尾不足 preloadScreens 屏时为 true（应追加下一章）
+ */
+export function isWithinPreloadWindow(
+  contentHeight: number,
+  viewHeight: number,
+  scrollOffset: number,
+  preloadScreens: number,
+): boolean {
+  if (viewHeight <= 0 || contentHeight <= 0) {
+    return false;
+  }
+  return contentHeight - viewHeight - scrollOffset < viewHeight * preloadScreens;
+}
+
+/**
  * 计算滚动模式初始渲染行数。
  * @param rowCharCounts 各行码点数（标题行传 0；顺序与渲染顺序一致）
  * @param options 计算选项

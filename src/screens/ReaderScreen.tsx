@@ -77,7 +77,7 @@ import {
   type PaginatedPage,
 } from '@/utils/pagination';
 import type { HighlightedSegment } from '@/utils/highlight';
-import { computeScrollInitialRows } from '@/utils/readerScroll';
+import { computeScrollInitialRows, isWithinPreloadWindow } from '@/utils/readerScroll';
 
 // ============ 类型定义 ============
 
@@ -927,10 +927,6 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
   const colors: ThemeColors = getPaperColors(paper);
 
-  // 文本数据
-  const [book, setBook] = useState<Book | null>(null);
-  const [chapter, setChapter] = useState<Chapter | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
   /** 连续滚动模式：已拼接的章节序列（首项为当前打开章，滚到末尾向后追加） */
   const [continuousChapters, setContinuousChapters] = useState<Chapter[]>([]);
   /** 实际正在阅读的章节（滚动跨章后与路由 chapterId 不同），初值在 chapterId 解析后给出 */
@@ -1047,6 +1043,52 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // 新建的对象，若以对象引用作依赖会引发 setState 无限循环（Maximum update depth）
   const segmentId = params?.segmentId ?? null;
 
+  // 文本数据：随路由参数【同步派生】（BugFix：切章时旧章内容多渲染一帧的闪烁）。
+  // 旧实现经 init effect 异步 setState 加载：点「下一章」后参数已变、章节状态仍是
+  // 旧章，当帧先渲染第一章、等 effect 落地才换新章，产生「先第一章再跳走」的闪烁。
+  // getBook/getChapter 均为同步内存索引（内置书 JSON / 已注册用户书），无需异步——
+  // 派生后参数一变、当帧即得新章数据；派生失败（无参数/未找到）由 loadError 表达。
+  const book = useMemo<Book | null>(() => {
+    if (!bookId) {
+      return null;
+    }
+    const res = TextLibraryService.getBook(bookId);
+    return res.success ? res.data ?? null : null;
+  }, [bookId]);
+  const chapter = useMemo<Chapter | null>(() => {
+    if (!chapterId) {
+      return null;
+    }
+    const res = TextLibraryService.getChapter(chapterId);
+    return res.success ? res.data ?? null : null;
+  }, [chapterId]);
+  const loadError = useMemo<string | null>(() => {
+    if (!bookId || !chapterId) {
+      return '缺少书籍或章节参数';
+    }
+    if (!book) {
+      return '加载书籍失败';
+    }
+    if (!chapter) {
+      return '加载章节失败';
+    }
+    return null;
+  }, [bookId, chapterId, book, chapter]);
+
+  /**
+   * 滚动拼接序列的「当帧一致视图」（切章闪烁的另一半修复）。
+   * 路由切章后、重置 effect 把 continuousChapters 重置为 [chapter] 之前，
+   * continuousChapters 仍是上一章的序列，直接渲染会闪现旧章内容。
+   * 派生规则：路由章已在序列中（正常阅读 / 向前后拼接的稳态）→ 原样使用；
+   * 不在（切章过渡帧）→ 以路由章单独成列，当帧即渲染新章。
+   */
+  const effectiveChapters = useMemo<Chapter[]>(() => {
+    if (continuousChapters.some((c) => c.id === chapter?.id)) {
+      return continuousChapters;
+    }
+    return chapter ? [chapter] : [];
+  }, [continuousChapters, chapter]);
+
   /**
    * P1-17 段落级续读：路由未携带 segmentId 时，从持久化 lastRead 恢复该章
    * 上次阅读到的段落；旧数据无 segmentId / 跨章跳转时为 null（回章首，同现状）。
@@ -1103,10 +1145,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // 否则后续章节的历史划线/笔记读不到（表现为划线不显示、点划线重复建笔记）。
   const annotationScope = useMemo<string[] | undefined>(() => {
     if (readerMode === 'scroll') {
-      return continuousChapters.map((c) => c.id);
+      return effectiveChapters.map((c) => c.id);
     }
     return chapterId ? [chapterId] : undefined;
-  }, [readerMode, continuousChapters, chapterId]);
+  }, [readerMode, effectiveChapters, chapterId]);
   const { highlights, addHighlight } = useHighlightsForChapters(
     bookId ?? undefined,
     annotationScope,
@@ -1114,25 +1156,13 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const { notes, addNote, updateNote } = useNotesForChapters(bookId ?? undefined, annotationScope);
   const { addBookmark } = useBookmarks();
 
-  // 初始化：加载书籍与章节，记录阅读位置，初始化数据库（幂等）
+  // 初始化：初始化数据库（幂等）并记录阅读位置。
+  // 书籍/章节文本已由上方 useMemo 随路由参数同步派生，本 effect 只保留副作用。
   useEffect(() => {
     if (!bookId || !chapterId) {
-      setLoadError('缺少书籍或章节参数');
-      return;
-    }
-    const bookRes = TextLibraryService.getBook(bookId);
-    const chapterRes = TextLibraryService.getChapter(chapterId);
-    if (!bookRes.success || !bookRes.data) {
-      setLoadError(bookRes.error ?? '加载书籍失败');
-      return;
-    }
-    if (!chapterRes.success || !chapterRes.data) {
-      setLoadError(chapterRes.error ?? '加载章节失败');
       return;
     }
     StorageService.initDatabase();
-    setBook(bookRes.data);
-    setChapter(chapterRes.data);
     // P1-17：路由携带 segmentId（书架/收藏跳转）优先；否则用持久化的段落级进度续读
     useReaderStore
       .getState()
@@ -1322,6 +1352,34 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   }, [appendNextChapter]);
 
   /**
+   * 内容不足预载窗口时追加下一章（BugFix：短章经典滚动模式停在第一章、无法滚动）。
+   * 根因：《道德经》等内置经典每章仅一段几十字，打开章的内容不足一屏 → FlatList
+   * 没有可滚动区间，物理上产生不了 onScroll；而 RN 的 onEndReached 在内容不满
+   * 一屏时不触发（Android 长期已知问题）、追加后仍不满一屏时也不重触发——
+   * 「追加下一章」的两个既有触发点全部依赖「先能滚动」，列表永远停在第一章。
+   * 向前拼接早有 onContentSizeChange 顶部兜底（顶部同样滚不动），本函数补齐
+   * 对称的「向后追加」兜底：由 onContentSizeChange 与 FlatList onLayout 两个
+   * 不依赖滚动事件的时机调用，口径与 handleScroll 统一走 isWithinPreloadWindow。
+   * 追加引发 contentSize 变化 → 再次触发 → 级联补齐，收敛于窗口填满或没有
+   * 下一章（去重 / 上限 / 锚点互斥守卫都在 appendNextChapter 内）。
+   */
+  const fillShortContentIfNeeded = useCallback(() => {
+    if (readerMode !== 'scroll') {
+      return;
+    }
+    if (
+      isWithinPreloadWindow(
+        contentH.current,
+        viewH.current,
+        scrollOffset.current,
+        CONTIGUOUS_PRELOAD_SCREENS,
+      )
+    ) {
+      appendNextChapter();
+    }
+  }, [readerMode, appendNextChapter]);
+
+  /**
    * 在连续滚动序列【头部】插入上一章。
    * 五重守卫：①仅滚动模式 ②无并发加载 ③无尚未完成的偏移补偿 ④未达拼接上限
    * ⑤存在上一章（不越过首章）且未重复插入。
@@ -1384,7 +1442,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   /** 连续滚动行：每章 = 1 个章标题行 + N 个段落行 */
   const continuousRows = useMemo<ReaderRow[]>(() => {
     const rows: ReaderRow[] = [];
-    for (const ch of continuousChapters) {
+    // 用 effectiveChapters（当帧一致视图）而非 continuousChapters 状态：
+    // 切章过渡帧不闪现旧章内容（见 effectiveChapters 注释）
+    for (const ch of effectiveChapters) {
       rows.push({
         id: `${TITLE_ROW_PREFIX}${ch.id}`,
         chapterId: ch.id,
@@ -1401,7 +1461,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       }
     }
     return rows;
-  }, [continuousChapters, toDisplayText, toDisplaySegment]);
+  }, [effectiveChapters, toDisplayText, toDisplaySegment]);
 
   /**
    * 滚动模式初始渲染行数（BugFix：导入书在滚动模式下无法即时滚动）。
@@ -1700,7 +1760,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
       // 距底部不足预载窗口（默认 2 屏）时提前追加下一章：
       // 「预加载」让拼接发生在用户远离章节边界处，到边界时内容已就绪。
-      if (contentHeight - viewHeight - offset < viewHeight * CONTIGUOUS_PRELOAD_SCREENS) {
+      // 口径统一走 isWithinPreloadWindow，与 onContentSizeChange / onLayout
+      // 的「短内容兜底追加」（fillShortContentIfNeeded）保持完全一致。
+      if (isWithinPreloadWindow(contentHeight, viewHeight, offset, CONTIGUOUS_PRELOAD_SCREENS)) {
         appendNextChapter();
       }
       // 距顶部不足预载窗口时提前向前拼接上一章（同上）。
@@ -2219,6 +2281,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
               }
             }
             contentH.current = h;
+            // 短内容兜底：内容不足预载窗口时级联追加下一章（道德经级短章的
+            // 「停在第一章、无法滚动」死锁的修复点，见 fillShortContentIfNeeded）
+            fillShortContentIfNeeded();
             // 锚点超时兜底：正常情况下锚点在行布局回调中已解析，这里只是保险
             expireAnchorIfNeeded();
             // 定位快速通道：模式切换会重挂载滚动列表，目标行若超出初始渲染窗口，
@@ -2244,6 +2309,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           }}
           onLayout={(e) => {
             viewH.current = e.nativeEvent.layout.height;
+            // 首帧布局完成即补一次短内容兜底：contentSize 事件可能先于 onLayout
+            // 到达（当时 viewH 尚为 0 会被口径函数跳过），错过首次时机则在此补齐
+            fillShortContentIfNeeded();
           }}
         />
       )}
