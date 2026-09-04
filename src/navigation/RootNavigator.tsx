@@ -1,7 +1,7 @@
 /**
  * 根导航（T05）
  * 结构：RootStack（Native Stack）
- *   ├─ Main：底部 3 Tab（书架 | 字典 | 我的），各 Tab 内 Native Stack
+ *   ├─ Main：底部 4 Tab（书架 | 字典 | 背诵 | 我的），各 Tab 内 Native Stack
  *   ├─ Reader：全局阅读器（书架 / 搜索结果 / 收藏列表等任意位置可进入）
  *   └─ RecitationPractice：背诵练习（阅读器工具栏「背诵」直达）
  * Tab 图标使用 emoji 兜底，避免 react-native-vector-icons 原生字体未链接时显示问号。
@@ -31,6 +31,7 @@ import type {
   LibraryStackParamList,
   MainTabParamList,
   ProfileStackParamList,
+  ReciteStackParamList,
   RootStackParamList,
 } from '@/navigation/types';
 
@@ -40,12 +41,14 @@ const RootStack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const LibraryStack = createNativeStackNavigator<LibraryStackParamList>();
 const DictStack = createNativeStackNavigator<DictStackParamList>();
+const ReciteStack = createNativeStackNavigator<ReciteStackParamList>();
 const ProfileStack = createNativeStackNavigator<ProfileStackParamList>();
 
 /** Tab 展示配置（emoji 图标兜底） */
 const TAB_META: Record<keyof MainTabParamList, { icon: string; label: string }> = {
   Library: { icon: '📚', label: '书架' },
   Dict: { icon: '📕', label: '字典' },
+  Recite: { icon: '🧠', label: '背诵' },
   Profile: { icon: '👤', label: '我的' },
 };
 
@@ -72,18 +75,26 @@ function DictStackScreens(): React.JSX.Element {
   );
 }
 
-/** 我的 Tab：个人中心 + 收藏 / 笔记 / 背诵进度 / 背诵练习 / 成就 */
+/** 背诵 Tab：背诵助手页 + 背诵练习页 */
+function ReciteStackScreens(): React.JSX.Element {
+  return (
+    <ReciteStack.Navigator screenOptions={{ headerShown: false }}>
+      <ReciteStack.Screen name="Recitation" component={RecitationScreen} />
+      <ReciteStack.Screen
+        name="RecitationPractice"
+        component={RecitationPracticeScreen}
+      />
+    </ReciteStack.Navigator>
+  );
+}
+
+/** 我的 Tab：个人中心 + 收藏 / 笔记 / 成就（背诵入口已独立为「背诵」Tab） */
 function ProfileStackScreens(): React.JSX.Element {
   return (
     <ProfileStack.Navigator screenOptions={{ headerShown: false }}>
       <ProfileStack.Screen name="Profile" component={ProfileScreen} />
       <ProfileStack.Screen name="Bookmarks" component={BookmarksScreen} />
       <ProfileStack.Screen name="NotesList" component={NotesListScreen} />
-      <ProfileStack.Screen name="Recitation" component={RecitationScreen} />
-      <ProfileStack.Screen
-        name="RecitationPractice"
-        component={RecitationPracticeScreen}
-      />
       <ProfileStack.Screen name="Achievements" component={AchievementsScreen} />
       <ProfileStack.Screen name="StudyStats" component={StudyStatsScreen} />
     </ProfileStack.Navigator>
@@ -122,6 +133,11 @@ function MainTabs(): React.JSX.Element {
         name="Dict"
         component={DictStackScreens}
         options={{ title: TAB_META.Dict.label }}
+      />
+      <Tab.Screen
+        name="Recite"
+        component={ReciteStackScreens}
+        options={{ title: TAB_META.Recite.label }}
       />
       <Tab.Screen
         name="Profile"

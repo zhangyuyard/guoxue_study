@@ -53,6 +53,8 @@ export type MainTabParamList = {
   Library: undefined;
   /** 字典（查字 / 管理 / 导入） */
   Dict: undefined;
+  /** 背诵（背诵助手 + 背诵练习） */
+  Recite: undefined;
   /** 我的 */
   Profile: undefined;
 };
@@ -70,13 +72,17 @@ export type DictStackParamList = {
   DictImport: undefined;
 };
 
-/** 我的 Tab Stack：个人中心、收藏 / 笔记 / 背诵进度 / 繁简转换 / 成就页面 */
+/** 背诵 Tab Stack：背诵助手页 + 背诵练习页 */
+export type ReciteStackParamList = {
+  Recitation: undefined;
+  RecitationPractice: RecitationPracticeParams;
+};
+
+/** 我的 Tab Stack：个人中心、收藏 / 笔记 / 繁简转换 / 成就页面 */
 export type ProfileStackParamList = {
   Profile: undefined;
   Bookmarks: undefined;
   NotesList: undefined;
-  Recitation: undefined;
-  RecitationPractice: RecitationPracticeParams;
   /** 成就页（P2-06） */
   Achievements: undefined;
   /** 学习统计页（P2-14 学习社区本地版） */

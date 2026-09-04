@@ -1,14 +1,16 @@
 /**
- * 背诵助手页（RecitationScreen）
- * 章节选择（按书分组列表，点击选中）+ 模式选择（填空默写/提示遮盖）
- * + 背诵进度卡片网格 + 「开始背诵」按钮。
+ * 背诵助手页（RecitationScreen，首页底部「背诵」Tab）
+ * 两级选择：先选书（横向书签 chips，含内置经典与用户导入书），
+ * 再展示该书章节逐章可选（粒度 = 最小章节，逐章独立开始背诵）
+ * + 模式选择（填空默写/提示遮盖）+ 背诵进度卡片网格 + 「开始背诵」按钮。
+ * 今日复习 / 每日复习提醒 / 每日背诵目标等既有能力全部保留。
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RecitationMode } from '@/types';
-import type { T04StackParamList } from '@/screens/types';
+import type { ReciteStackParamList } from '@/navigation/types';
 import { TextLibraryService } from '@/services/TextLibraryService';
 import { buildReviewItems, REVIEW_INTERVAL_DAYS } from '@/services/ReviewScheduler';
 import {
@@ -21,7 +23,7 @@ import { dailyGoalProgress, DAILY_GOAL_MAX, DAILY_GOAL_MIN } from '@/utils/daily
 import { getColors, PAGE_TITLE_FONT_SIZE } from '@/theme';
 import { RecitationCard } from '@/components/recitation/RecitationCard';
 
-type Props = NativeStackScreenProps<T04StackParamList, 'Recitation'>;
+type Props = NativeStackScreenProps<ReciteStackParamList, 'Recitation'>;
 
 /** 章节索引条目 */
 interface ChapterEntry {
@@ -46,17 +48,23 @@ export default function RecitationScreen({ navigation }: Props): React.JSX.Eleme
   const loadRecitationList = useRecitationStore((s) => s.loadRecitationList);
   const removeProgressByBook = useRecitationStore((s) => s.removeProgressByBook);
 
-  /** 全部章节（按书分组） */
+  /** 全部书籍（按书分组；内置经典 + 用户导入书统一来自 TextLibraryService） */
   const [chapterGroups, setChapterGroups] = useState<
     { bookId: string; bookTitle: string; chapters: ChapterEntry[] }[]
   >([]);
+  /** 当前选中的书（两级选择第一级） */
+  const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   /** 当前选中章节 */
   const [selectedChapter, setSelectedChapter] = useState<ChapterEntry | null>(null);
   /** 当前选中模式 */
   const [mode, setMode] = useState<RecitationMode>('fillBlank');
 
-  // 加载书籍章节
-  useEffect(() => {
+  /**
+   * 加载书籍章节（含用户导入书：UserBookService 启动时已注册进 TextLibraryService，
+   * getChapter 取文链路对导入书同样生效，故背诵天然支持导入书）。
+   * 挂载与每次页面 focus 时刷新：用户在书架导入新书后切回本 Tab 即可见。
+   */
+  const loadBooks = useCallback(() => {
     const res = TextLibraryService.getBooks();
     if (res.success && res.data) {
       const groups = res.data.map((book) => ({
@@ -70,8 +78,22 @@ export default function RecitationScreen({ navigation }: Props): React.JSX.Eleme
         })),
       }));
       setChapterGroups(groups);
+      // 保持已选书（若仍存在）；首次进入默认选中第一本
+      setSelectedBookId((prev) =>
+        prev && groups.some((g) => g.bookId === prev) ? prev : groups[0]?.bookId ?? null,
+      );
     }
   }, []);
+
+  useEffect(() => {
+    loadBooks();
+  }, [loadBooks]);
+
+  // focus 刷新：覆盖「本 Tab 已挂载后用户又导入新书」的场景
+  useEffect(() => {
+    const unsub = navigation.addListener('focus', loadBooks);
+    return unsub;
+  }, [navigation, loadBooks]);
 
   // 加载背诵进度
   useEffect(() => {
@@ -92,6 +114,17 @@ export default function RecitationScreen({ navigation }: Props): React.JSX.Eleme
   /** 选中章节 */
   const selectChapter = useCallback((chapter: ChapterEntry) => {
     setSelectedChapter(chapter);
+  }, []);
+
+  /** 当前选中书的分组（两级选择第一级；未命中时章节列表为空） */
+  const selectedGroup = useMemo(
+    () => chapterGroups.find((g) => g.bookId === selectedBookId) ?? null,
+    [chapterGroups, selectedBookId],
+  );
+
+  /** 切换书籍（不影响已选章节：开始按钮仍以 selectedChapter 为准） */
+  const selectBook = useCallback((bookId: string) => {
+    setSelectedBookId(bookId);
   }, []);
 
   /**
@@ -402,46 +435,78 @@ export default function RecitationScreen({ navigation }: Props): React.JSX.Eleme
         ) : null}
       </View>
 
-      {/* 章节选择 */}
+      {/* 两级选择 · 第一级：选书（横向书签 chips，含内置经典与用户导入书） */}
+      <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>选择书籍</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.bookChipsScroll}
+        contentContainerStyle={styles.bookChips}
+      >
+        {chapterGroups.map((group) => {
+          const selected = group.bookId === selectedBookId;
+          return (
+            <Pressable
+              key={group.bookId}
+              onPress={() => selectBook(group.bookId)}
+              style={[
+                styles.bookChip,
+                {
+                  backgroundColor: selected ? colors.primary : colors.card,
+                  borderColor: selected ? colors.primary : colors.border,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              accessibilityLabel={`选择书籍${group.bookTitle}`}
+            >
+              <Text
+                style={[
+                  styles.bookChipText,
+                  { color: selected ? '#FFFFFF' : colors.text },
+                ]}
+                numberOfLines={1}
+              >
+                {group.bookTitle}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
+      {/* 两级选择 · 第二级：选章节（仅当前选中书的章节，逐章独立开始背诵） */}
       <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-        选择章节
+        {selectedGroup ? `选择章节（${selectedGroup.bookTitle}）` : '选择章节'}
       </Text>
-      {chapterGroups.map((group) => (
-        <View key={group.bookId} style={styles.bookGroup}>
-          <Text style={[styles.bookTitle, { color: colors.primary }]}>
-            《{group.bookTitle}》
-          </Text>
-          <View style={styles.chapterList}>
-            {group.chapters.map((chapter) => {
-              const selected = selectedChapter?.id === chapter.id;
-              return (
-                <Pressable
-                  key={chapter.id}
-                  onPress={() => selectChapter(chapter)}
-                  style={[
-                    styles.chapterItem,
-                    {
-                      backgroundColor: selected ? colors.primary : colors.card,
-                      borderColor: selected ? colors.primary : colors.border,
-                    },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                >
-                  <Text
-                    style={[
-                      styles.chapterText,
-                      { color: selected ? '#FFFFFF' : colors.text },
-                    ]}
-                  >
-                    {chapter.title}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      ))}
+      <View style={styles.chapterList}>
+        {(selectedGroup?.chapters ?? []).map((chapter) => {
+          const selected = selectedChapter?.id === chapter.id;
+          return (
+            <Pressable
+              key={chapter.id}
+              onPress={() => selectChapter(chapter)}
+              style={[
+                styles.chapterItem,
+                {
+                  backgroundColor: selected ? colors.primary : colors.card,
+                  borderColor: selected ? colors.primary : colors.border,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+            >
+              <Text
+                style={[
+                  styles.chapterText,
+                  { color: selected ? '#FFFFFF' : colors.text },
+                ]}
+              >
+                {chapter.title}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
 
       {/* 模式选择 */}
       <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>选择模式</Text>
@@ -638,14 +703,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
-  bookGroup: {
-    marginBottom: 4,
+  // 两级选择 · 选书 chips（横向滚动）
+  bookChipsScroll: {
+    flexGrow: 0,
   },
-  bookTitle: {
+  bookChips: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  bookChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    maxWidth: 160,
+  },
+  bookChipText: {
     fontSize: 14,
     fontWeight: '700',
-    paddingHorizontal: 16,
-    marginBottom: 6,
   },
   chapterList: {
     flexDirection: 'row',

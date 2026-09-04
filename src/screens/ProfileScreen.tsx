@@ -158,7 +158,7 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
 
   const bookmarkCount = useBookmarkStore((s) => s.bookmarks.length);
   const noteCount = useNoteStore((s) => s.notes.length);
-  const recitationCount = useRecitationStore((s) => s.list.length);
+  // 背诵入口已独立为首页底部「背诵」Tab，此处不再展示背诵进度入口
   /** 已解锁成就数（P2-06，「我的成就」入口角标） */
   const unlockedCount = useAchievementStore((s) => Object.keys(s.unlockedAt).length);
 
@@ -330,7 +330,6 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
   const entries = [
     { key: 'bookmarks', icon: '⭐', label: '收藏', desc: `${bookmarkCount} 条`, onPress: () => navigation.navigate('Bookmarks') },
     { key: 'notes', icon: '📝', label: '笔记', desc: `${noteCount} 条`, onPress: () => navigation.navigate('NotesList') },
-    { key: 'recitation', icon: '📖', label: '背诵进度', desc: `${recitationCount} 条`, onPress: () => navigation.navigate('Recitation') },
     { key: 'achievements', icon: '🏅', label: '我的成就', desc: `已解锁 ${unlockedCount}/${ACHIEVEMENT_TOTAL}`, onPress: () => navigation.navigate('Achievements') },
     { key: 'studyStats', icon: '📊', label: '学习统计', desc: '总览学习成果并分享', onPress: () => navigation.navigate('StudyStats') },
     { key: 'export', icon: '📤', label: '导出数据', desc: '复制 JSON 到剪贴板', onPress: handleExport },

@@ -136,19 +136,36 @@ describe('阅读器 UI 精简：翻页条 / 底部 dock 删除 + 注音按钮迁
     // dockHeight/visiblePageHeight 扣高机制同步清理
     expect(source).not.toMatch(/dockHeight/);
     expect(source).toMatch(/const visiblePageHeight = measured \? Math\.max\(80, pagerLayout\.height\) : 0;/);
-    // 正文底部留白随 dock 删除大幅缩减
-    expect(source).toMatch(/const CONTENT_BOTTOM_PADDING = 32;/);
+    // 正文底部留白为固定底部进度条让位（64：进度条约 42px + 呼吸空隙，不含 safe-area）
+    expect(source).toMatch(/const CONTENT_BOTTOM_PADDING = 64;/);
   });
 
-  test('dock 功能迁移至长按弹出菜单（进度行 + 收藏/背诵/朗读/语速操作区）', () => {
-    // 进度行（含 progressFill 进度条）渲染于选词面板 sheet 内
-    expect(source).toMatch(/styles\.menuProgressWrap/);
+  test('底部固定进度条回归阅读页底部（复用 progressFill，长按菜单进度行删除）', () => {
+    expect(source).toMatch(/styles\.bottomProgress/);
+    expect(source).toMatch(/styles\.bottomProgressText/);
     expect(source).toMatch(/styles\.progressFill/);
-    // 全文操作区
-    expect(source).toMatch(/accessibilityLabel="收藏本章全文"/);
-    expect(source).toMatch(/accessibilityLabel="背诵练习"/);
+    expect(source).toMatch(/styles\.progressTrack/);
+    // 长按菜单内的进度行与死样式必须移除（避免与底部进度条重复展示）
+    expect(source).not.toMatch(/styles\.menuProgressWrap/);
+    expect(source).not.toMatch(/styles\.progressText/);
+    // 进度文本随阅读模式给出页码信息（翻页模式含第 i/j 页）
+    expect(source).toMatch(/第 \$\{Math\.max\(1, chapterIndex \+ 1\)\}\/\$\{totalChapters\} 章/);
+  });
+
+  test('收藏/朗读上移右上角「藏/听」按钮（长按菜单两项删除，背诵/语速保留）', () => {
+    // 藏：已收藏态 + 两步确认取消（handleToggleArticleBookmark）
+    expect(source).toMatch(/const handleToggleArticleBookmark = useCallback/);
+    expect(source).toMatch(/articleBookmark \? '取消收藏本章' : '收藏本章'/);
+    expect(source).toMatch(/articleBookmark \? colors\.primary : colors\.pinyin/);
+    // 听：朗读中主色高亮 + 状态化无障碍标签
     expect(source).toMatch(/ttsSpeaking \? '停止朗读' : '朗读当前段落'/);
-    // 语速步进边界禁用 + 当前倍率展示
+    expect(source).toMatch(/ttsSpeaking \? colors\.primary : colors\.pinyin/);
+    expect(source).toMatch(/\{ttsSpeaking \? '⏹' : '听'\}/);
+    // 长按菜单中的「收藏全文」「朗读/停止」两项删除
+    expect(source).not.toMatch(/accessibilityLabel="收藏本章全文"/);
+    expect(source).not.toMatch(/▶ 朗读/);
+    // 背诵练习与语速步进保留在菜单
+    expect(source).toMatch(/accessibilityLabel="背诵练习"/);
     expect(source).toMatch(/disabled=\{speechRate <= 0\.5\}/);
     expect(source).toMatch(/disabled=\{speechRate >= 2\.0\}/);
     expect(source).toMatch(/speechRate\.toFixed\(2\)\}x/);
@@ -184,5 +201,53 @@ describe('阅读器 UI 精简：翻页条 / 底部 dock 删除 + 注音按钮迁
     expect(scrollUtil).toMatch(/export function planHeadDrop\(/);
     expect(scrollUtil).toMatch(/keptChapterIds: chapterIds\.slice\(excess\),/);
     expect(scrollUtil).toMatch(/droppedChapterIds: chapterIds\.slice\(0, excess\),/);
+  });
+});
+
+describe('注音切换不跳章回归（Bug：切「音」后章节跳动）', () => {
+  test('滚动模式：注音切换前捕获视口锚点（captureViewportAnchor 仅 scroll 模式生效）', () => {
+    expect(source).toMatch(/const captureViewportAnchor = useCallback/);
+    expect(source).toMatch(
+      /const captureViewportAnchor = useCallback\(\(\) => \{\s*\n\s*if \(readerMode !== 'scroll'\) \{\s*\n\s*return;\s*\n\s*\}/,
+    );
+    // 锚点记录「视口顶部所在行 + 视口顶入深度」，按旧布局偏移计算
+    expect(source).toMatch(
+      /layoutAnchor\.current = \{\s*\n\s*rowId: bestId,\s*\n\s*delta: Math\.max\(0, offset - bestY\),\s*\n\s*createdAt: Date\.now\(\),\s*\n\s*\};/,
+    );
+  });
+
+  test('handleCyclePinyinMode 在 setPinyinMode 前捕获锚点（补偿基准必须取切换前的旧布局）', () => {
+    expect(source).toMatch(
+      /const handleCyclePinyinMode = useCallback\(\(\) => \{\s*\n\s*captureViewportAnchor\(\);/,
+    );
+  });
+
+  test('handleRowLayout 消费视口锚点：目标行重排后按「新 y + 深度」落位，超时放弃', () => {
+    expect(source).toMatch(/const viewportAnchor = layoutAnchor\.current;/);
+    expect(source).toMatch(
+      /if \(viewportAnchor != null && rowId === viewportAnchor\.rowId\) \{[\s\S]*?listRef\.current\?\.scrollToOffset\(\{ offset: target, animated: false \}\);/,
+    );
+    // 超时未等到重排则放弃，避免陈旧锚点事后把用户拽走
+    expect(source).toMatch(/Date\.now\(\) - viewportAnchor\.createdAt > LOCATE_TIMEOUT_MS/);
+  });
+
+  test('翻页模式：measureKey 重量测前捕获「当前页所在段」作为重定位目标', () => {
+    // pages/index 经 layoutRef 供重置 effect 读取（不得加入重置 effect 依赖）
+    expect(source).toMatch(/layoutRef\.current = \{ pages, index \};/);
+    expect(source).toMatch(
+      /relocateSegIdRef\.current = firstSeg \? blockSegId\(firstSeg\.id\) : null;/,
+    );
+  });
+
+  test('翻页模式定位目标解析：stale 显式目标不重复生效，重量测后回当前页所在段', () => {
+    // 打开时的显式目标只定位一次，防止 measureKey 重置后被陈旧目标拽回（跳动根因）
+    expect(source).toMatch(
+      /const freshExplicit = !!locateSegmentId && locateSegmentId !== locatedSegIdRef\.current;/,
+    );
+    expect(source).toMatch(
+      /const target = freshExplicit \? locateSegmentId : relocateSegIdRef\.current;/,
+    );
+    // 重定位成功后清空，不影响后续定位
+    expect(source).toMatch(/relocateSegIdRef\.current = null;/);
   });
 });

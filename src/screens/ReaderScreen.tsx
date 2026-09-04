@@ -1,12 +1,11 @@
 /**
  * 阅读器主页面（ReaderScreen）
  * 页面结构：
- * - 顶部：书名 + 章节名 + 返回按钮 + 设置入口（字号/行距/主题）+ 繁简切换 + 注音切换
+ * - 顶部：书名 + 章节名 + 返回按钮 + 设置入口（字号/行距/主题）+ 繁简/藏/听/音切换
  * - 正文：FlatList 逐段渲染（注音模式用 PinyinText，关闭注音用 HighlightText）
- * - 无底部 dock（已随 UI 精简删除）：进度 / 朗读 / 语速 / 收藏 / 背诵 / 注音切换
- *   全部并入「长按正文弹出的选词操作面板」与右上角按钮
+ * - 底部：固定进度条（第 N/共 M 章 · X% + 细进度条）
  * 交互流程：
- * - 长按正文 → 弹出选词面板（进度 + 可调整范围 + 解析/划线/笔记 + 收藏/背诵/朗读/语速）
+ * - 长按正文 → 弹出选词面板（可调整范围 + 划线/解析/翻译/笔记 + 背诵/语速）
  * - 点击已有划线 → 弹出笔记编辑器（新建或编辑关联笔记）
  * - 章节前进：滚动模式为滑动窗口连续拼接（无限前进）；翻页模式翻到章边界自动跨章
  * - 与 useReaderStore 联动：openChapter 保存阅读位置，滚动更新当前段落
@@ -139,10 +138,11 @@ const PINYIN_MODE_LABELS: Record<PinyinMode, string> = {
 };
 
 /**
- * 正文容器底部留白（px）：底部 dock（进度/朗读/注音/工具栏）已随 UI 精简删除，
- * 功能并入长按弹出菜单与右上角按钮，仅保留少量呼吸空隙，避免末段贴底。
+ * 正文容器底部留白（px）：底部固定进度条（文本行 + 细进度条，不含 safe-area，
+ * safe-area 由外层 SafeAreaView 处理）约占 42px，另留约 22px 呼吸空隙，
+ * 避免末段紧贴进度条。
  */
-const CONTENT_BOTTOM_PADDING = 32;
+const CONTENT_BOTTOM_PADDING = 64;
 
 /**
  * 连续滚动「滑动窗口」的最大章节数。
@@ -523,14 +523,36 @@ function PageModeView({
   const [splitPlan, setSplitPlan] = useState<Record<string, number[]>>({});
   /** 拆分块高度：块 id（`segId#start-end`）-> 实测高度 */
   const [chunkHeights, setChunkHeights] = useState<Record<string, number>>({});
+  /**
+   * 最新 pages/index 的即时引用：measureKey 重置 effect 需要在清空测量前
+   * 捕获「当前页首个真实段落」作为重定位目标，但不能把 pages/index 加进该
+   * effect 的依赖（会随分页更新反复触发重置 → 死循环），故经 ref 读取最新值。
+   * 赋值位于 pages useMemo 之后（渲染期同步更新，见下）。
+   */
+  const layoutRef = useRef<{ pages: PaginatedPage[]; index: number }>({ pages: [], index: 0 });
+  /**
+   * 重量测后的重定位目标段（measureKey 变化时捕获的「当前页所在段」）。
+   * 注音/字号等排版因素变化会触发整章重新量测分页，页型全变；若不重定位，
+   * 视口会停在原页码上但内容已换（或被 stale 定位目标拽回打开时的段落）。
+   * 重定位成功后清空，避免影响后续定位。
+   */
+  const relocateSegIdRef = useRef<string | null>(null);
+  /** 已用 locateSegmentId 完成过定位的目标（防止 measureKey 重置后 stale 目标反复重定位） */
+  const locatedSegIdRef = useRef<string | null>(null);
 
   // 影响「段高测量」的因素：仅排版相关（与 pageHeight 无关，段高只取决于宽度与字号/行距）。
   // 刻意不含 pageHeight：pageHeight 只应随旋转等容器尺寸变化而变化，若纳入则会触发
   // 整段重测（清空 segHeights → 首屏闪白/空白）。pageHeight 变化只重建分页，不清测量。
+  // 注意：measureKey 含 pinyinMode（注音开关注音行高变化必然重排），重置测量前先
+  // 捕获当前页所在段，量测收敛后由定位 effect 回到该段所在页（防注音切换后章节跳动）。
   const measureKey = `${chapterTitle}|${pinyinMode}|${fontSize}|${lineHeight}|${Math.round(
     pageWidth,
   )}`;
   useEffect(() => {
+    // 重量测前捕获「当前页首个真实段落」：此时 pages/index 仍是旧排版的结果
+    const currentPage = layoutRef.current.pages[layoutRef.current.index];
+    const firstSeg = currentPage?.blocks.find((b) => b.id !== TITLE_BLOCK_ID);
+    relocateSegIdRef.current = firstSeg ? blockSegId(firstSeg.id) : null;
     setSegHeights({});
     setTitleHeight(0);
     setTitleMeasured(false);
@@ -689,6 +711,8 @@ function PageModeView({
     () => paginateBlocks(blocks, pageBudget, 0, isTitleBlock),
     [blocks, pageBudget],
   );
+  // 渲染期同步更新 pages/index 即时引用（供 measureKey 重置 effect 捕获重定位目标）
+  layoutRef.current = { pages, index };
 
   /**
    * 拆分决策是否已收敛：每个段「需要拆分 ⇔ 已有拆分方案」。
@@ -735,16 +759,30 @@ function PageModeView({
     }
   }, [pageReady, pages.length, index, onIndexChange]);
 
-  // 定位：打开时跳到含目标段落的页（仅一次；目标段可能被拆成多个区间块）
+  // 定位：打开时跳到含目标段落的页（目标段可能被拆成多个区间块）；
+  // 重量测（注音/字号切换等）后回到重定位目标段所在页。
+  // 目标解析优先级：① 未定位过的显式目标（打开/切章时的 locateSegmentId）；
+  // ② 重量测捕获的「当前页所在段」（relocateSegIdRef）。
+  // 已定位过的显式目标不得因 measureKey 重置而反复生效——否则注音切换会被
+  // 打开时的陈旧目标拽回（注音切换跳章 Bug 的翻页模式根因）。
   useEffect(() => {
-    if (!pageReady || locatedRef.current || !locateSegmentId) {
+    if (!pageReady || locatedRef.current) {
+      return;
+    }
+    const freshExplicit = !!locateSegmentId && locateSegmentId !== locatedSegIdRef.current;
+    const target = freshExplicit ? locateSegmentId : relocateSegIdRef.current;
+    if (!target) {
       return;
     }
     const idx = pages.findIndex((p) =>
-      p.blocks.some((b) => blockSegId(b.id) === locateSegmentId),
+      p.blocks.some((b) => blockSegId(b.id) === target),
     );
     if (idx >= 0) {
       locatedRef.current = true;
+      relocateSegIdRef.current = null;
+      if (freshExplicit) {
+        locatedSegIdRef.current = locateSegmentId;
+      }
       onIndexChange(idx);
     }
   }, [pageReady, locateSegmentId, pages, onIndexChange]);
@@ -1004,6 +1042,15 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const pendingScroll = useRef({ target: '', done: false });
   /** 「打开时定位」的超时放弃计时器（同一时刻至多一个，见 LOCATE_TIMEOUT_MS） */
   const locateGiveUpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * 注音切换等「行高整体变化」场景的视口锚点（滚动模式防跳动）。
+   * 注音开启/关闭会使正文行高成倍变化（PinyinText 逐字两行 ↔ HighlightText 单行），
+   * 视口上方全部内容的高度随之改变，而滚动 offset 数值不变 → 视口内的内容直接
+   * 跳变成其它段落。补偿方式：切换前捕获「视口顶部所在行 + 视口顶入该行的深度」，
+   * 行重排后该行重新 onLayout 时按「新 y + 深度」一次性落位，使视口停留在
+   * 用户正在阅读的位置（同段落，允许行高变化导致的轻微位移）。
+   */
+  const layoutAnchor = useRef<{ rowId: string; delta: number; createdAt: number } | null>(null);
 
   /**
    * 武装/重新武装「打开时定位」：目标行 onLayout 后由 handleRowLayout 落位。
@@ -1029,6 +1076,35 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     },
     [pendingScroll],
   );
+
+  /**
+   * 捕获滚动模式视口锚点（注音切换前调用）：
+   * 取「y ≤ 当前偏移 + 24」的最大 y 行（即视口顶部所在行，含标题行），
+   * 记录该行 id 与视口顶入深度（offset - y）。rowOffsets 中的 y 为行在内容
+   * 容器内的绝对偏移，与 scrollOffset 同基准，可直接比较。
+   */
+  const captureViewportAnchor = useCallback(() => {
+    if (readerMode !== 'scroll') {
+      return;
+    }
+    const offset = scrollOffset.current;
+    let bestId = '';
+    let bestY = -1;
+    for (const [id, y] of rowOffsets.current) {
+      if (y <= offset + 24 && y > bestY) {
+        bestY = y;
+        bestId = id;
+      }
+    }
+    if (!bestId || bestY < 0) {
+      return;
+    }
+    layoutAnchor.current = {
+      rowId: bestId,
+      delta: Math.max(0, offset - bestY),
+      createdAt: Date.now(),
+    };
+  }, [readerMode, rowOffsets]);
 
   // 交互状态
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -1185,7 +1261,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     annotationScope,
   );
   const { notes, addNote, updateNote } = useNotesForChapters(bookId ?? undefined, annotationScope);
-  const { addBookmark } = useBookmarks();
+  const { bookmarks, addBookmark, removeBookmark } = useBookmarks();
 
   // 初始化：初始化数据库（幂等）并记录阅读位置。
   // 书籍/章节文本已由上方 useMemo 随路由参数同步派生，本 effect 只保留副作用。
@@ -1715,6 +1791,21 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const handleRowLayout = useCallback(
     (rowId: string, y: number) => {
       rowOffsets.current.set(rowId, y);
+      // 注音切换视口锚点：目标行重排后按「新 y + 视口顶入深度」一次性落位。
+      // 超时（LOCATE_TIMEOUT_MS）未等到重排则放弃，避免陈旧锚点在后续布局中
+      // 突然生效把用户拽走。
+      const viewportAnchor = layoutAnchor.current;
+      if (viewportAnchor != null && rowId === viewportAnchor.rowId) {
+        const expired = Date.now() - viewportAnchor.createdAt > LOCATE_TIMEOUT_MS;
+        layoutAnchor.current = null;
+        if (!expired) {
+          const target = Math.max(0, y + viewportAnchor.delta);
+          listRef.current?.scrollToOffset({ offset: target, animated: false });
+          // 同步补偿基准：onScroll 事件与本次 scrollTo 的到达顺序不保证，
+          // 主动写回保证后续锚点/进度计算用到的是落位后的偏移
+          scrollOffset.current = target;
+        }
+      }
       const pending = pendingScroll.current;
       if (!pending.done && pending.target === rowId) {
         const targetOffset = Math.max(0, y - 24);
@@ -2075,22 +2166,56 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
   // ---------- 收藏 ----------
 
-  /** 整篇收藏（article） */
-  const handleBookmarkArticle = useCallback(() => {
-    if (!bookId || !chapterId || !chapter) {
+  /** 收藏目标章：滚动模式取实际正在阅读的章（activeChapterId），翻页模式取路由章 */
+  const bookmarkChapter = useMemo<Chapter | null>(() => {
+    const cid = readerMode === 'scroll' ? activeChapterId ?? chapterId : chapterId;
+    if (!cid) {
+      return null;
+    }
+    return effectiveChapters.find((c) => c.id === cid) ?? null;
+  }, [readerMode, activeChapterId, chapterId, effectiveChapters]);
+
+  /** 当前章的整篇收藏（article）：右上角「藏」按钮的已收藏态与取消收藏依据 */
+  const articleBookmark = useMemo<Bookmark | null>(
+    () =>
+      bookmarks.find(
+        (b) =>
+          b.type === 'article' && b.bookId === bookId && b.chapterId === bookmarkChapter?.id,
+      ) ?? null,
+    [bookmarks, bookId, bookmarkChapter],
+  );
+
+  /** 整篇收藏切换（article）：未收藏 → 收藏；已收藏 → 两步确认后取消 */
+  const handleToggleArticleBookmark = useCallback(() => {
+    if (!bookId || !bookmarkChapter) {
+      return;
+    }
+    if (articleBookmark) {
+      Alert.alert(
+        '取消收藏',
+        `《${toDisplayText(bookmarkChapter.title)}》已收藏，确定取消吗？`,
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '取消收藏',
+            style: 'destructive',
+            onPress: () => removeBookmark(articleBookmark.id),
+          },
+        ],
+      );
       return;
     }
     const saved = addBookmark({
       type: 'article',
       bookId,
-      chapterId,
-      text: `${book?.title ?? ''}·${chapter.title}`,
+      chapterId: bookmarkChapter.id,
+      text: `${book?.title ?? ''}·${toDisplayText(bookmarkChapter.title)}`,
       tags: [],
     });
     if (saved) {
-      Alert.alert('已收藏', `《${chapter.title}》已加入收藏`);
+      Alert.alert('已收藏', `《${toDisplayText(bookmarkChapter.title)}》已加入收藏`);
     }
-  }, [bookId, chapterId, chapter, book, addBookmark]);
+  }, [bookId, bookmarkChapter, articleBookmark, book, toDisplayText, addBookmark, removeBookmark]);
 
   /** 解析面板收藏（paragraph，补充书籍/章节上下文） */
   const handleAnalysisBookmark = useCallback(
@@ -2151,12 +2276,15 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   /**
    * 注音模式循环切换（右上角「音」按钮，原底部注音切换条的功能迁移）：
    * 全文注音 → 仅生僻字 → 关闭 → 全文注音 …。持久化走 setPinyinMode（不变）。
+   * 切换前先捕获滚动模式视口锚点：注音行高变化会使既有内容整体重排，
+   * 不补偿则视口内容直接跳变（注音切换跳章 Bug 的滚动模式根因）。
    */
   const handleCyclePinyinMode = useCallback(() => {
+    captureViewportAnchor();
     const idx = PINYIN_MODE_CYCLE.indexOf(pinyinMode);
     const next = PINYIN_MODE_CYCLE[(idx + 1) % PINYIN_MODE_CYCLE.length] ?? 'full';
     setPinyinMode(next);
-  }, [pinyinMode, setPinyinMode]);
+  }, [pinyinMode, setPinyinMode, captureViewportAnchor]);
 
   // ---------- 渲染 ----------
 
@@ -2262,6 +2390,38 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         >
           <Text style={[styles.convButton, { color: colors.primary }]}>
             {conversionMode === 'traditional' ? '繁' : '简'}
+          </Text>
+        </Pressable>
+        {/* 整篇收藏（原长按菜单「收藏全文」迁移）：已收藏主色高亮，再点两步确认取消 */}
+        <Pressable
+          onPress={handleToggleArticleBookmark}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={articleBookmark ? '取消收藏本章' : '收藏本章'}
+        >
+          <Text
+            style={[
+              styles.convButton,
+              { color: articleBookmark ? colors.primary : colors.pinyin },
+            ]}
+          >
+            藏
+          </Text>
+        </Pressable>
+        {/* 正文朗读开关（原长按菜单「朗读/停止」迁移）：朗读中主色高亮 + 图标变停止符 */}
+        <Pressable
+          onPress={handleToggleSpeech}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={ttsSpeaking ? '停止朗读' : '朗读当前段落'}
+        >
+          <Text
+            style={[
+              styles.convButton,
+              { color: ttsSpeaking ? colors.primary : colors.pinyin },
+            ]}
+          >
+            {ttsSpeaking ? '⏹' : '听'}
           </Text>
         </Pressable>
         {/* 注音模式切换（原底部注音条迁移）：循环 全文注音 → 仅生僻字 → 关闭。
@@ -2426,6 +2586,32 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           进度 / 朗读 / 语速 / 收藏 / 背诵并入下方「选词操作面板」（长按正文弹出），
           注音切换迁移至右上角「音」按钮 */}
 
+      {/* 底部固定进度条：第 N/共 M 章 ·（第 i/j 页）· X% + 细进度条。
+          滚动模式进度随 activeChapterId 实时更新（progressChapterId），
+          翻页模式由当前页/总页数给出章内进度；safe-area 由外层 SafeAreaView 处理 */}
+      <View style={[styles.bottomProgress, { borderTopColor: colors.border }]}>
+        <Text style={[styles.bottomProgressText, { color: colors.textSecondary }]}>
+          {readerMode === 'page' && pageCount > 0
+            ? `第 ${Math.max(1, chapterIndex + 1)}/${totalChapters} 章 · 第 ${
+                pageIndex + 1
+              }/${pageCount} 页 · ${Math.round(overallProgress * 100)}%`
+            : `第 ${Math.max(1, chapterIndex + 1)} / ${totalChapters} 章 · ${Math.round(
+                overallProgress * 100,
+              )}%`}
+        </Text>
+        <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
+          <View
+            style={[
+              styles.progressFill,
+              {
+                width: `${Math.round(overallProgress * 100)}%`,
+                backgroundColor: colors.primary,
+              },
+            ]}
+          />
+        </View>
+      </View>
+
       {/* 选词操作面板 */}
       <Modal
         visible={selectionVisible}
@@ -2438,31 +2624,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             style={[styles.sheet, { backgroundColor: colors.background }]}
             onPress={() => undefined}
           >
-            {/* 阅读进度（原底部进度条迁移）：第 N/共 M 章 ·（第 i/j 页）· 百分比 */}
-            {totalChapters > 0 && (
-              <View style={styles.menuProgressWrap}>
-                <Text style={[styles.progressText, { color: colors.textSecondary }]}>
-                  {readerMode === 'page' && pageCount > 0
-                    ? `第 ${Math.max(1, chapterIndex + 1)}/${totalChapters} 章 · 第 ${
-                        pageIndex + 1
-                      }/${pageCount} 页 · ${Math.round(overallProgress * 100)}%`
-                    : `第 ${Math.max(1, chapterIndex + 1)} / ${totalChapters} 章 · ${Math.round(
-                        overallProgress * 100,
-                      )}%`}
-                </Text>
-                <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      {
-                        width: `${Math.round(overallProgress * 100)}%`,
-                        backgroundColor: colors.primary,
-                      },
-                    ]}
-                  />
-                </View>
-              </View>
-            )}
+            {/* 阅读进度已固定于阅读页底部进度条（不再重复展示于长按菜单） */}
             <Text style={[styles.sheetTitle, { color: colors.textSecondary }]}>选中文字</Text>
             <View style={styles.selectionRow}>
               <Pressable
@@ -2533,16 +2695,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
               </Pressable>
             </View>
 
-            {/* 全文操作区（原底部 dock 功能迁移）：收藏全文 / 背诵练习 / 朗读（TTS 状态实时反映） */}
+            {/* 全文操作区（收藏/朗读已上移右上角「藏/听」按钮）：背诵练习 */}
             <View style={styles.actionRow}>
-              <Pressable
-                style={({ pressed }) => [styles.menuActionButton, pressed && styles.pressed]}
-                onPress={handleBookmarkArticle}
-                accessibilityRole="button"
-                accessibilityLabel="收藏本章全文"
-              >
-                <Text style={[styles.actionButtonText, { color: colors.text }]}>收藏全文</Text>
-              </Pressable>
               <Pressable
                 style={({ pressed }) => [styles.menuActionButton, pressed && styles.pressed]}
                 onPress={handleRecite}
@@ -2550,21 +2704,6 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                 accessibilityLabel="背诵练习"
               >
                 <Text style={[styles.actionButtonText, { color: colors.text }]}>背诵练习</Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.menuActionButton, pressed && styles.pressed]}
-                onPress={handleToggleSpeech}
-                accessibilityRole="button"
-                accessibilityLabel={ttsSpeaking ? '停止朗读' : '朗读当前段落'}
-              >
-                <Text
-                  style={[
-                    styles.actionButtonText,
-                    { color: ttsSpeaking ? colors.primary : colors.text },
-                  ]}
-                >
-                  {ttsSpeaking ? '⏹ 停止朗读' : '▶ 朗读'}
-                </Text>
               </Pressable>
             </View>
 
@@ -2938,16 +3077,19 @@ const styles = StyleSheet.create({
   },
   /** 拆页续块：去掉段落下边距，页内视觉上仍是同一段的连续行 */
   segmentContinuation: {},
-  // 长按弹出菜单：进度行（原底部进度条迁移至此）
-  menuProgressWrap: {
+  // 底部固定进度条（原长按菜单进度行回归页底）
+  bottomProgress: {
+    paddingTop: 8,
+    paddingBottom: 6,
+    paddingHorizontal: 16,
     gap: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  bottomProgressText: {
+    fontSize: 12,
   },
   pressed: {
     opacity: 0.7,
-  },
-  progressText: {
-    fontSize: 12,
-    marginBottom: 4,
   },
   progressTrack: {
     height: 4,
