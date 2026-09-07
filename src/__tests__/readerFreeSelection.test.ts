@@ -125,4 +125,66 @@ describe('③ 菜单溢出修复', () => {
     // 面板底部预留进度条高度，避免遮挡
     expect(reader).toMatch(/paddingBottom: 56/);
   });
+
+  test('选中文字不再 numberOfLines 截断，完整换行显示（超长经面板 ScrollView 滚动）', () => {
+    expect(reader).not.toMatch(/styles\.selectionText[^\n]*numberOfLines/);
+  });
+});
+
+describe('④ 活动选区视觉效果（selectionRange 透传链路）', () => {
+  test('ReaderScreen：菜单打开期间派生活动选区快照（activeSelection）', () => {
+    expect(reader).toMatch(
+      /selectionVisible && selection\s*\?\s*\{ segmentId: selection\.segmentId, start: selection\.start, end: selection\.end \}/,
+    );
+  });
+
+  test('ReaderScreen：滚动模式 renderRow 按段匹配下发 selectionRange', () => {
+    expect(reader).toMatch(
+      /activeSelection && activeSelection\.segmentId === item\.segment\.id\s*\?\s*\[activeSelection\.start, activeSelection\.end\]\s*:\s*undefined/,
+    );
+  });
+
+  test('ReaderScreen：翻页模式经 PageModeView → SegmentBlockItem 透传 activeSelection', () => {
+    expect(reader).toMatch(
+      /activeSelection\?: \{ segmentId: string; start: number; end: number \} \| null;/,
+    );
+    expect(reader).toMatch(
+      /activeSelection\.segmentId === segId\s*\?\s*\[activeSelection\.start, activeSelection\.end\]\s*:\s*undefined/,
+    );
+  });
+
+  test('SegmentItem：off 模式拆页路径对选区区间求交集并平移到局部坐标系', () => {
+    expect(reader).toMatch(/const localSelectionRange = useMemo<\[number, number\] \| undefined>\(/);
+    expect(reader).toMatch(/const from = Math\.max\(s, selectionRange\[0\]\);/);
+    expect(reader).toMatch(/const to = Math\.min\(e, selectionRange\[1\]\);/);
+    expect(reader).toMatch(/return from < to \? \[from - s, to - s\] : undefined;/);
+    // PinyinText 用全局码点基准，HighlightText 用局部（切片平移后）基准
+    expect(reader).toMatch(/selectionRange=\{selectionRange\}/);
+    expect(reader).toMatch(/selectionRange=\{localSelectionRange\}/);
+  });
+
+  test('PinyinText：字格支持 selectionRange 叠加主色半透明选区背景', () => {
+    expect(pinyinText).toMatch(/selectionRange\?: \[number, number\];/);
+    expect(pinyinText).toMatch(/withAlpha\(colors\.primary, 0\.25\)/);
+    expect(pinyinText).toMatch(/selected \? \{ backgroundColor: selectionBg \} : null/);
+    // 选区样式优先于已保存划线背景，保证选区可辨识
+    expect(pinyinText).toMatch(/highlight && !selected/);
+  });
+
+  test('HighlightText：两渲染路径均支持 selectionRange 选区背景', () => {
+    expect(highlightText).toMatch(/selectionRange\?: \[number, number\];/);
+    expect(highlightText).toMatch(/withAlpha\(colors\.primary, 0\.25\)/);
+    // 逐字路径：选区内字符着选区背景
+    expect(highlightText).toMatch(
+      /selected \? \[styles\.span, \{ backgroundColor: selectionBg \}\] : \(segStyle \?\? undefined\)/,
+    );
+    // 片段路径：与选区相交的片段按交集切分着色
+    expect(highlightText).toMatch(/pieces\.push\(\{ from: selFrom, to: selTo, selected: true \}\);/);
+  });
+
+  test('主题提供 withAlpha 派生半透明主色（选区背景随主题换色）', () => {
+    expect(readSrc('theme/colors.ts')).toMatch(
+      /export function withAlpha\(hex: string, alpha: number\): string/,
+    );
+  });
 });

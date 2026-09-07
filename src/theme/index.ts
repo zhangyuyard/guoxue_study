@@ -2,12 +2,21 @@
  * 主题聚合导出
  * 提供 getTheme(theme) 便捷入口，返回当前主题完整配置。
  */
-import { getColors, highlightColors, lightColors, darkColors, getPaperColors, PAPER_THEMES, PAPER_OPTIONS } from './colors';
+import { getColors, highlightColors, lightColors, darkColors, getPaperColors, PAPER_THEMES, PAPER_OPTIONS, withAlpha } from './colors';
 import * as typography from './typography';
 import type { ThemeColors } from './colors';
 import type { ThemeMode } from '@/types';
 
-export { getColors, highlightColors, lightColors, darkColors, getPaperColors, PAPER_THEMES, PAPER_OPTIONS };
+export {
+  getColors,
+  highlightColors,
+  lightColors,
+  darkColors,
+  getPaperColors,
+  PAPER_THEMES,
+  PAPER_OPTIONS,
+  withAlpha,
+};
 export type { ThemeColors };
 export * from './typography';
 export { typography };

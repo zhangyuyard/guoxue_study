@@ -25,7 +25,7 @@ import { ConversionService } from '@/services/ConversionService';
 import { GuyinService, GUYIN_ATTRIBUTION, type GuyinEntry } from '@/services/GuyinService';
 import { useReadingOverrideStore } from '@/store/useReadingOverrideStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
-import { getColors, highlightColors, type ThemeColors } from '@/theme';
+import { getColors, highlightColors, withAlpha, type ThemeColors } from '@/theme';
 import {
   PINYIN_FONT_RATIO,
   PINYIN_LINE_GAP,
@@ -154,6 +154,10 @@ interface CharCellProps {
   styles: CellStyles;
   /** 多音字拼音色 */
   accentColor: string;
+  /** 活动选区背景色（主色半透明），仅选中字格着色 */
+  selectionBg: string;
+  /** 该字格是否处于活动选区内 */
+  selected: boolean;
   onHighlightPress?: (h: Highlight) => void;
   onLongPressChar?: (index: number) => void;
   /** 点按汉字回调（自由选区扩展用；提供时优先于划线点击） */
@@ -169,6 +173,8 @@ const CharCell = React.memo(function CharCell({
   cell,
   styles,
   accentColor,
+  selectionBg,
+  selected,
   onHighlightPress,
   onLongPressChar,
   onPressChar,
@@ -215,7 +221,13 @@ const CharCell = React.memo(function CharCell({
         style={[
           styles.char,
           cell.isRare ? styles.rareChar : null,
-          highlight ? { backgroundColor: highlightColors[highlight.color] } : null,
+          // 已保存划线背景：未被活动选区覆盖时显示（选区样式优先，保证选区在
+          // 三色划线上仍以主色半透明可辨识，而非与划线色混叠）
+          highlight && !selected
+            ? { backgroundColor: highlightColors[highlight.color] }
+            : null,
+          // 活动选区视觉反馈：主色半透明背景（菜单打开期间实时跟随扩展更新）
+          selected ? { backgroundColor: selectionBg } : null,
         ]}
         onPress={pressChar}
         onLongPress={onLongPressChar ? () => onLongPressChar(cell.index) : undefined}
@@ -476,6 +488,12 @@ export interface PinyinTextProps {
   pinyinMode: PinyinMode;
   /** 本段划线（可选，注音模式下叠加高亮背景） */
   highlights?: Highlight[];
+  /**
+   * 活动选区（段内码点区间 [start, end)，与划线偏移同一坐标系）。
+   * 选区菜单打开期间传入：区间内字格叠加主色半透明背景作为视觉反馈，
+   * 点按扩展后随 selection state 更新实时跟随；菜单关闭后传入 undefined 即消失。
+   */
+  selectionRange?: [number, number];
   /** 点击命中划线回调 */
   onPressHighlight?: (h: Highlight) => void;
   /** 长按汉字回调（参数为码点索引，供上层扩展选词） */
@@ -504,6 +522,7 @@ function PinyinTextBase({
   lineHeight,
   pinyinMode,
   highlights,
+  selectionRange,
   onPressHighlight,
   onLongPressChar,
   onPressChar,
@@ -514,6 +533,10 @@ function PinyinTextBase({
   const theme = useSettingsStore((s) => s.theme);
   const conversionMode = useSettingsStore((s) => s.conversionMode);
   const colors: ThemeColors = getColors(theme);
+
+  // 活动选区背景：主题主色叠 25% 透明度（随主题换色，引用稳定缓存）。
+  // 只影响渲染样式层，不参与注音计算，不会触发 pinyinCache 失效。
+  const selectionBg = useMemo(() => withAlpha(colors.primary, 0.25), [colors]);
 
   // 内部自动注音（外部传入 annotations 时优先生效）
   const { annotations: selfAnnotations, annotate } = usePinyin(text, pinyinMode, {
@@ -918,6 +941,12 @@ function PinyinTextBase({
             cell={cell}
             styles={styles}
             accentColor={colors.accent}
+            selectionBg={selectionBg}
+            selected={
+              selectionRange !== undefined &&
+              cell.index >= selectionRange[0] &&
+              cell.index < selectionRange[1]
+            }
             onHighlightPress={onPressHighlight}
             onLongPressChar={onLongPressChar}
             onPressChar={onPressChar}

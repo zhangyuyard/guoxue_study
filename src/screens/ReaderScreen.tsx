@@ -262,6 +262,11 @@ interface SegmentItemProps {
   lineHeight: number;
   pinyinMode: PinyinMode;
   segmentHighlights: Highlight[];
+  /**
+   * 活动选区（整段全局码点区间 [start, end)）：菜单打开期间传入，
+   * 渲染时给选区覆盖的字格/字符叠加主色半透明背景（选区视觉反馈）。
+   */
+  selectionRange?: [number, number];
   onHighlightPress: (h: Highlight) => void;
   /** 长按正文（参数为码点索引）：以该字为起点创建/重建选区 */
   onLongPressIndex: (segmentId: string, index: number) => void;
@@ -292,6 +297,7 @@ const SegmentItem = React.memo(function SegmentItem({
   lineHeight,
   pinyinMode,
   segmentHighlights,
+  selectionRange,
   onHighlightPress,
   onLongPressIndex,
   onPressIndex,
@@ -354,6 +360,22 @@ const SegmentItem = React.memo(function SegmentItem({
     return { localText, localHighlights };
   }, [pinyinMode, charRange, segment.text, segmentHighlights]);
 
+  // 活动选区在 'off' 模式（HighlightText）渲染坐标系中的区间：
+  // 未拆页时即全局区间；拆页时与 charRange 求交集并平移到局部坐标系
+  // （与 offModeSlice 的划线偏移平移同型），与拆页无交集则不显示选区视觉。
+  const localSelectionRange = useMemo<[number, number] | undefined>(() => {
+    if (!selectionRange) {
+      return undefined;
+    }
+    if (!charRange) {
+      return selectionRange;
+    }
+    const [s, e] = charRange;
+    const from = Math.max(s, selectionRange[0]);
+    const to = Math.min(e, selectionRange[1]);
+    return from < to ? [from - s, to - s] : undefined;
+  }, [selectionRange, charRange]);
+
   return (
     <View
       style={isContinuation ? styles.segmentContinuation : styles.segment}
@@ -364,6 +386,7 @@ const SegmentItem = React.memo(function SegmentItem({
           <HighlightText
             text={offModeSlice.localText}
             highlights={offModeSlice.localHighlights}
+            selectionRange={localSelectionRange}
             onPressHighlight={onHighlightPress}
             onLongPressSegment={handleLongPressSegment}
             onPressChar={onPressIndex ? handlePressSegment : undefined}
@@ -374,6 +397,7 @@ const SegmentItem = React.memo(function SegmentItem({
           <HighlightText
             text={segment.text}
             highlights={segmentHighlights}
+            selectionRange={localSelectionRange}
             onPressHighlight={onHighlightPress}
             onLongPressSegment={handleLongPressSegment}
             onPressChar={onPressIndex ? handlePressSegment : undefined}
@@ -388,6 +412,7 @@ const SegmentItem = React.memo(function SegmentItem({
           lineHeight={lineHeight}
           pinyinMode={pinyinMode}
           highlights={segmentHighlights}
+          selectionRange={selectionRange}
           onPressHighlight={onHighlightPress}
           onLongPressChar={handleLongPressChar}
           onPressChar={onPressIndex ? handlePressChar : undefined}
@@ -444,6 +469,8 @@ interface SegmentBlockItemProps {
   lineHeight: number;
   pinyinMode: PinyinMode;
   highlightsBySegment: Map<string, Highlight[]>;
+  /** 活动选区快照（菜单打开期间非空），用于选区视觉反馈 */
+  activeSelection?: { segmentId: string; start: number; end: number } | null;
   onHighlightPress: (h: Highlight) => void;
   onLongPressIndex: (segmentId: string, index: number) => void;
   onPressIndex?: (segmentId: string, index: number) => void;
@@ -460,6 +487,7 @@ const SegmentBlockItem = React.memo(function SegmentBlockItem({
   lineHeight,
   pinyinMode,
   highlightsBySegment,
+  activeSelection,
   onHighlightPress,
   onLongPressIndex,
   onPressIndex,
@@ -473,6 +501,11 @@ const SegmentBlockItem = React.memo(function SegmentBlockItem({
   }
   const range = parseChunkRange(blockId);
   const total = segCharCounts.get(segId) ?? 0;
+  // 活动选区命中本段时下发整段全局码点区间（选区/划线基准不随拆页变化）
+  const selectionRange: [number, number] | undefined =
+    activeSelection && activeSelection.segmentId === segId
+      ? [activeSelection.start, activeSelection.end]
+      : undefined;
   return (
     <SegmentItem
       segment={segment}
@@ -480,6 +513,7 @@ const SegmentBlockItem = React.memo(function SegmentBlockItem({
       lineHeight={lineHeight}
       pinyinMode={pinyinMode}
       segmentHighlights={highlightsBySegment.get(segId) ?? EMPTY_HIGHLIGHTS}
+      selectionRange={selectionRange}
       onHighlightPress={onHighlightPress}
       onLongPressIndex={onLongPressIndex}
       onPressIndex={onPressIndex}
@@ -502,6 +536,8 @@ interface PageModeViewProps {
   /** 当前繁简显示模式：纳入 measureKey（繁简转换改变文本 → 分页可能变化，需重量测 + 重定位） */
   displayMode: 'simplified' | 'traditional';
   highlightsBySegment: Map<string, Highlight[]>;
+  /** 活动选区快照（菜单打开期间非空），透传至分页块做选区视觉反馈 */
+  activeSelection?: { segmentId: string; start: number; end: number } | null;
   onHighlightPress: (h: Highlight) => void;
   onLongPressIndex: (segmentId: string, index: number) => void;
   /** 点按正文扩展选区（缺省 = 未处于选区状态，字符点按回落划线点击） */
@@ -531,6 +567,7 @@ function PageModeView({
   pinyinMode,
   displayMode,
   highlightsBySegment,
+  activeSelection,
   onHighlightPress,
   onLongPressIndex,
   onPressIndex,
@@ -865,6 +902,7 @@ function PageModeView({
                   lineHeight={lineHeight}
                   pinyinMode={pinyinMode}
                   highlightsBySegment={highlightsBySegment}
+                  activeSelection={activeSelection}
                   onHighlightPress={onHighlightPress}
                   onLongPressIndex={onLongPressIndex}
                   onPressIndex={onPressIndex}
@@ -887,6 +925,7 @@ function PageModeView({
       lineHeight,
       pinyinMode,
       highlightsBySegment,
+      activeSelection,
       onHighlightPress,
       onLongPressIndex,
       onPressIndex,
@@ -1151,6 +1190,18 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // 交互状态
   const [selection, setSelection] = useState<Selection | null>(null);
   const [selectionVisible, setSelectionVisible] = useState(false);
+  /**
+   * 活动选区（选区菜单打开期间）的正文字段快照：仅当菜单可见且存在选区时非空。
+   * 用于把 [start, end) 码点区间下发到渲染组件做选区视觉反馈；
+   * 菜单收起 / 保存划线 / 打开解析等清空 selectionVisible 后视觉随之消失。
+   */
+  const activeSelection = useMemo(
+    () =>
+      selectionVisible && selection
+        ? { segmentId: selection.segmentId, start: selection.start, end: selection.end }
+        : null,
+    [selectionVisible, selection],
+  );
   const [analysisVisible, setAnalysisVisible] = useState(false);
   const [analysisText, setAnalysisText] = useState('');
   // 选段在线翻译（P0：用户自带 Key 的服务商适配器）
@@ -2415,6 +2466,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             lineHeight={lineHeight}
             pinyinMode={pinyinMode}
             segmentHighlights={highlightsBySegment.get(item.segment.id) ?? EMPTY_HIGHLIGHTS}
+            selectionRange={
+              activeSelection && activeSelection.segmentId === item.segment.id
+                ? [activeSelection.start, activeSelection.end]
+                : undefined
+            }
             onHighlightPress={handleHighlightPress}
             onLongPressIndex={handleLongPressIndex}
             onPressIndex={selectionVisible ? handleSelectionExtendPress : undefined}
@@ -2439,6 +2495,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       handleLongPressIndex,
       handleSelectionExtendPress,
       selectionVisible,
+      activeSelection,
       handleRowLayout,
       bookId,
       colors,
@@ -2596,6 +2653,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
               pinyinMode={pinyinMode}
               displayMode={conversionMode}
               highlightsBySegment={highlightsBySegment}
+              activeSelection={activeSelection}
               onHighlightPress={handleHighlightPress}
               onLongPressIndex={handleLongPressIndex}
               onPressIndex={selectionVisible ? handleSelectionExtendPress : undefined}
@@ -2742,7 +2800,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
               {/* 内容限高滚动：内容少时自适应高度，极端情况（超长选区/大字号）可滚动不溢出 */}
               <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
                 <Text style={[styles.sheetTitle, { color: colors.textSecondary }]}>选中文字</Text>
-                <Text style={[styles.selectionText, { color: colors.text }]} numberOfLines={2}>
+                {/* 选中文字完整换行显示（不截断）：超长选区经面板 ScrollView 限高滚动查看 */}
+                <Text style={[styles.selectionText, { color: colors.text }]}>
                   {selection.text}
                 </Text>
                 <Text style={[styles.selectionHint, { color: colors.pinyin }]}>
@@ -3385,11 +3444,14 @@ const styles = StyleSheet.create({
   },
   selectionText: {
     fontSize: 17,
+    // 多行换行时的舒适行高（单行/多行通用，风格不变）
+    lineHeight: 24,
     fontWeight: '600',
     textAlign: 'center',
   },
   selectionHint: {
     fontSize: 11,
+    lineHeight: 16,
     textAlign: 'center',
   },
   rangeButton: {

@@ -54,6 +54,23 @@ export const highlightColors = {
   blue: 'rgba(33, 150, 243, 0.3)',
 } as const;
 
+/**
+ * 十六进制色叠加透明度：`#RRGGBB` -> `rgba(r, g, b, alpha)`。
+ * 用于在运行时基于主题色（如 primary）派生半透明背景（活动选区视觉反馈）。
+ * 非 6 位十六进制输入原样返回（主题色均为 #RRGGBB，防御性兜底）。
+ */
+export function withAlpha(hex: string, alpha: number): string {
+  const m = /^#([0-9A-Fa-f]{6})$/.exec(hex);
+  if (!m) {
+    return hex;
+  }
+  const value = parseInt(m[1], 16);
+  const r = (value >> 16) & 0xff;
+  const g = (value >> 8) & 0xff;
+  const b = value & 0xff;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 /** 按主题获取色板 */
 export function getColors(theme: ThemeMode) {
   return theme === 'dark' ? darkColors : lightColors;

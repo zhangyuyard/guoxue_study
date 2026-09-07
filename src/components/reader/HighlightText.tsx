@@ -11,7 +11,7 @@ import { StyleSheet, Text, type TextStyle } from 'react-native';
 import type { Highlight } from '@/types';
 
 import { useSettingsStore } from '@/store/useSettingsStore';
-import { getColors, highlightColors, type ThemeColors } from '@/theme';
+import { getColors, highlightColors, withAlpha, type ThemeColors } from '@/theme';
 import { getLineHeightPx } from '@/theme/typography';
 import { buildHighlightedSegments, type HighlightedSegment } from '@/utils/highlight';
 
@@ -20,6 +20,11 @@ export interface HighlightTextProps {
   text: string;
   /** 本段划线列表 */
   highlights: Highlight[];
+  /**
+   * 活动选区（本段局部文本的码点区间 [start, end)，与 localHighlights 同一坐标系）。
+   * 选区菜单打开期间传入：区间内字符叠加主色半透明背景作为视觉反馈。
+   */
+  selectionRange?: [number, number];
   /** 点击高亮片段回调 */
   onPressHighlight?: (h: Highlight) => void;
   /** 长按片段回调（含未高亮片段，用于上层扩展选词） */
@@ -38,6 +43,7 @@ export interface HighlightTextProps {
 function HighlightTextBase({
   text,
   highlights,
+  selectionRange,
   onPressHighlight,
   onLongPressSegment,
   onPressChar,
@@ -46,6 +52,9 @@ function HighlightTextBase({
 }: HighlightTextProps): React.JSX.Element {
   const theme = useSettingsStore((s) => s.theme);
   const colors: ThemeColors = getColors(theme);
+
+  // 活动选区背景：主题主色叠 25% 透明度（随主题换色，引用稳定缓存）
+  const selectionBg = useMemo(() => withAlpha(colors.primary, 0.25), [colors]);
 
   const segments = useMemo(
     () => buildHighlightedSegments(text, highlights),
@@ -77,10 +86,17 @@ function HighlightTextBase({
             : null;
           return chars.map((ch, i) => {
             const globalIndex = seg.start + i;
+            // 活动选区样式优先于已保存划线背景（主色半透明，保证可辨识）
+            const selected =
+              selectionRange !== undefined &&
+              globalIndex >= selectionRange[0] &&
+              globalIndex < selectionRange[1];
             return (
               <Text
                 key={`c${globalIndex}`}
-                style={segStyle ?? undefined}
+                style={
+                  selected ? [styles.span, { backgroundColor: selectionBg }] : (segStyle ?? undefined)
+                }
                 onPress={() => onPressChar(globalIndex)}
                 onLongPress={
                   onLongPressSegment ? () => onLongPressSegment(seg) : undefined
@@ -95,34 +111,59 @@ function HighlightTextBase({
     );
   }
 
+  // 片段级渲染路径（无 onPressChar，选区菜单关闭时的常态渲染）。
+  // 活动选区与片段无法逐字着色，故把与选区相交的片段按交集切成至多三段，
+  // 仅交集部分着选区背景（选区样式优先于划线背景）。
   return (
     <Text style={[styles.text, baseStyle]}>
       {segments.map((seg) => {
         const highlight = seg.highlight;
-        if (highlight) {
+        const segEnd = seg.start + Array.from(seg.text).length;
+        const selFrom =
+          selectionRange ? Math.max(seg.start, selectionRange[0]) : null;
+        const selTo = selectionRange ? Math.min(segEnd, selectionRange[1]) : null;
+        const pieces: { from: number; to: number; selected: boolean }[] = [];
+        if (selFrom !== null && selTo !== null && selFrom < selTo) {
+          if (seg.start < selFrom) {
+            pieces.push({ from: seg.start, to: selFrom, selected: false });
+          }
+          pieces.push({ from: selFrom, to: selTo, selected: true });
+          if (selTo < segEnd) {
+            pieces.push({ from: selTo, to: segEnd, selected: false });
+          }
+        } else {
+          pieces.push({ from: seg.start, to: segEnd, selected: false });
+        }
+        const plainStyle = highlight
+          ? [
+              styles.span,
+              { backgroundColor: highlightColors[highlight.color] },
+              highlight.noteId ? styles.noted : null,
+            ]
+          : undefined;
+        return pieces.map((piece) => {
+          const pieceText = Array.from(seg.text)
+            .slice(piece.from - seg.start, piece.to - seg.start)
+            .join('');
           return (
             <Text
-              key={`h${seg.start}`}
-              style={[
-                styles.span,
-                { backgroundColor: highlightColors[highlight.color] },
-                highlight.noteId ? styles.noted : null,
-              ]}
-              onPress={onPressHighlight ? () => onPressHighlight(highlight) : undefined}
+              key={`s${piece.from}`}
+              style={
+                piece.selected
+                  ? [styles.span, { backgroundColor: selectionBg }]
+                  : plainStyle
+              }
+              onPress={
+                highlight && onPressHighlight
+                  ? () => onPressHighlight(highlight)
+                  : undefined
+              }
               onLongPress={onLongPressSegment ? () => onLongPressSegment(seg) : undefined}
             >
-              {seg.text}
+              {pieceText}
             </Text>
           );
-        }
-        return (
-          <Text
-            key={`p${seg.start}`}
-            onLongPress={onLongPressSegment ? () => onLongPressSegment(seg) : undefined}
-          >
-            {seg.text}
-          </Text>
-        );
+        });
       })}
     </Text>
   );
