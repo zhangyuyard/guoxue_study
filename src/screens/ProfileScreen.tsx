@@ -1,7 +1,8 @@
 /**
  * 我的页（ProfileScreen）
- * 功能入口卡片（收藏/笔记/背诵进度/导出数据）+ 设置列表
+ * 功能入口按分组展示（学习 / 词典）+ 设置列表
  * （字号 4 档 / 行距 3 档 / 日夜间主题 / 注音模式 / 繁简偏好 / 关于）。
+ * 字典功能（查词 / 词典管理 / 字典上传）入口自底部 Tab 迁移至本页词典分组。
  * 设置项全部经 useSettingsStore 持久化（zustand persist + MMKV）。
  */
 import React, { useCallback, useState } from 'react';
@@ -19,11 +20,8 @@ import DocumentPicker from 'react-native-document-picker';
 import RNFS from 'react-native-fs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useNavigation } from '@react-navigation/native';
-import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { PinyinMode } from '@/types';
 import type { T04StackParamList } from '@/screens/types';
-import type { MainTabParamList } from '@/navigation/types';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { TRANSLATION_PROVIDERS } from '@/types/translation';
 import { useAchievementStore } from '@/store/useAchievementStore';
@@ -75,6 +73,38 @@ function copyToClipboard(text: string): boolean {
   return false;
 }
 
+/** 功能入口卡片 */
+function EntryCard({
+  entry,
+  colors,
+}: {
+  entry: ProfileEntry;
+  colors: ReturnType<typeof getColors>;
+}): React.JSX.Element {
+  return (
+    <Pressable
+      onPress={entry.onPress}
+      style={({ pressed }) => [
+        styles.entryCard,
+        { backgroundColor: colors.card, borderColor: colors.border },
+        pressed && styles.pressed,
+      ]}
+    >
+      <Text style={[styles.entryIcon, { color: colors.primary }]}>{entry.icon}</Text>
+      <Text style={[styles.entryLabel, { color: colors.text }]}>{entry.label}</Text>
+      <Text style={[styles.entryDesc, { color: colors.pinyin }]}>{entry.desc}</Text>
+    </Pressable>
+  );
+}
+
+/** 功能入口条目 */
+interface ProfileEntry {
+  key: string;
+  icon: string;
+  label: string;
+  desc: string;
+  onPress: () => void;
+}
 /** 分段选择行 */
 function SegmentedRow<T extends string | number>({
   options,
@@ -125,7 +155,6 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
   const insets = useSafeAreaInsets();
   const theme = useSettingsStore((s) => s.theme);
   const colors = getColors(theme);
-  const tabNavigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
 
   const fontSize = useSettingsStore((s) => s.fontSize);
   const lineHeight = useSettingsStore((s) => s.lineHeight);
@@ -326,14 +355,27 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
     })();
   }, [applyBackupRestore]);
 
-  /** 功能入口 */
-  const entries = [
-    { key: 'bookmarks', icon: '⭐', label: '收藏', desc: `${bookmarkCount} 条`, onPress: () => navigation.navigate('Bookmarks') },
-    { key: 'notes', icon: '📝', label: '笔记', desc: `${noteCount} 条`, onPress: () => navigation.navigate('NotesList') },
-    { key: 'achievements', icon: '🏅', label: '我的成就', desc: `已解锁 ${unlockedCount}/${ACHIEVEMENT_TOTAL}`, onPress: () => navigation.navigate('Achievements') },
-    { key: 'studyStats', icon: '📊', label: '学习统计', desc: '总览学习成果并分享', onPress: () => navigation.navigate('StudyStats') },
-    { key: 'export', icon: '📤', label: '导出数据', desc: '复制 JSON 到剪贴板', onPress: handleExport },
-    { key: 'dictUpload', icon: '📥', label: '字典上传', desc: '导入自定义字典', onPress: () => (tabNavigation.navigate as (name: string, params: object) => void)('Dict', { screen: 'DictImport' }) },
+  /** 功能入口（按「学习 / 词典」分组；数据类入口收敛至「数据与备份」卡片） */
+  const entryGroups: { key: string; title: string; entries: ProfileEntry[] }[] = [
+    {
+      key: 'study',
+      title: '学习',
+      entries: [
+        { key: 'bookmarks', icon: '⭐', label: '收藏', desc: `${bookmarkCount} 条`, onPress: () => navigation.navigate('Bookmarks') },
+        { key: 'notes', icon: '📝', label: '笔记', desc: `${noteCount} 条`, onPress: () => navigation.navigate('NotesList') },
+        { key: 'studyStats', icon: '📊', label: '学习统计', desc: '总览学习成果并分享', onPress: () => navigation.navigate('StudyStats') },
+        { key: 'achievements', icon: '🏅', label: '我的成就', desc: `已解锁 ${unlockedCount}/${ACHIEVEMENT_TOTAL}`, onPress: () => navigation.navigate('Achievements') },
+      ],
+    },
+    {
+      key: 'dict',
+      title: '词典',
+      entries: [
+        { key: 'dictLookup', icon: '🔍', label: '查词', desc: '查询字头释义与读音', onPress: () => navigation.navigate('DictLookup', {}) },
+        { key: 'dictManage', icon: '📖', label: '词典管理', desc: '启用与排序本地词典', onPress: () => navigation.navigate('DictManage') },
+        { key: 'dictUpload', icon: '📥', label: '字典上传', desc: '导入自定义字典', onPress: () => navigation.navigate('DictImport') },
+      ],
+    },
   ];
 
   const pinyinOptions: { value: PinyinMode; label: string }[] = [
@@ -352,24 +394,17 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
     >
       <Text style={[styles.title, { color: colors.text }]}>我的</Text>
 
-      {/* 功能入口卡片 */}
-      <View style={styles.entryGrid}>
-        {entries.map((entry) => (
-          <Pressable
-            key={entry.key}
-            onPress={entry.onPress}
-            style={({ pressed }) => [
-              styles.entryCard,
-              { backgroundColor: colors.card, borderColor: colors.border },
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={[styles.entryIcon, { color: colors.primary }]}>{entry.icon}</Text>
-            <Text style={[styles.entryLabel, { color: colors.text }]}>{entry.label}</Text>
-            <Text style={[styles.entryDesc, { color: colors.pinyin }]}>{entry.desc}</Text>
-          </Pressable>
-        ))}
-      </View>
+      {/* 功能入口（分组展示：学习 / 词典） */}
+      {entryGroups.map((group) => (
+        <View key={group.key}>
+          <SectionTitle title={group.title} colors={colors} />
+          <View style={styles.entryGrid}>
+            {group.entries.map((entry) => (
+              <EntryCard key={entry.key} entry={entry} colors={colors} />
+            ))}
+          </View>
+        </View>
+      ))}
 
       {/* 阅读设置 */}
       <SectionTitle title="阅读设置" colors={colors} />
@@ -453,12 +488,31 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
         </View>
       </Pressable>
 
-      {/* 备份与恢复（P2-15 本地版） */}
-      <SectionTitle title="备份与恢复" colors={colors} />
+      {/* 数据与备份（导出数据 + 本地备份/恢复） */}
+      <SectionTitle title="数据与备份" colors={colors} />
       <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Pressable
-          onPress={handleBackupExport}
+          onPress={handleExport}
           style={({ pressed }) => [styles.backupRow, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="导出收藏笔记等数据到剪贴板"
+        >
+          <View style={styles.settingLabelBox}>
+            <Text style={[styles.settingLabel, { color: colors.text }]}>导出数据</Text>
+            <Text style={[styles.settingHint, { color: colors.pinyin }]}>
+              收藏 / 笔记 / 背诵进度 → JSON 复制到剪贴板
+            </Text>
+          </View>
+          <Text style={[styles.settingValue, { color: colors.textSecondary }]}>导出 ›</Text>
+        </Pressable>
+        <Pressable
+          onPress={handleBackupExport}
+          style={({ pressed }) => [
+            styles.backupRow,
+            styles.backupRowBordered,
+            { borderTopColor: colors.border },
+            pressed && styles.pressed,
+          ]}
           accessibilityRole="button"
           accessibilityLabel="导出备份文件"
         >

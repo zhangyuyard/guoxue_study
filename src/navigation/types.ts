@@ -2,14 +2,17 @@
  * 导航路由参数类型（T05）
  * 层级结构：
  *   RootStack（全局页面 + 主 Tab 容器）
- *     └─ MainTab（书架 / 字典 / 我的）
+ *     └─ MainTab（书架 / 背诵 / 我的）
  *          ├─ LibraryStack：Library → Search
- *          ├─ DictStack：DictLookup → DictManage → DictImport
- *          └─ ProfileStack：Profile → Bookmarks / NotesList / Recitation / RecitationPractice
+ *          ├─ ReciteStack：Recitation → RecitationPractice
+ *          └─ ProfileStack：Profile → DictLookup / DictManage / DictImport
+ *               → Bookmarks / NotesList / Achievements / StudyStats
  * 说明：
  *   - Reader 与 RecitationPractice 挂在 RootStack，供书架、搜索结果、收藏列表、
  *     阅读器工具栏等任意位置进入（navigate 未命中当前 Stack 时由 React Navigation 冒泡至父级）。
- *     DictLookup 同样挂在 RootStack（阅读器解析面板「在字典中查看」直达，返回不丢阅读位置）。
+ *   - 字典功能不再占用底部 Tab，三屏（DictLookup / DictManage / DictImport）挂载于
+ *     ProfileStack，入口统一收敛到「我的」页词典分组；DictLookup 同时保留在
+ *     RootStack（阅读器解析面板「在字典中查看」直达，返回不丢阅读位置）。
  *   - 各页面统一使用 AppStackParamList（应用级全路由表）声明 props，
  *     保证编译期 navigate 的路由名与参数和全局注册一致。
  */
@@ -51,8 +54,6 @@ export interface DictLookupParams {
 export type MainTabParamList = {
   /** 书架 */
   Library: undefined;
-  /** 字典（查字 / 管理 / 导入） */
-  Dict: undefined;
   /** 背诵（背诵助手 + 背诵练习） */
   Recite: undefined;
   /** 我的 */
@@ -65,22 +66,21 @@ export type LibraryStackParamList = {
   Search: undefined;
 };
 
-/** 字典 Tab Stack：查字页 + 管理页 + 导入页 */
-export type DictStackParamList = {
-  DictLookup: DictLookupParams;
-  DictManage: undefined;
-  DictImport: undefined;
-};
-
 /** 背诵 Tab Stack：背诵助手页 + 背诵练习页 */
 export type ReciteStackParamList = {
   Recitation: undefined;
   RecitationPractice: RecitationPracticeParams;
 };
 
-/** 我的 Tab Stack：个人中心、收藏 / 笔记 / 繁简转换 / 成就页面 */
+/** 我的 Tab Stack：个人中心、词典三屏、收藏 / 笔记 / 成就页面 */
 export type ProfileStackParamList = {
   Profile: undefined;
+  /** 查字页（「我的」页词典分组进入；阅读器直达走 RootStack.DictLookup） */
+  DictLookup: DictLookupParams;
+  /** 词典管理页 */
+  DictManage: undefined;
+  /** 字典导入页 */
+  DictImport: undefined;
   Bookmarks: undefined;
   NotesList: undefined;
   /** 成就页（P2-06） */

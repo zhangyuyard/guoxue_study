@@ -2,7 +2,7 @@
  * TextLibraryService 章节翻页数据路径回归测试
  * 阅读页「上一章 / 下一章」依赖 getSiblingChapters 返回正确的相邻章节，
  * 此测试锁定该数据路径，避免回归导致「只显示第一章、无法翻页」。
- * 另锁定：内置书目清单（道德经 + B5 批次孟子/庄子/诗经/荀子/楚辞）；
+ * 另锁定：内置书目清单（原 10 部 + 2026-09 扩充周易/左传/史记/资治通鉴/墨子/文选）；
  * 用户书注册后可读、可被 getBooks 枚举。
  */
 import {
@@ -65,7 +65,10 @@ describe('TextLibraryService.getSiblingChapters（章节翻页数据路径）', 
 });
 
 describe('TextLibraryService 初始内置书目', () => {
-  /** 内置书单顺序：道德经 + 论语/大学/中庸 + B5 批次五部 + 唐诗三百首（P2-10 起 10 部全量注册） */
+  /**
+   * 内置书单顺序：道德经 + 论语/大学/中庸 + B5 批次五部 + 唐诗三百首
+   * + 2026-09 扩充六部（周易/左传/史记/资治通鉴/墨子/文选），共 16 部全量注册。
+   */
   const BUILTIN_IDS = [
     'daodejing',
     'lunyu',
@@ -77,9 +80,15 @@ describe('TextLibraryService 初始内置书目', () => {
     'xunzi',
     'chuci',
     'tangshi',
+    'zhouyi',
+    'zuozhuan',
+    'shiji',
+    'tongjian',
+    'mozi',
+    'wenxuan',
   ];
 
-  test('内置书目为 10 部（道德经/论语/大学/中庸/孟子/庄子/诗经/荀子/楚辞/唐诗三百首）', () => {
+  test('内置书目为 16 部（原 10 部 + 周易/左传/史记/资治通鉴/墨子/文选）', () => {
     const res = TextLibraryService.getBooks();
     expect(res.success).toBe(true);
     expect(res.data!.map((b) => b.id)).toEqual(BUILTIN_IDS);
@@ -132,6 +141,12 @@ describe('TextLibraryService.registerUserBooks（用户上传书籍注册）', (
       'xunzi',
       'chuci',
       'tangshi',
+      'zhouyi',
+      'zuozhuan',
+      'shiji',
+      'tongjian',
+      'mozi',
+      'wenxuan',
     ]);
   });
 });

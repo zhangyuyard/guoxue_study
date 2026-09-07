@@ -20,6 +20,7 @@ import type {
 import pinyinDictData from '@/data/pinyin-dict.json';
 import polyphoneRulesData from '@/data/polyphone-rules.json';
 import yitiData from '@/data/yiti-zi.json';
+import phrasePinyinData from '@/data/phrase-pinyin.json';
 import { toSimplified } from '@/utils/conversion';
 import {
   buildHanSequence,
@@ -134,6 +135,64 @@ const POLYPHONE = pinyinDictData.polyphone as Record<string, string[]>;
 const RULES = polyphoneRulesData.rules as unknown as PolyphoneRule[];
 const YITI_GROUPS = yitiData.groups as unknown as YitiGroup[];
 
+// ---------- 词组读音层（v3.2：phrase-pinyin-data） ----------
+// 数据：mozillazg/phrase-pinyin-data（MIT）large_pinyin.txt v0.19.0 = 汉典词典 +
+// 汉典成语词典 + CC-CEDICT + 手工纠正；构建脚本 build-phrase-pinyin.mjs 过滤为
+// 「2~8 字纯汉字且含至少一个多音字」的词组（约 18 万条）。
+// 懒初始化：Map（18 万条）构建成本一次性、约几十 ms，推迟到首次 annotate 时，
+// 避免拖慢模块加载与冷启动。
+const PHRASE_SOURCE_LABEL = 'phrase-pinyin-data（汉典/CC-CEDICT 合并词库）';
+const PHRASE_MAX_LEN = 8;
+
+let phraseMapCache: Map<string, string> | null = null;
+function getPhraseMap(): Map<string, string> {
+  if (!phraseMapCache) {
+    phraseMapCache = new Map(Object.entries(phrasePinyinData.phrases));
+  }
+  return phraseMapCache;
+}
+
+/**
+ * 对逻辑字符序列做正向最大匹配，得到「下标 → 词组读音」覆盖表。
+ * 词组内每个字（含单音字）都采用词典读音——词典条目整体可信；
+ * 与 canon 语境、规则库的冲突由仲裁链顺序保证（canon > 规则库 > 词组层）。
+ *
+ * @param logicChars 与原文码点严格对齐的简体逻辑字序列
+ * @returns Map<原文码点下标, 读音>
+ */
+export function computePhraseOverlay(logicChars: readonly string[]): Map<number, string> {
+  const map = getPhraseMap();
+  const overlay = new Map<number, string>();
+  let i = 0;
+  while (i < logicChars.length) {
+    if (!isCJKChar(logicChars[i])) {
+      i += 1;
+      continue;
+    }
+    let hit = false;
+    const maxLen = Math.min(PHRASE_MAX_LEN, logicChars.length - i);
+    for (let len = maxLen; len >= 2; len -= 1) {
+      const phrase = logicChars.slice(i, i + len).join('');
+      const pinyin = map.get(phrase);
+      if (pinyin) {
+        const syllables = pinyin.split(/\s+/);
+        for (let j = 0; j < len; j += 1) {
+          if (syllables[j]) {
+            overlay.set(i + j, syllables[j]);
+          }
+        }
+        i += len;
+        hit = true;
+        break;
+      }
+    }
+    if (!hit) {
+      i += 1;
+    }
+  }
+  return overlay;
+}
+
 // ---------- 预构建索引 ----------
 const rulesByChar = new Map<string, PolyphoneRule>();
 for (const rule of RULES) {
@@ -186,9 +245,21 @@ function isCJKChar(ch: string): boolean {
  * charIdx 按码点定位（Array.from），保证扩展区汉字不串位。
  */
 export function resolvePolyphone(char: string, context: string): string {
+  return resolvePolyphoneMatched(char, context).pinyin;
+}
+
+/**
+ * resolvePolyphone 的带命中标志版本（内部使用）：
+ * matched=false 表示规则库无 pattern 命中、读音仅为 default 兜底——
+ * 该弱证据结论应让位于词组层词典事实（v3.2 仲裁链），但不能替换原导出签名。
+ */
+function resolvePolyphoneMatched(
+  char: string,
+  context: string,
+): { pinyin: string; matched: boolean } {
   const rule = rulesByChar.get(char);
   if (!rule) {
-    return PINYIN_DICT[char] ?? '';
+    return { pinyin: PINYIN_DICT[char] ?? '', matched: false };
   }
   let best: PolyphoneContext | null = null;
   let bestLen = -1;
@@ -244,7 +315,10 @@ export function resolvePolyphone(char: string, context: string): string {
     }
   }
 
-  return best ? (best as PolyphoneContext).pinyin : rule.default || (rule.readings[0] ?? '');
+  return {
+    pinyin: best ? (best as PolyphoneContext).pinyin : rule.default || (rule.readings[0] ?? ''),
+    matched: Boolean(best),
+  };
 }
 
 /** 获取多音字的全部候选读音（内置 ∪ 外部字典来源，去重；非多音字或未知字返回空数组），返回副本避免外部篡改内部数据 */
@@ -316,6 +390,8 @@ export function annotate(
       const seqInfo: HanSequence = buildHanSequence(text);
       const tjSpanCache = new Map<string, [number, number] | null>();
       const rdSpanCache = new Map<string, [number, number] | null>();
+      // 词组读音覆盖表（v3.2）：与 chars 严格对齐的简体逻辑字序列上做正向最大匹配
+      const phraseOverlay = computePhraseOverlay(chars.map((c) => toSimplified(c)));
     // 整句语境注音（禁用变调，保持原调）
     const baseArr = pinyin(text, {
       toneType: 'symbol',
@@ -385,10 +461,26 @@ export function annotate(
           py = canonReading.reading;
           readingSources = canonReading.sources;
           readingVerified = true;
-        } else if (rulesByChar.has(logic)) {
-          const corrected = resolvePolyphone(logic, logicText);
-          if (corrected) {
-            py = corrected;
+        } else {
+          // 规则库：pattern 真命中才短路；仅 default 兜底（matched=false）时
+          // 落词组层——词典事实强于「取首个读音」的弱兜底（v3.2 仲裁链）
+          let ruleHandled = false;
+          if (rulesByChar.has(logic)) {
+            const ruleResult = resolvePolyphoneMatched(logic, logicText);
+            if (ruleResult.matched) {
+              py = ruleResult.pinyin;
+              ruleHandled = true;
+            }
+          }
+          if (!ruleHandled) {
+            // 词组精确匹配（v3.2）：位于古文规则库之后——通用词典对古文异读
+            // 可能误导（如「地道」词典为名词 dì dào），规则库优先守古文
+            const phrasePy = phraseOverlay.get(idx);
+            if (phrasePy) {
+              py = phrasePy;
+              readingSources = [PHRASE_SOURCE_LABEL];
+              readingVerified = true;
+            }
           }
         }
       }

@@ -337,7 +337,7 @@ describe('PinyinService × canon v3 用例级语境锚定', () => {
     expect(shuo.tongjia).toBeUndefined();
   });
 
-  test('读音候选同样受语境锚定约束：例句未命中 → 读音回退（未校验）', () => {
+  test('读音候选同样受语境锚定约束：例句未命中 → canon 未采用，回退词组层（v3.2）', () => {
     const provider: CanonProvider = {
       getTongjia: () => null,
       getReadingCandidates: (_w, _b, char) =>
@@ -349,8 +349,10 @@ describe('PinyinService × canon v3 用例级语境锚定', () => {
     setCanonProvider(provider);
     const res = annotate('成事不说', 'full', { workId: 'lunyu-bayi', bookId: 'lunyu' });
     const shuo = res.data!.find((a) => a.char === '说')!;
-    // canon 读音未采用（回退内置规则 / pinyin-pro，标未校验）
-    expect(shuo.readingVerified).toBe(false);
+    // canon 的 yuè 未被采用；回退链路命中词组层「成事不说 → shuō」（读音正确）
+    expect(shuo.pinyin).toBe('shuō');
+    expect(shuo.readingVerified).toBe(true);
+    expect(shuo.readingSources![0]).toContain('phrase-pinyin-data');
   });
 
   test('候选行无 context（人工种子/引文缺失）：不标注（v3.1 宁缺毋滥）', () => {

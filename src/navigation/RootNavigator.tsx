@@ -1,9 +1,12 @@
 /**
  * 根导航（T05）
  * 结构：RootStack（Native Stack）
- *   ├─ Main：底部 4 Tab（书架 | 字典 | 背诵 | 我的），各 Tab 内 Native Stack
+ *   ├─ Main：底部 3 Tab（书架 | 背诵 | 我的），各 Tab 内 Native Stack
  *   ├─ Reader：全局阅读器（书架 / 搜索结果 / 收藏列表等任意位置可进入）
  *   └─ RecitationPractice：背诵练习（背诵 Tab「背诵助手」选章进入；阅读器不再直达）
+ * 字典功能不再占用底部 Tab：三屏（DictLookup / DictManage / DictImport）挂载于
+ * ProfileStack，入口收敛到「我的」页词典分组；DictLookup 同时保留在 RootStack，
+ * 供阅读器解析面板「在字典中查看」直达（返回不丢阅读位置）。
  * Tab 图标使用 emoji 兜底，避免 react-native-vector-icons 原生字体未链接时显示问号。
  */
 import React from 'react';
@@ -27,7 +30,6 @@ import StudyStatsScreen from '@/screens/StudyStatsScreen';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getColors } from '@/theme';
 import type {
-  DictStackParamList,
   LibraryStackParamList,
   MainTabParamList,
   ProfileStackParamList,
@@ -40,14 +42,12 @@ import type {
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const LibraryStack = createNativeStackNavigator<LibraryStackParamList>();
-const DictStack = createNativeStackNavigator<DictStackParamList>();
 const ReciteStack = createNativeStackNavigator<ReciteStackParamList>();
 const ProfileStack = createNativeStackNavigator<ProfileStackParamList>();
 
 /** Tab 展示配置（emoji 图标兜底） */
 const TAB_META: Record<keyof MainTabParamList, { icon: string; label: string }> = {
   Library: { icon: '📚', label: '书架' },
-  Dict: { icon: '📕', label: '字典' },
   Recite: { icon: '🧠', label: '背诵' },
   Profile: { icon: '👤', label: '我的' },
 };
@@ -64,17 +64,6 @@ function LibraryStackScreens(): React.JSX.Element {
   );
 }
 
-/** 字典 Tab：查字页 + 管理页 + 导入页 */
-function DictStackScreens(): React.JSX.Element {
-  return (
-    <DictStack.Navigator screenOptions={{ headerShown: false }}>
-      <DictStack.Screen name="DictLookup" component={DictLookupScreen} />
-      <DictStack.Screen name="DictManage" component={DictManageScreen} />
-      <DictStack.Screen name="DictImport" component={DictImportScreen} />
-    </DictStack.Navigator>
-  );
-}
-
 /** 背诵 Tab：背诵助手页 + 背诵练习页 */
 function ReciteStackScreens(): React.JSX.Element {
   return (
@@ -88,11 +77,14 @@ function ReciteStackScreens(): React.JSX.Element {
   );
 }
 
-/** 我的 Tab：个人中心 + 收藏 / 笔记 / 成就（背诵入口已独立为「背诵」Tab） */
+/** 我的 Tab：个人中心 + 词典三屏（原字典 Tab 入口迁移至此）+ 收藏 / 笔记 / 成就 */
 function ProfileStackScreens(): React.JSX.Element {
   return (
     <ProfileStack.Navigator screenOptions={{ headerShown: false }}>
       <ProfileStack.Screen name="Profile" component={ProfileScreen} />
+      <ProfileStack.Screen name="DictLookup" component={DictLookupScreen} />
+      <ProfileStack.Screen name="DictManage" component={DictManageScreen} />
+      <ProfileStack.Screen name="DictImport" component={DictImportScreen} />
       <ProfileStack.Screen name="Bookmarks" component={BookmarksScreen} />
       <ProfileStack.Screen name="NotesList" component={NotesListScreen} />
       <ProfileStack.Screen name="Achievements" component={AchievementsScreen} />
@@ -128,11 +120,6 @@ function MainTabs(): React.JSX.Element {
         name="Library"
         component={LibraryStackScreens}
         options={{ title: TAB_META.Library.label }}
-      />
-      <Tab.Screen
-        name="Dict"
-        component={DictStackScreens}
-        options={{ title: TAB_META.Dict.label }}
       />
       <Tab.Screen
         name="Recite"

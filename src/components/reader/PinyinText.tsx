@@ -493,6 +493,11 @@ export interface PinyinTextProps {
   lineHeight: number;
   /** 注音模式：off 时直接渲染纯文本 */
   pinyinMode: PinyinMode;
+  /**
+   * 繁简显示模式覆盖（书籍级设置分层）：传入时优先生效（通假字浮窗文案随其转换），
+   * 缺省回落全局 useSettingsStore.conversionMode（向后兼容未传覆盖的调用方）。
+   */
+  conversionMode?: 'simplified' | 'traditional';
   /** 本段划线（可选，注音模式下叠加高亮背景） */
   highlights?: Highlight[];
   /**
@@ -528,6 +533,7 @@ function PinyinTextBase({
   fontSize,
   lineHeight,
   pinyinMode,
+  conversionMode: conversionModeOverride,
   highlights,
   selectionRange,
   onPressHighlight,
@@ -538,7 +544,9 @@ function PinyinTextBase({
   charRange,
 }: PinyinTextProps): React.JSX.Element {
   const theme = useSettingsStore((s) => s.theme);
-  const conversionMode = useSettingsStore((s) => s.conversionMode);
+  const storeConversionMode = useSettingsStore((s) => s.conversionMode);
+  // 繁简生效值：书籍级覆盖（设置分层）优先，未传时回落全局
+  const conversionMode = conversionModeOverride ?? storeConversionMode;
   const colors: ThemeColors = getColors(theme);
 
   // 活动选区背景：主题主色叠 25% 透明度（随主题换色，引用稳定缓存）。

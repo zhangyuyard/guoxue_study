@@ -51,6 +51,13 @@ const MAX_SEGMENT_CHARS = 2500;
 const SEGMENTS_PER_PART = 60;
 /** 章节数上限（防畸形文件撑爆 db） */
 const MAX_CHAPTERS = 5000;
+/**
+ * 大文件确认阈值（8MB）。
+ * 读文件本身是分块进行的（READ_CHUNK_LIMIT），但解码与 parseTxtBook 仍为
+ * 全量同步解析——超过该阈值的文件解析可能阻塞主线程较久，导入前先经
+ * onConfirmLargeFile 向用户确认再继续，而非静默截断或崩溃。
+ */
+export const LARGE_FILE_CONFIRM_BYTES = 8 * 1024 * 1024;
 
 type DB = ReturnType<typeof open>;
 
@@ -568,15 +575,36 @@ export async function restoreUserBooks(
   return { success: true, data: { restored: restoredBooks.length, skipped } };
 }
 
+/** importBook 可选项 */
+export interface ImportBookOptions {
+  /** 大文件确认回调：文件大小超过 LARGE_FILE_CONFIRM_BYTES 时调用；
+   * 返回 true 继续导入，false 取消。未提供时不拦截（保持旧调用方行为）。 */
+  onConfirmLargeFile?: (size: number) => Promise<boolean>;
+}
+
 /** 导入一本书：选文件 → 读取 → 解析 → 存库 → 注册 → 刷新内存列表 */
 export async function importBook(
   picked?: PickedBookFile,
+  opts?: ImportBookOptions,
 ): Promise<ServiceResult<Book>> {
   const pickRes = picked ? { success: true, data: picked } : await pickBookFile();
   if (!pickRes.success || !pickRes.data) {
     return { success: false, error: pickRes.error ?? '已取消选择文件' };
   }
   const file = pickRes.data;
+
+  // 大文件防护：超 8MB 先经 UI 确认（文件大小未知时跳过，读取阶段仍有大小上限兜底）
+  if (file.size > LARGE_FILE_CONFIRM_BYTES && opts?.onConfirmLargeFile) {
+    let confirmed = false;
+    try {
+      confirmed = await opts.onConfirmLargeFile(file.size);
+    } catch {
+      confirmed = false;
+    }
+    if (!confirmed) {
+      return { success: false, error: '已取消导入大文件' };
+    }
+  }
 
   const ext = file.fileName.split('.').pop()?.toLowerCase() ?? 'txt';
   // 含图片/压缩容器格式体积偏大，放宽限制

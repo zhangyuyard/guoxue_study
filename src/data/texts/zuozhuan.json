@@ -1,0 +1,47 @@
+{
+  "id": "zuozhuan",
+  "title": "左传（选）",
+  "author": "左丘明",
+  "category": "jing",
+  "description": "我国第一部叙事详备的编年体史书，相传为左丘明所作，记春秋二百五十余年史事。本选本收《郑伯克段于鄢》《曹刿论战》《烛之武退秦师》三篇名作，以通行整理本为底。",
+  "chapters": [
+    {
+      "id": "zuozhuan-zhengbo-keduanyuyan",
+      "bookId": "zuozhuan",
+      "title": "郑伯克段于鄢",
+      "order": 1,
+      "segments": [
+        { "id": "zuozhuan-zhengbo-keduanyuyan-1", "chapterId": "zuozhuan-zhengbo-keduanyuyan", "order": 1, "text": "初，郑武公娶于申，曰武姜，生庄公及共叔段。庄公寤生，惊姜氏，故名曰“寤生”，遂恶之。爱共叔段，欲立之。亟请于武公，公弗许。及庄公即位，为之请制。公曰：“制，岩邑也，虢叔死焉，佗邑唯命。”请京，使居之，谓之京城大叔。" },
+        { "id": "zuozhuan-zhengbo-keduanyuyan-2", "chapterId": "zuozhuan-zhengbo-keduanyuyan", "order": 2, "text": "祭仲曰：“都城过百雉，国之害也。先王之制：大都，不过参国之一；中，五之一；小，九之一。今京不度，非制也，君将不堪。”公曰：“姜氏欲之，焉辟害？”对曰：“姜氏何厌之有？不如早为之所，无使滋蔓。蔓，难图也。蔓草犹不可除，况君之宠弟乎？”公曰：“多行不义，必自毙，子姑待之。”" },
+        { "id": "zuozhuan-zhengbo-keduanyuyan-3", "chapterId": "zuozhuan-zhengbo-keduanyuyan", "order": 3, "text": "既而大叔命西鄙、北鄙贰于己。公子吕曰：“国不堪贰，君将若之何？欲与大叔，臣请事之；若弗与，则请除之，无生民心。”公曰：“无庸，将自及。”大叔又收贰以为己邑，至于廪延。子封曰：“可矣。厚将得众。”公曰：“不义不昵，厚将崩。”" },
+        { "id": "zuozhuan-zhengbo-keduanyuyan-4", "chapterId": "zuozhuan-zhengbo-keduanyuyan", "order": 4, "text": "大叔完聚，缮甲兵，具卒乘，将袭郑，夫人将启之。公闻其期，曰：“可矣。”命子封帅车二百乘以伐京，京叛大叔段。段入于鄢，公伐诸鄢。五月辛丑，大叔出奔共。" },
+        { "id": "zuozhuan-zhengbo-keduanyuyan-5", "chapterId": "zuozhuan-zhengbo-keduanyuyan", "order": 5, "text": "书曰：“郑伯克段于鄢。”段不弟，故不言弟；如二君，故曰克；称郑伯，讥失教也，谓之郑志。不言出奔，难之也。" },
+        { "id": "zuozhuan-zhengbo-keduanyuyan-6", "chapterId": "zuozhuan-zhengbo-keduanyuyan", "order": 6, "text": "遂寘姜氏于城颍，而誓之曰：“不及黄泉，无相见也！”既而悔之。颍考叔为颍谷封人，闻之，有献于公。公赐之食，食舍肉。公问之。对曰：“小人有母，皆尝小人之食矣，未尝君之羹，请以遗之。”公曰：“尔有母遗，繄我独无！”颍考叔曰：“敢问何谓也？”公语之故，且告之悔。对曰：“君何患焉？若阙地及泉，隧而相见，其谁曰不然？”公从之。" },
+        { "id": "zuozhuan-zhengbo-keduanyuyan-7", "chapterId": "zuozhuan-zhengbo-keduanyuyan", "order": 7, "text": "公入而赋：“大隧之中，其乐也融融！”姜出而赋：“大隧之外，其乐也泄泄！”遂为母子如初。君子曰：颍考叔，纯孝也。爱其母，施及庄公。《诗》曰：“孝子不匮，永锡尔类。”其是之谓乎！" }
+      ]
+    },
+    {
+      "id": "zuozhuan-caogui-lunzhan",
+      "bookId": "zuozhuan",
+      "title": "曹刿论战",
+      "order": 2,
+      "segments": [
+        { "id": "zuozhuan-caogui-lunzhan-1", "chapterId": "zuozhuan-caogui-lunzhan", "order": 1, "text": "十年春，齐师伐我。公将战。曹刿请见。其乡人曰：“肉食者谋之，又何间焉？”刿曰：“肉食者鄙，未能远谋。”乃入见。" },
+        { "id": "zuozhuan-caogui-lunzhan-2", "chapterId": "zuozhuan-caogui-lunzhan", "order": 2, "text": "问何以战。公曰：“衣食所安，弗敢专也，必以分人。”对曰：“小惠未遍，民弗从也。”公曰：“牺牲玉帛，弗敢加也，必以信。”对曰：“小信未孚，神弗福也。”公曰：“小大之狱，虽不能察，必以情。”对曰：“忠之属也。可以一战。战则请从。”" },
+        { "id": "zuozhuan-caogui-lunzhan-3", "chapterId": "zuozhuan-caogui-lunzhan", "order": 3, "text": "公与之乘，战于长勺。公将鼓之。刿曰：“未可。”齐人三鼓。刿曰：“可矣。”齐师败绩。公将驰之。刿曰：“未可。”下视其辙，登轼而望之，曰：“可矣。”遂逐齐师。" },
+        { "id": "zuozhuan-caogui-lunzhan-4", "chapterId": "zuozhuan-caogui-lunzhan", "order": 4, "text": "既克，公问其故。对曰：“夫战，勇气也。一鼓作气，再而衰，三而竭。彼竭我盈，故克之。夫大国，难测也，惧有伏焉。吾视其辙乱，望其旗靡，故逐之。”" }
+      ]
+    },
+    {
+      "id": "zuozhuan-zhuzhiwu-tuiqinshi",
+      "bookId": "zuozhuan",
+      "title": "烛之武退秦师",
+      "order": 3,
+      "segments": [
+        { "id": "zuozhuan-zhuzhiwu-tuiqinshi-1", "chapterId": "zuozhuan-zhuzhiwu-tuiqinshi", "order": 1, "text": "晋侯、秦伯围郑，以其无礼于晋，且贰于楚也。晋军函陵，秦军氾南。佚之狐言于郑伯曰：“国危矣，若使烛之武见秦君，师必退。”公从之。辞曰：“臣之壮也，犹不如人；今老矣，无能为也已。”公曰：“吾不能早用子，今急而求子，是寡人之过也。然郑亡，子亦有不利焉。”许之。" },
+        { "id": "zuozhuan-zhuzhiwu-tuiqinshi-2", "chapterId": "zuozhuan-zhuzhiwu-tuiqinshi", "order": 2, "text": "夜缒而出。见秦伯曰：“秦、晋围郑，郑既知亡矣。若亡郑而有益于君，敢以烦执事。越国以鄙远，君知其难也。焉用亡郑以陪邻？邻之厚，君之薄也。若舍郑以为东道主，行李之往来，共其乏困，君亦无所害。且君尝为晋君赐矣，许君焦、瑕，朝济而夕设版焉，君之所知也。夫晋，何厌之有？既东封郑，又欲肆其西封。若不阙秦，将焉取之？阙秦以利晋，唯君图之。”秦伯说，与郑人盟，使杞子、逢孙、杨孙戍之，乃还。" },
+        { "id": "zuozhuan-zhuzhiwu-tuiqinshi-3", "chapterId": "zuozhuan-zhuzhiwu-tuiqinshi", "order": 3, "text": "子犯请击之。公曰：“不可。微夫人之力不及此。因人之力而敝之，不仁；失其所与，不知；以乱易整，不武。吾其还也。”亦去之。" }
+      ]
+    }
+  ]
+}

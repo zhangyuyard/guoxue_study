@@ -2,7 +2,8 @@
  * 文本库管理服务（TextLibraryService）
  * 负责加载与查询内置经典文本与用户导入书籍。
  * 内置数据源：src/data/texts/ 下各 JSON（daodejing、lunyu、daxue、zhongyong、
- * mengzi、zhuangzi、shijing、xunzi、chuci、tangshi 共 10 部）。
+ * mengzi、zhuangzi、shijing、xunzi、chuci、tangshi 十部 + zhouyi、zuozhuan、
+ * shiji、tongjian、mozi、wenxuan 六部扩充，共 16 部）。
  * 用户书籍：由 UserBookService 启动时经 registerUserBooks 注册进来。
  * App 启动时全量加载并缓存，离线可用。
  */
@@ -25,8 +26,14 @@ import shijingData from '@/data/texts/shijing.json';
 import xunziData from '@/data/texts/xunzi.json';
 import chuciData from '@/data/texts/chuci.json';
 import tangshiData from '@/data/texts/tangshi.json';
+import zhouyiData from '@/data/texts/zhouyi.json';
+import zuozhuanData from '@/data/texts/zuozhuan.json';
+import shijiData from '@/data/texts/shiji.json';
+import tongjianData from '@/data/texts/tongjian.json';
+import moziData from '@/data/texts/mozi.json';
+import wenxuanData from '@/data/texts/wenxuan.json';
 
-/** 内置书籍原始数据（10 部：道德经/论语/大学/中庸 + 孟子/庄子/诗经/荀子/楚辞 + 唐诗三百首） */
+/** 内置书籍原始数据（16 部：经部 7 部 + 史部 2 部 + 子部 4 部 + 集部 3 部） */
 const RAW_BOOKS = [
   daodejingData,
   lunyuData,
@@ -38,6 +45,12 @@ const RAW_BOOKS = [
   xunziData,
   chuciData,
   tangshiData,
+  zhouyiData,
+  zuozhuanData,
+  shijiData,
+  tongjianData,
+  moziData,
+  wenxuanData,
 ];
 
 /** 书籍缓存（惰性构建） */

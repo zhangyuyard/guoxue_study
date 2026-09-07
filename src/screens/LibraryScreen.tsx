@@ -74,13 +74,26 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
     [navigation],
   );
 
-  /** 导入书籍：选文件（txt/md/html/fb2/epub）→ 解析 → 入库 → 刷新书架 */
+  /** 导入书籍：选文件（txt/md/html/fb2/epub）→ 解析 → 入库 → 刷新书架。
+   * 文件超过 8MB 时先弹确认提示（大文件解析耗时较久），经用户同意再继续。 */
   const handleImport = useCallback(async (): Promise<void> => {
     if (importing) {
       return;
     }
     setImporting(true);
-    const res = await UserBookService.importBook();
+    const res = await UserBookService.importBook(undefined, {
+      onConfirmLargeFile: (size: number) =>
+        new Promise<boolean>((resolve) => {
+          Alert.alert(
+            '导入大文件',
+            `该文件约 ${(size / 1024 / 1024).toFixed(1)}MB，解析可能需要一些时间，是否继续导入？`,
+            [
+              { text: '取消', style: 'cancel', onPress: () => resolve(false) },
+              { text: '继续导入', onPress: () => resolve(true) },
+            ],
+          );
+        }),
+    });
     setImporting(false);
     if (res.success && res.data) {
       Alert.alert(
@@ -88,7 +101,11 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
         `《${res.data.title}》共 ${res.data.chapters.length} 章，已加入书架`,
       );
       loadBooks();
-    } else if (res.error && res.error !== '已取消选择文件') {
+    } else if (
+      res.error &&
+      res.error !== '已取消选择文件' &&
+      res.error !== '已取消导入大文件'
+    ) {
       Alert.alert('导入失败', res.error);
     }
   }, [importing, loadBooks]);

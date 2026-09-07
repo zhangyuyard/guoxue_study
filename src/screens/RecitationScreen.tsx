@@ -1,12 +1,21 @@
 /**
  * 背诵助手页（RecitationScreen，首页底部「背诵」Tab）
- * 两级选择：先选书（横向书签 chips，含内置经典与用户导入书），
- * 再展示该书章节逐章可选（粒度 = 最小章节，逐章独立开始背诵）
+ * 两级选择：先选书、再选章节（选择器收起为按钮态，点开弹出列表浮层，
+ * 选中后收起；含内置经典与用户导入书，章节粒度 = 最小章节，逐章独立开始背诵）
  * + 模式选择（填空默写/提示遮盖）+ 背诵进度卡片网格 + 「开始背诵」按钮。
  * 今日复习 / 每日复习提醒 / 每日背诵目标等既有能力全部保留。
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  Alert,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RecitationMode } from '@/types';
@@ -58,6 +67,10 @@ export default function RecitationScreen({ navigation }: Props): React.JSX.Eleme
   const [selectedChapter, setSelectedChapter] = useState<ChapterEntry | null>(null);
   /** 当前选中模式 */
   const [mode, setMode] = useState<RecitationMode>('fillBlank');
+  /** 选书浮层开关 */
+  const [bookPickerVisible, setBookPickerVisible] = useState(false);
+  /** 选章浮层开关 */
+  const [chapterPickerVisible, setChapterPickerVisible] = useState(false);
 
   /**
    * 加载书籍章节（含用户导入书：UserBookService 启动时已注册进 TextLibraryService，
@@ -435,78 +448,54 @@ export default function RecitationScreen({ navigation }: Props): React.JSX.Eleme
         ) : null}
       </View>
 
-      {/* 两级选择 · 第一级：选书（横向书签 chips，含内置经典与用户导入书） */}
+      {/* 两级选择 · 第一级：选书（收起为按钮态，点开浮层选择，含内置经典与用户导入书） */}
       <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>选择书籍</Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.bookChipsScroll}
-        contentContainerStyle={styles.bookChips}
+      <Pressable
+        onPress={() => setBookPickerVisible(true)}
+        style={[
+          styles.pickerButton,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={`选择书籍${selectedGroup?.bookTitle ?? ''}`}
       >
-        {chapterGroups.map((group) => {
-          const selected = group.bookId === selectedBookId;
-          return (
-            <Pressable
-              key={group.bookId}
-              onPress={() => selectBook(group.bookId)}
-              style={[
-                styles.bookChip,
-                {
-                  backgroundColor: selected ? colors.primary : colors.card,
-                  borderColor: selected ? colors.primary : colors.border,
-                },
-              ]}
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              accessibilityLabel={`选择书籍${group.bookTitle}`}
-            >
-              <Text
-                style={[
-                  styles.bookChipText,
-                  { color: selected ? '#FFFFFF' : colors.text },
-                ]}
-                numberOfLines={1}
-              >
-                {group.bookTitle}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+        <Text
+          style={[styles.pickerButtonText, { color: colors.text }]}
+          numberOfLines={1}
+        >
+          {selectedGroup?.bookTitle ?? '请选择书籍'}
+        </Text>
+        <Text style={[styles.pickerButtonArrow, { color: colors.textSecondary }]}>▾</Text>
+      </Pressable>
 
-      {/* 两级选择 · 第二级：选章节（仅当前选中书的章节，逐章独立开始背诵） */}
+      {/* 两级选择 · 第二级：选章节（仅当前选中书的章节，收起为按钮态，点开浮层选择） */}
       <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
         {selectedGroup ? `选择章节（${selectedGroup.bookTitle}）` : '选择章节'}
       </Text>
-      <View style={styles.chapterList}>
-        {(selectedGroup?.chapters ?? []).map((chapter) => {
-          const selected = selectedChapter?.id === chapter.id;
-          return (
-            <Pressable
-              key={chapter.id}
-              onPress={() => selectChapter(chapter)}
-              style={[
-                styles.chapterItem,
-                {
-                  backgroundColor: selected ? colors.primary : colors.card,
-                  borderColor: selected ? colors.primary : colors.border,
-                },
-              ]}
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-            >
-              <Text
-                style={[
-                  styles.chapterText,
-                  { color: selected ? '#FFFFFF' : colors.text },
-                ]}
-              >
-                {chapter.title}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <Pressable
+        onPress={() => setChapterPickerVisible(true)}
+        disabled={!selectedGroup}
+        style={[
+          styles.pickerButton,
+          { backgroundColor: colors.card, borderColor: colors.border },
+          !selectedGroup && styles.pickerButtonDisabled,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel="选择章节"
+      >
+        <Text
+          style={[
+            styles.pickerButtonText,
+            { color: selectedChapter ? colors.text : colors.textSecondary },
+          ]}
+          numberOfLines={1}
+        >
+          {selectedChapter
+            ? `${selectedChapter.bookTitle} · ${selectedChapter.title}`
+            : '请先选择章节'}
+        </Text>
+        <Text style={[styles.pickerButtonArrow, { color: colors.textSecondary }]}>▾</Text>
+      </Pressable>
 
       {/* 模式选择 */}
       <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>选择模式</Text>
@@ -611,6 +600,136 @@ export default function RecitationScreen({ navigation }: Props): React.JSX.Eleme
           </View>
         </>
       ) : null}
+
+      {/* 选书浮层（Modal 列表，选中后收起；零新依赖） */}
+      <Modal
+        visible={bookPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBookPickerVisible(false)}
+      >
+        <Pressable
+          style={styles.pickerOverlay}
+          onPress={() => setBookPickerVisible(false)}
+        >
+          <Pressable
+            style={[
+              styles.pickerSheet,
+              { backgroundColor: colors.background, borderColor: colors.border },
+            ]}
+            onPress={() => undefined}
+          >
+            <Text style={[styles.pickerSheetTitle, { color: colors.text }]}>选择书籍</Text>
+            <ScrollView
+              style={styles.pickerList}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={false}
+            >
+              {chapterGroups.map((group) => {
+                const selected = group.bookId === selectedBookId;
+                return (
+                  <Pressable
+                    key={group.bookId}
+                    onPress={() => {
+                      selectBook(group.bookId);
+                      setBookPickerVisible(false);
+                    }}
+                    style={[
+                      styles.pickerItem,
+                      {
+                        backgroundColor: selected ? colors.primary : colors.card,
+                        borderColor: selected ? colors.primary : colors.border,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`选择书籍${group.bookTitle}`}
+                  >
+                    <Text
+                      style={[
+                        styles.pickerItemText,
+                        { color: selected ? '#FFFFFF' : colors.text },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {group.bookTitle}
+                    </Text>
+                    <Text style={[styles.pickerItemCheck, { color: '#FFFFFF' }]}>
+                      {selected ? '✓' : ''}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* 选章浮层（仅当前选中书的章节；章节多时可滚动，兼容小屏） */}
+      <Modal
+        visible={chapterPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setChapterPickerVisible(false)}
+      >
+        <Pressable
+          style={styles.pickerOverlay}
+          onPress={() => setChapterPickerVisible(false)}
+        >
+          <Pressable
+            style={[
+              styles.pickerSheet,
+              { backgroundColor: colors.background, borderColor: colors.border },
+            ]}
+            onPress={() => undefined}
+          >
+            <Text style={[styles.pickerSheetTitle, { color: colors.text }]}>
+              {selectedGroup ? `选择章节（${selectedGroup.bookTitle}）` : '选择章节'}
+            </Text>
+            <ScrollView
+              style={styles.pickerList}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={false}
+            >
+              {(selectedGroup?.chapters ?? []).map((chapter) => {
+                const selected = selectedChapter?.id === chapter.id;
+                return (
+                  <Pressable
+                    key={chapter.id}
+                    onPress={() => {
+                      selectChapter(chapter);
+                      setChapterPickerVisible(false);
+                    }}
+                    style={[
+                      styles.pickerItem,
+                      {
+                        backgroundColor: selected ? colors.primary : colors.card,
+                        borderColor: selected ? colors.primary : colors.border,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`选择章节${chapter.title}`}
+                  >
+                    <Text
+                      style={[
+                        styles.pickerItemText,
+                        { color: selected ? '#FFFFFF' : colors.text },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {chapter.title}
+                    </Text>
+                    <Text style={[styles.pickerItemCheck, { color: '#FFFFFF' }]}>
+                      {selected ? '✓' : ''}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 }
@@ -703,41 +822,77 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
-  // 两级选择 · 选书 chips（横向滚动）
-  bookChipsScroll: {
+  // 两级选择 · 收起态按钮（点开浮层选择）
+  pickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  pickerButtonDisabled: {
+    opacity: 0.5,
+  },
+  pickerButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    flexShrink: 1,
+    // 显式行高避免中文字形上下被裁切
+    lineHeight: 20,
+    includeFontPadding: false,
+  },
+  pickerButtonArrow: {
+    fontSize: 14,
+    marginLeft: 'auto',
+  },
+  // 两级选择 · 浮层（Modal 列表）
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  pickerSheet: {
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingTop: 16,
+    paddingBottom: 12,
+    maxHeight: '70%',
+  },
+  pickerSheetTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  pickerList: {
     flexGrow: 0,
   },
-  bookChips: {
+  pickerItem: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 8,
-  },
-  bookChip: {
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 18,
+    paddingVertical: 12,
+    borderRadius: 10,
     borderWidth: 1,
-    maxWidth: 160,
+    marginBottom: 8,
   },
-  bookChipText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  chapterList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 10,
-    gap: 8,
-  },
-  chapterItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 18,
-    borderWidth: 1,
-  },
-  chapterText: {
+  pickerItemText: {
     fontSize: 14,
     fontWeight: '500',
+    flexShrink: 1,
+    lineHeight: 19,
+    includeFontPadding: false,
+  },
+  pickerItemCheck: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   modeRow: {
     flexDirection: 'row',

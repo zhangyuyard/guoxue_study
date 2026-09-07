@@ -11,11 +11,15 @@
 export const BACKUP_VERSION = 1;
 
 /**
- * v1 schema 扩展说明（userBooks 字段）：
+ * v1 schema 扩展说明：
+ * - userBooks 等顶层字段与 settings.perBookSettings（书籍级设置覆盖，设置分层）：
  * userBooks 为 v1 的「可选字段」而非升 version 的原因——
  * 升 version 会使 parseBackup 拒绝所有旧备份（旧文件 version=1 落入不支持分支），
  * 与「最小破坏」原则相悖；而可选字段（缺失=空数组）+ 未知字段忽略的既有向前兼容
  * 机制即可让新旧备份双读，恢复侧对空数组天然无副作用。
+ * perBookSettings 挂在 data.settings 内部（作为 settings 快照的可选键）：
+ * 旧备份缺失 → 设置 store 恢复时不动 perBookSettings 现值（缺失=空覆盖语义）；
+ * 新备份提供 → parse 时校验为「bookId -> 覆盖键值对象」的两层对象结构。
  */
 
 /** 备份聚合数据（各字段最小结构约束在 parseBackup 校验） */
@@ -95,7 +99,8 @@ export const SETTINGS_BACKUP_KEYS = [
 ] as const;
 
 /**
- * 从设置 state 采集备份快照：仅保留白名单字段 + translation 配置对象。
+ * 从设置 state 采集备份快照：仅保留白名单字段 + translation 配置对象
+ * + perBookSettings（书籍级设置覆盖，v1 可选扩展字段；旧版本 state 缺失时跳过）。
  * 纯函数（不 import store 类型，入参用索引签名，调用方做一次类型收窄即可）。
  */
 export function pickSettingsSnapshot(
@@ -111,6 +116,12 @@ export function pickSettingsSnapshot(
   const translation = settings.translation;
   if (translation && typeof translation === 'object' && !Array.isArray(translation)) {
     out.translation = { ...(translation as Record<string, unknown>) };
+  }
+  // perBookSettings 为 bookId -> 覆盖键值 的两层对象（设置分层），整体浅拷贝进备份；
+  // 未定义（旧版 state）时跳过 = 旧备份无该键，恢复侧缺失即不动现值
+  const perBookSettings = settings.perBookSettings;
+  if (isPlainObject(perBookSettings)) {
+    out.perBookSettings = { ...perBookSettings };
   }
   return out;
 }
@@ -186,6 +197,22 @@ export function parseBackup(text: string): ParsedBackup {
 
   if (!isPlainObject(data.settings)) {
     throw new Error('备份文件格式错误：data.settings 应为对象');
+  }
+  // perBookSettings 为 settings 内部的 v1 可选扩展字段（书籍级设置覆盖）：
+  // 旧备份缺失 → 跳过（恢复侧缺失=不动现值，向后兼容）；
+  // 新备份提供 → 必须为「bookId -> 对象」的两层结构（非法报错，口径同其它字段）
+  if (data.settings.perBookSettings !== undefined) {
+    const perBook = data.settings.perBookSettings;
+    if (!isPlainObject(perBook)) {
+      throw new Error('备份文件格式错误：data.settings.perBookSettings 应为对象');
+    }
+    for (const [bookId, entry] of Object.entries(perBook)) {
+      if (!isPlainObject(entry)) {
+        throw new Error(
+          `备份文件格式错误：data.settings.perBookSettings.${bookId} 应为对象`,
+        );
+      }
+    }
   }
   for (const key of ['recitation', 'bookmarks', 'notes'] as const) {
     if (!Array.isArray(data[key])) {

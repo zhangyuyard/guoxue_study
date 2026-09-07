@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CommonActions } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { AppStackParamList } from '@/navigation/types';
 import type { DictLookupResult } from '@/types/dict';
@@ -117,6 +118,31 @@ export default function DictLookupScreen({ route, navigation }: Props): React.JS
     setQuery(word);
     doLookup(word);
   };
+
+  /**
+   * 打开字典管理页（管理入口按钮）。
+   * DictLookup 挂载于两处：
+   *   1. 「我的」Tab 的 ProfileStack —— 该 navigator 注册了 DictManage，直接 navigate；
+   *   2. RootStack 级（阅读器解析面板「在字典中查看」直达）—— RootStack 未注册
+   *      DictManage（它在兄弟分支 Main→Profile→ProfileStack 中），navigate 只向父级
+   *      冒泡、无法进入兄弟分支，直接 navigate 会被静默丢弃（按钮无响应的根因）。
+   *      此处经 Main Tab 容器做嵌套导航：切到「我的」Tab 并落到词典管理页。
+   * 兼容性说明：路由检测基于当前 navigator 的 routeNames（结构无关），
+   * 嵌套路径与 RootNavigator 的挂载位置（ProfileStack 三屏）保持一致。
+   */
+  const openDictManage = useCallback((): void => {
+    const state = navigation.getState();
+    if (state.routeNames.includes('DictManage')) {
+      navigation.navigate('DictManage');
+      return;
+    }
+    navigation.dispatch(
+      CommonActions.navigate({
+        name: 'Main',
+        params: { screen: 'Profile', params: { screen: 'DictManage' } },
+      }),
+    );
+  }, [navigation]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -264,7 +290,7 @@ export default function DictLookupScreen({ route, navigation }: Props): React.JS
                 { borderColor: colors.primary },
                 pressed && styles.pressed,
               ]}
-              onPress={() => navigation.navigate('DictManage')}
+              onPress={openDictManage}
               accessibilityRole="button"
               accessibilityLabel="管理字典"
             >

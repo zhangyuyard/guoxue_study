@@ -52,6 +52,7 @@ function CategoryTabsInner({
             accessibilityState={{ selected }}
           >
             <Text
+              numberOfLines={1}
               style={[
                 styles.label,
                 {
@@ -79,13 +80,20 @@ const styles = StyleSheet.create({
   },
   tab: {
     paddingHorizontal: 18,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingVertical: 8,
+    minHeight: 34,
+    justifyContent: 'center',
+    borderRadius: 17,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'transparent',
+    // 防止在弹性容器内被压缩导致文字截断
+    flexShrink: 0,
   },
   label: {
     fontSize: 14,
+    // 显式行高 + 关闭 Android 默认 fontPadding，避免中文字形上下被裁切
+    lineHeight: 20,
+    includeFontPadding: false,
     fontWeight: '500',
   },
 });

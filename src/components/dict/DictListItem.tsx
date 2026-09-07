@@ -85,6 +85,7 @@ function DictListItem({
           value={dict.enabled}
           onValueChange={onToggle}
           trackColor={{ false: colors.border, true: colors.primary }}
+          accessibilityLabel={`「${dict.name}」参与查询开关（关闭后该字典不参与查词）`}
         />
       </View>
 

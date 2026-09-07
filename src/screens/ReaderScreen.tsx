@@ -59,7 +59,7 @@ import { TextLibraryService } from '@/services/TextLibraryService';
 import { ConversionService } from '@/services/ConversionService';
 import { TtsService } from '@/services/tts/TtsService';
 import { stepSpeechRate } from '@/utils/speech';
-import { useSettingsStore } from '@/store/useSettingsStore';
+import { useReaderBookSettings, useSettingsStore } from '@/store/useSettingsStore';
 import { useReaderStore } from '@/store/useReaderStore';
 import {
   useBookmarks,
@@ -262,6 +262,11 @@ interface SegmentItemProps {
   fontSize: number;
   lineHeight: number;
   pinyinMode: PinyinMode;
+  /**
+   * 繁简显示模式（书籍级设置分层）：传入 PinyinText 覆盖其内部全局读取，
+   * 保证通假字浮窗等繁简相关展示与本书生效值一致；缺省回落全局（向后兼容）。
+   */
+  conversionMode?: 'simplified' | 'traditional';
   segmentHighlights: Highlight[];
   /**
    * 活动选区（整段全局码点区间 [start, end)）：菜单打开期间传入，
@@ -297,6 +302,7 @@ const SegmentItem = React.memo(function SegmentItem({
   fontSize,
   lineHeight,
   pinyinMode,
+  conversionMode,
   segmentHighlights,
   selectionRange,
   onHighlightPress,
@@ -412,6 +418,7 @@ const SegmentItem = React.memo(function SegmentItem({
           fontSize={fontSize}
           lineHeight={lineHeight}
           pinyinMode={pinyinMode}
+          conversionMode={conversionMode}
           highlights={segmentHighlights}
           selectionRange={selectionRange}
           onPressHighlight={onHighlightPress}
@@ -977,6 +984,7 @@ function PageModeView({
                         fontSize={fontSize}
                         lineHeight={lineHeight}
                         pinyinMode={pinyinMode}
+                        conversionMode={displayMode}
                         segmentHighlights={
                           highlightsBySegment.get(seg.id) ?? EMPTY_HIGHLIGHTS
                         }
@@ -1002,6 +1010,7 @@ function PageModeView({
                     fontSize={fontSize}
                     lineHeight={lineHeight}
                     pinyinMode={pinyinMode}
+                    conversionMode={displayMode}
                     segmentHighlights={highlightsBySegment.get(seg.id) ?? EMPTY_HIGHLIGHTS}
                     onHighlightPress={onHighlightPress}
                     onLongPressIndex={onLongPressIndex}
@@ -1038,19 +1047,27 @@ function PageModeView({
 // ============ 主页面 ============
 
 function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Element {
-  // 设置（阅读纸张/字号/行距/注音模式）
-  const paper = useSettingsStore((s) => s.paper);
-  const setPaper = useSettingsStore((s) => s.setPaper);
-  const readerMode = useSettingsStore((s) => s.readerMode);
-  const setReaderMode = useSettingsStore((s) => s.setReaderMode);
-  const fontSize = useSettingsStore((s) => s.fontSize);
-  const lineHeight = useSettingsStore((s) => s.lineHeight);
-  const pinyinMode = useSettingsStore((s) => s.pinyinMode);
-  const setFontSize = useSettingsStore((s) => s.setFontSize);
-  const setLineHeight = useSettingsStore((s) => s.setLineHeight);
-  const setPinyinMode = useSettingsStore((s) => s.setPinyinMode);
-  const conversionMode = useSettingsStore((s) => s.conversionMode);
-  const setConversionMode = useSettingsStore((s) => s.setConversionMode);
+  // 设置（阅读纸张/字号/行距/注音模式/繁简）：书籍级分层（settings 分层）。
+  // 读：perBookSettings[bookId] 覆盖优先，缺键回落全局默认（「我的-设置」写全局层）；
+  // 写：面板内修改仅写书籍层覆盖（无 bookId 的防御路径回落全局层，保持旧行为）。
+  const routeBookId = route?.params?.bookId ?? null;
+  const {
+    paper,
+    readerMode,
+    fontSize,
+    lineHeight,
+    pinyinMode,
+    conversionMode,
+    setPaper,
+    setReaderMode,
+    setFontSize,
+    setLineHeight,
+    setPinyinMode,
+    setConversionMode,
+    hasBookOverrides,
+    isPerBook,
+    followGlobal,
+  } = useReaderBookSettings(routeBookId);
   // 正文朗读（P2-02）：语速（持久化，0.5–2.0）与朗读状态
   const speechRate = useSettingsStore((s) => s.speechRate);
   const setSpeechRate = useSettingsStore((s) => s.setSpeechRate);
@@ -2696,6 +2713,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             fontSize={fontSize}
             lineHeight={lineHeight}
             pinyinMode={pinyinMode}
+            conversionMode={conversionMode}
             segmentHighlights={highlightsBySegment.get(item.segment.id) ?? EMPTY_HIGHLIGHTS}
             selectionRange={
               activeSelection && activeSelection.segmentId === item.segment.id
@@ -2721,6 +2739,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       fontSize,
       lineHeight,
       pinyinMode,
+      conversionMode,
       highlightsBySegment,
       handleHighlightPress,
       handleLongPressIndex,
@@ -3310,6 +3329,26 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             <View style={[styles.sheetGrabber, { backgroundColor: colors.border }]} />
             <Text style={[styles.sheetTitle, { color: colors.text }]}>阅读设置</Text>
 
+            {/* 设置分层说明：面板内修改仅写当前书覆盖层，全局默认在「我的-设置」改 */}
+            {isPerBook ? (
+              <Text style={[styles.sheetHint, { color: colors.textSecondary }]}>
+                当前设置仅对本书生效；前往「我的 → 设置」修改全局默认
+              </Text>
+            ) : null}
+            {/* 「跟随全局」复位入口：存在任一书籍级覆盖键时展示，清空即恢复跟随全局 */}
+            {hasBookOverrides ? (
+              <Pressable
+                style={[styles.followGlobalButton, { borderColor: colors.border }]}
+                onPress={() => followGlobal()}
+                accessibilityRole="button"
+                accessibilityLabel="恢复本书设置跟随全局默认"
+              >
+                <Text style={[styles.followGlobalText, { color: colors.primary }]}>
+                  恢复跟随全局默认
+                </Text>
+              </Pressable>
+            ) : null}
+
             {/* 字号：A- / A+ 步进，含实时预览 */}
             <SettingsSectionTitle text="字号" colors={colors} />
             <View style={styles.sizeRow}>
@@ -3644,6 +3683,23 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     alignSelf: 'center',
     marginBottom: 4,
+  },
+  // 阅读设置抽屉：书籍级分层说明文案（随面板 hint 视觉，弱化灰字）
+  sheetHint: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  // 阅读设置抽屉：「恢复跟随全局默认」复位入口
+  followGlobalButton: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  followGlobalText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   sizeRow: {
     flexDirection: 'row',
