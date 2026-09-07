@@ -283,6 +283,31 @@ export const DictionaryService = {
     return { success: false, error: `未找到词条：${target}` };
   },
 
+  /**
+   * 词语精确查询：仅命中「词条完全等于目标」的收录项，不触发
+   * lookupWord 的包含匹配回退（选区解析按实际选中内容判定收录，
+   * 部分包含命中会误把任意长度的选串当成已收录词条）。
+   */
+  lookupWordExact(word: string): ServiceResult<WordAnalysis> {
+    if (!word) {
+      return { success: false, error: '词语不能为空' };
+    }
+    const exact = wordIndex.get(word.trim());
+    if (!exact) {
+      return { success: false, error: `未收录词条：${word.trim()}` };
+    }
+    return {
+      success: true,
+      data: {
+        word: exact.word,
+        meaning: exact.meaning,
+        source: exact.source,
+        usage: exact.usage,
+        examples: exact.examples,
+      },
+    };
+  },
+
   /** 词库规模（供 UI 展示/调试） */
   getWordCount(): ServiceResult<number> {
     return { success: true, data: WORDS.length };

@@ -156,6 +156,8 @@ interface CharCellProps {
   accentColor: string;
   onHighlightPress?: (h: Highlight) => void;
   onLongPressChar?: (index: number) => void;
+  /** 点按汉字回调（自由选区扩展用；提供时优先于划线点击） */
+  onPressChar?: (index: number) => void;
   /** 点击多音字拼音回调（弹出全部读音浮窗），仅多音字生效 */
   onPressPinyin?: (cell: CharCellData) => void;
   /** 点击通假字「通」标识回调（弹出通假字浮窗），仅通假字生效 */
@@ -169,10 +171,18 @@ const CharCell = React.memo(function CharCell({
   accentColor,
   onHighlightPress,
   onLongPressChar,
+  onPressChar,
   onPressPinyin,
   onPressTongjia,
 }: CharCellProps) {
   const highlight = cell.highlight;
+  // 汉字点按：选区扩展中（onPressChar 存在）→ 点按扩展选区；
+  // 否则保持原行为——点已划线字符打开关联笔记
+  const pressChar = onPressChar
+    ? () => onPressChar(cell.index)
+    : highlight && onHighlightPress
+      ? () => onHighlightPress(highlight)
+      : undefined;
   // 仅多音字拼音响应点击（弹出全部读音），不占用汉字的划线点击与长按手势
   const pressPinyin =
     cell.isPolyphone && onPressPinyin ? () => onPressPinyin(cell) : undefined;
@@ -207,7 +217,7 @@ const CharCell = React.memo(function CharCell({
           cell.isRare ? styles.rareChar : null,
           highlight ? { backgroundColor: highlightColors[highlight.color] } : null,
         ]}
-        onPress={highlight && onHighlightPress ? () => onHighlightPress(highlight) : undefined}
+        onPress={pressChar}
         onLongPress={onLongPressChar ? () => onLongPressChar(cell.index) : undefined}
       >
         {cell.char}
@@ -470,6 +480,11 @@ export interface PinyinTextProps {
   onPressHighlight?: (h: Highlight) => void;
   /** 长按汉字回调（参数为码点索引，供上层扩展选词） */
   onLongPressChar?: (index: number) => void;
+  /**
+   * 点按汉字回调（码点索引，供自由选区「点按扩展」；提供时优先于划线点击）。
+   * 仅覆盖汉字格，非汉字 run（标点/空白）不响应点按扩展。
+   */
+  onPressChar?: (index: number) => void;
   /** 当前篇目 ID（Chapter.id），用于语境化通假/读音判定；缺省则降级 */
   workId?: string;
   /** 当前书籍 ID（Book.id），作为通配兜底层；缺省仅用 workId + 全局 '*' */
@@ -491,6 +506,7 @@ function PinyinTextBase({
   highlights,
   onPressHighlight,
   onLongPressChar,
+  onPressChar,
   workId,
   bookId,
   charRange,
@@ -904,6 +920,7 @@ function PinyinTextBase({
             accentColor={colors.accent}
             onHighlightPress={onPressHighlight}
             onLongPressChar={onLongPressChar}
+            onPressChar={onPressChar}
             onPressPinyin={handlePolyphonePress}
             onPressTongjia={handleTongjiaPress}
           />

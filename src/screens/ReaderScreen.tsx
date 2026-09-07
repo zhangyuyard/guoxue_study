@@ -5,7 +5,9 @@
  * - 正文：FlatList 逐段渲染（注音模式用 PinyinText，关闭注音用 HighlightText）
  * - 底部：固定进度条（第 N/共 M 章 · X% + 细进度条）
  * 交互流程：
- * - 长按正文 → 弹出选词面板（可调整范围 + 划线/解析/翻译/笔记）
+ * - 长按正文 → 以该字为起点创建初始选区，阅读页内浮动菜单（底部停靠，非全屏
+ *   Modal，不遮挡正文）弹出；菜单打开时点按正文任意字可扩展选区（终点之后向右
+ *   扩、起点之前向左扩），长按其他字重新选字；划线/解析/翻译/笔记作用于当前选区
  * - 点击已有划线 → 弹出笔记编辑器（新建或编辑关联笔记）
  * - 章节前进：滚动模式为滑动窗口连续拼接（无限前进）；翻页模式翻到章边界自动跨章
  * - 与 useReaderStore 联动：openChapter 保存阅读位置，滚动更新当前段落
@@ -261,8 +263,13 @@ interface SegmentItemProps {
   pinyinMode: PinyinMode;
   segmentHighlights: Highlight[];
   onHighlightPress: (h: Highlight) => void;
-  /** 长按正文（参数为码点索引） */
+  /** 长按正文（参数为码点索引）：以该字为起点创建/重建选区 */
   onLongPressIndex: (segmentId: string, index: number) => void;
+  /**
+   * 点按正文（参数为段内码点索引）：选区打开时的「点按扩展」。
+   * 缺省（未处于选区状态）时字符点按回落到划线/笔记点击。
+   */
+  onPressIndex?: (segmentId: string, index: number) => void;
   /** 上报段落布局位置（用于定位滚动） */
   onLayoutItem: (segmentId: string, y: number) => void;
   /** 当前篇目 ID（Chapter.id），语境化通假/读音判定 */
@@ -287,6 +294,7 @@ const SegmentItem = React.memo(function SegmentItem({
   segmentHighlights,
   onHighlightPress,
   onLongPressIndex,
+  onPressIndex,
   onLayoutItem,
   workId,
   bookId,
@@ -300,6 +308,23 @@ const SegmentItem = React.memo(function SegmentItem({
       onLongPressIndex(segmentId, index);
     },
     [onLongPressIndex, segmentId],
+  );
+
+  // 注音模式（PinyinText）：字格索引即整段全局码点索引，直接上报
+  const handlePressChar = useCallback(
+    (index: number) => {
+      onPressIndex?.(segmentId, index);
+    },
+    [onPressIndex, segmentId],
+  );
+
+  // 'off' 模式（HighlightText）：切出的局部文本分段索引需加上区间起点
+  // 还原为整段全局码点索引（长按与点按同基准）
+  const handlePressSegment = useCallback(
+    (localIndex: number) => {
+      onPressIndex?.(segmentId, localIndex + (charRange?.[0] ?? 0));
+    },
+    [onPressIndex, segmentId, charRange],
   );
 
   const handleLongPressSegment = useCallback(
@@ -341,6 +366,7 @@ const SegmentItem = React.memo(function SegmentItem({
             highlights={offModeSlice.localHighlights}
             onPressHighlight={onHighlightPress}
             onLongPressSegment={handleLongPressSegment}
+            onPressChar={onPressIndex ? handlePressSegment : undefined}
             fontSize={fontSize}
             lineHeight={lineHeight}
           />
@@ -350,6 +376,7 @@ const SegmentItem = React.memo(function SegmentItem({
             highlights={segmentHighlights}
             onPressHighlight={onHighlightPress}
             onLongPressSegment={handleLongPressSegment}
+            onPressChar={onPressIndex ? handlePressSegment : undefined}
             fontSize={fontSize}
             lineHeight={lineHeight}
           />
@@ -363,6 +390,7 @@ const SegmentItem = React.memo(function SegmentItem({
           highlights={segmentHighlights}
           onPressHighlight={onHighlightPress}
           onLongPressChar={handleLongPressChar}
+          onPressChar={onPressIndex ? handlePressChar : undefined}
           workId={workId}
           bookId={bookId}
           charRange={charRange}
@@ -418,6 +446,7 @@ interface SegmentBlockItemProps {
   highlightsBySegment: Map<string, Highlight[]>;
   onHighlightPress: (h: Highlight) => void;
   onLongPressIndex: (segmentId: string, index: number) => void;
+  onPressIndex?: (segmentId: string, index: number) => void;
   workId?: string;
   bookId?: string;
 }
@@ -433,6 +462,7 @@ const SegmentBlockItem = React.memo(function SegmentBlockItem({
   highlightsBySegment,
   onHighlightPress,
   onLongPressIndex,
+  onPressIndex,
   workId,
   bookId,
 }: SegmentBlockItemProps): React.JSX.Element | null {
@@ -452,6 +482,7 @@ const SegmentBlockItem = React.memo(function SegmentBlockItem({
       segmentHighlights={highlightsBySegment.get(segId) ?? EMPTY_HIGHLIGHTS}
       onHighlightPress={onHighlightPress}
       onLongPressIndex={onLongPressIndex}
+      onPressIndex={onPressIndex}
       onLayoutItem={() => undefined}
       workId={workId}
       bookId={bookId}
@@ -473,6 +504,8 @@ interface PageModeViewProps {
   highlightsBySegment: Map<string, Highlight[]>;
   onHighlightPress: (h: Highlight) => void;
   onLongPressIndex: (segmentId: string, index: number) => void;
+  /** 点按正文扩展选区（缺省 = 未处于选区状态，字符点按回落划线点击） */
+  onPressIndex?: (segmentId: string, index: number) => void;
   workId?: string;
   bookId?: string;
   pageWidth: number;
@@ -500,6 +533,7 @@ function PageModeView({
   highlightsBySegment,
   onHighlightPress,
   onLongPressIndex,
+  onPressIndex,
   workId,
   bookId,
   pageWidth,
@@ -833,6 +867,7 @@ function PageModeView({
                   highlightsBySegment={highlightsBySegment}
                   onHighlightPress={onHighlightPress}
                   onLongPressIndex={onLongPressIndex}
+                  onPressIndex={onPressIndex}
                   workId={workId}
                   bookId={bookId}
                 />
@@ -854,6 +889,7 @@ function PageModeView({
       highlightsBySegment,
       onHighlightPress,
       onLongPressIndex,
+      onPressIndex,
       workId,
       bookId,
       pageWidth,
@@ -2041,7 +2077,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
   // ---------- 选词 ----------
 
-  /** 长按正文：以起点向后取 4 字窗口作为初始选区 */
+  /**
+   * 长按正文：以该字为起点向后取 4 字窗口作为初始选区并打开浮动菜单。
+   * 已有选区时再次长按 = 废弃当前选区、以新位置重新开始（自由选中语义）。
+   */
   const handleLongPressIndex = useCallback(
     (segmentId: string, index: number) => {
       const chars = segmentCharsMap.get(segmentId);
@@ -2056,27 +2095,49 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [segmentCharsMap],
   );
 
-  /** 调整选区边界 */
-  const adjustSelection = useCallback(
-    (side: 'start' | 'end', delta: 1 | -1) => {
+  /**
+   * 点按正文扩展选区（自由选中，替代旧版 ± 逐字步进按钮）：
+   * - 点按位置在当前终点之后 → 终点扩展到该字（含）；
+   * - 点按位置在起点之前 → 起点扩展到该字（向左扩展）；
+   * - 点按选区内部 → 不变；
+   * - 点按其它段落 → 单段限制下以新位置重新开一个 4 字初始窗口
+   *   （与长按新起点行为一致，避免跨段选区破坏 Highlight 存储结构）。
+   */
+  const handleSelectionExtendPress = useCallback(
+    (segmentId: string, index: number) => {
       setSelection((prev) => {
-        if (!prev) {
-          return prev;
+        if (segmentId !== prev?.segmentId) {
+          const chars = segmentCharsMap.get(segmentId);
+          if (!chars || chars.length === 0) {
+            return prev;
+          }
+          const start = clamp(index, 0, chars.length - 1);
+          const end = Math.min(start + 4, chars.length);
+          return { segmentId, start, end, text: chars.slice(start, end).join('') };
         }
         const chars = segmentCharsMap.get(prev.segmentId);
         if (!chars) {
           return prev;
         }
-        if (side === 'start') {
-          const start = clamp(prev.start + delta, 0, prev.end - 1);
+        if (index >= prev.end) {
+          const end = clamp(index + 1, prev.start + 1, chars.length);
+          return { ...prev, end, text: chars.slice(prev.start, end).join('') };
+        }
+        if (index < prev.start) {
+          const start = clamp(index, 0, prev.end - 1);
           return { ...prev, start, text: chars.slice(start, prev.end).join('') };
         }
-        const end = clamp(prev.end + delta, prev.start + 1, chars.length);
-        return { ...prev, end, text: chars.slice(prev.start, end).join('') };
+        return prev;
       });
     },
     [segmentCharsMap],
   );
+
+  /** 收起选区菜单并清空选区（面板「收起」按钮） */
+  const closeSelection = useCallback(() => {
+    setSelectionVisible(false);
+    setSelection(null);
+  }, []);
 
   // ---------- 划线 ----------
 
@@ -2343,7 +2404,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
   // ---------- 渲染 ----------
 
-  /** 渲染一行：段落行走 SegmentItem（承载划线 / 长按选词 / 注音），标题行走章标题 */
+  /** 渲染一行：段落行走 SegmentItem（承载划线 / 长按选词 / 点按扩展选区），标题行走章标题 */
   const renderRow = useCallback(
     ({ item }: { item: ReaderRow }) => {
       if (item.segment) {
@@ -2356,6 +2417,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             segmentHighlights={highlightsBySegment.get(item.segment.id) ?? EMPTY_HIGHLIGHTS}
             onHighlightPress={handleHighlightPress}
             onLongPressIndex={handleLongPressIndex}
+            onPressIndex={selectionVisible ? handleSelectionExtendPress : undefined}
             onLayoutItem={handleRowLayout}
             workId={item.chapterId}
             bookId={bookId ?? undefined}
@@ -2375,6 +2437,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       highlightsBySegment,
       handleHighlightPress,
       handleLongPressIndex,
+      handleSelectionExtendPress,
+      selectionVisible,
       handleRowLayout,
       bookId,
       colors,
@@ -2510,248 +2574,218 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         </Pressable>
       </View>
 
-      {/* 正文：滚动模式用 FlatList，仿真翻页模式用分页容器
-          （章节翻页条已随 UI 精简删除：滚动模式为滑动窗口连续拼接无限前进，
-          翻页模式翻到章边界自动跨章，跨章跳转保留目录入口） */}
-      {readerMode === 'page' ? (
-        <View
-          style={styles.pagerArea}
-          onLayout={(e) => {
-            const { width, height } = e.nativeEvent.layout;
-            setPagerLayout((prev) =>
-              prev.width === width && prev.height === height ? prev : { width, height },
-            );
-          }}
-        >
-          <PageModeView
-            segments={displaySegments}
-            chapterTitle={displayChapterTitle}
-            colors={colors}
-            fontSize={fontSize}
-            lineHeight={lineHeight}
-            pinyinMode={pinyinMode}
-            displayMode={conversionMode}
-            highlightsBySegment={highlightsBySegment}
-            onHighlightPress={handleHighlightPress}
-            onLongPressIndex={handleLongPressIndex}
-            workId={chapterId ?? undefined}
-            bookId={bookId ?? undefined}
-            pageWidth={pagerLayout.width}
-            pageHeight={visiblePageHeight}
-            index={pageIndex}
-            onIndexChange={setPageIndex}
-            onPageCountChange={setPageCount}
-            onActiveSegmentChange={handlePageActiveSegment}
-            onEdgeReached={handlePageEdge}
-            locateSegmentId={locateTarget}
-          />
-        </View>
-      ) : (
-        <FlatList
-          ref={listRef}
-          style={{ flex: 1 }}
-          // 连续滚动：正文跨章拼接（前面的章 + 当前章 + 后续已加载章），
-          // 滚到末尾自动追加下一章，滚到开头自动向前拼接上一章
-          data={continuousRows}
-          keyExtractor={(item) => item.id}
-          renderItem={renderRow}
-          // 目标段落定位：一次性渲染足够多的段落以保证 onLayout 触发。
-          // 行数按打开章内容量预算计算（scrollInitialRows）：内置书仍为 30 行，
-          // 导入书大段落按字符预算收缩，避免首帧逐字注音渲染压死 JS 线程。
-          initialNumToRender={scrollInitialRows}
-          contentContainerStyle={styles.content}
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={viewabilityConfig}
-          onScroll={handleScroll}
-          onScrollEndDrag={handleScrollEndDrag}
-          scrollEventThrottle={16}
-          onEndReached={handleEndReached}
-          // 预载窗口（屏高倍数）与 handleScroll / onContentSizeChange 的触发条件保持一致
-          onEndReachedThreshold={CONTIGUOUS_PRELOAD_SCREENS}
-          onStartReached={handleStartReached}
-          onStartReachedThreshold={CONTIGUOUS_PRELOAD_SCREENS}
-          onContentSizeChange={(_w, h) => {
-            // 锚点兜底补偿：锚点行若移出渲染窗口，onLayout 永不触发，此时用
-            // contentSize 增量（首次变化恰为插入高度）做一次性补偿——
-            // 优于不补偿（那会整屏跳到上一章开头）。增量非正则等锚点/超时处理。
-            const anchorNow = prependAnchor.current;
-            if (anchorNow) {
-              const delta = h - contentH.current;
-              if (delta > 0 && contentH.current > 0) {
-                anchorNow.snapshot.forEach((oldY, key) => {
-                  if (rowOffsets.current.get(key) === oldY) {
-                    rowOffsets.current.set(key, oldY + delta);
-                  }
-                });
-                listRef.current?.scrollToOffset({
-                  offset: Math.max(0, scrollOffset.current + delta),
-                  animated: false,
-                });
-                prependAnchor.current = null;
-              }
-            }
-            // 滑动窗口丢头补偿：头部章节被丢弃后保留内容整体上移「丢弃高度」，
-            // 把滚动偏移回退相同高度，使视口仍停留在用户正在阅读的内容上。
-            // 补偿量在丢头时按 rowOffsets 精确算出（见 maybeDropHeadChapters）。
-            const dropDelta = headDropCompensation.current;
-            if (dropDelta > 0) {
-              headDropCompensation.current = 0;
-              listRef.current?.scrollToOffset({
-                offset: Math.max(0, scrollOffset.current - dropDelta),
-                animated: false,
-              });
-            }
-            contentH.current = h;
-            // 短内容兜底：内容不足预载窗口时级联追加下一章（道德经级短章的
-            // 「停在第一章、无法滚动」死锁的修复点，见 fillShortContentIfNeeded）
-            fillShortContentIfNeeded();
-            // 锚点超时兜底：正常情况下锚点在行布局回调中已解析，这里只是保险
-            expireAnchorIfNeeded();
-            // 定位快速通道：模式切换会重挂载滚动列表，目标行若超出初始渲染窗口，
-            // onLayout 不会再触发；此时 rowOffsets 仍保有同一内容上一次会话的
-            // 真实布局偏移（onLayout 的 y 是相对内容容器的绝对偏移），直接落位。
-            const pending = pendingScroll.current;
-            if (!pending.done && pending.target) {
-              const known = rowOffsets.current.get(pending.target);
-              // 仅当估算内容高覆盖目标偏移时才落位，避免被钳制到错误位置
-              if (typeof known === 'number' && h > known) {
-                pending.done = true;
-                listRef.current?.scrollToOffset({
-                  offset: Math.max(0, known - 24),
-                  animated: false,
-                });
-              }
-            }
-            // 顶部无法产生滚动事件（已到 offset 0，物理上滚不动），
-            // 故在内容首次量出高度后主动向前拼接上一章，打通「向上滚动」的入口。
-            if (h > 0 && scrollOffset.current <= viewH.current * CONTIGUOUS_PRELOAD_SCREENS) {
-              prependPreviousChapter();
-            }
-          }}
-          onLayout={(e) => {
-            viewH.current = e.nativeEvent.layout.height;
-            // 首帧布局完成即补一次短内容兜底：contentSize 事件可能先于 onLayout
-            // 到达（当时 viewH 尚为 0 会被口径函数跳过），错过首次时机则在此补齐
-            fillShortContentIfNeeded();
-          }}
-        />
-      )}
-
-      {/* 底部浮动 dock（进度 + 朗读 + 注音模式 + 工具栏）已随 UI 精简删除：
-          进度 / 朗读 / 语速 / 收藏 / 背诵并入下方「选词操作面板」（长按正文弹出），
-          注音切换迁移至右上角「音」按钮 */}
-
-      {/* 底部固定进度条：第 N/共 M 章 ·（第 i/j 页）· X% + 细进度条。
-          滚动模式进度随 activeChapterId 实时更新（progressChapterId），
-          翻页模式由当前页/总页数给出章内进度；safe-area 由外层 SafeAreaView 处理 */}
-      <View style={[styles.bottomProgress, { borderTopColor: colors.border }]}>
-        <Text style={[styles.bottomProgressText, { color: colors.textSecondary }]}>
-          {readerMode === 'page' && pageCount > 0
-            ? `第 ${Math.max(1, chapterIndex + 1)}/${totalChapters} 章 · 第 ${
-                pageIndex + 1
-              }/${pageCount} 页 · ${Math.round(overallProgress * 100)}%`
-            : `第 ${Math.max(1, chapterIndex + 1)} / ${totalChapters} 章 · ${Math.round(
-                overallProgress * 100,
-              )}%`}
-        </Text>
-        <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
+      {/* 正文区域 + 底部进度条 + 选区浮动菜单（选区菜单以阅读页内浮动层实现，
+          box-none 允许点按穿透到正文做「点按扩展选区」，不再用全屏 Modal 遮挡正文） */}
+      <View style={styles.readerBody}>
+        {readerMode === 'page' ? (
           <View
-            style={[
-              styles.progressFill,
-              {
-                width: `${Math.round(overallProgress * 100)}%`,
-                backgroundColor: colors.primary,
-              },
-            ]}
-          />
-        </View>
-      </View>
-
-      {/* 选词操作面板 */}
-      <Modal
-        visible={selectionVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSelectionVisible(false)}
-      >
-        <Pressable style={styles.overlay} onPress={() => setSelectionVisible(false)}>
-          <Pressable
-            style={[styles.sheet, { backgroundColor: colors.background }]}
-            onPress={() => undefined}
+            style={styles.pagerArea}
+            onLayout={(e) => {
+              const { width, height } = e.nativeEvent.layout;
+              setPagerLayout((prev) =>
+                prev.width === width && prev.height === height ? prev : { width, height },
+              );
+            }}
           >
-            {/* 阅读进度已固定于阅读页底部进度条（不再重复展示于长按菜单） */}
-            <Text style={[styles.sheetTitle, { color: colors.textSecondary }]}>选中文字</Text>
-            <View style={styles.selectionRow}>
-              <Pressable
-                style={[styles.rangeButton, { borderColor: colors.border }]}
-                onPress={() => adjustSelection('start', 1)}
-                disabled={!selection || selection.start >= selection.end - 1}
-                accessibilityRole="button"
-                accessibilityLabel="起点后移"
-              >
-                <Text style={[styles.rangeButtonText, { color: colors.textSecondary }]}>{'−'}</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.rangeButton, { borderColor: colors.border }]}
-                onPress={() => adjustSelection('start', -1)}
-                disabled={!selection || selection.start <= 0}
-                accessibilityRole="button"
-                accessibilityLabel="起点前移"
-              >
-                <Text style={[styles.rangeButtonText, { color: colors.textSecondary }]}>{'＋'}</Text>
-              </Pressable>
-              <Text style={[styles.selectionText, { color: colors.text }]} numberOfLines={1}>
-                {selection?.text ?? ''}
-              </Text>
-              <Pressable
-                style={[styles.rangeButton, { borderColor: colors.border }]}
-                onPress={() => adjustSelection('end', 1)}
-                disabled={
-                  !selection ||
-                  !segmentCharsMap.get(selection.segmentId) ||
-                  selection.end >= (segmentCharsMap.get(selection.segmentId)?.length ?? 0)
+            <PageModeView
+              segments={displaySegments}
+              chapterTitle={displayChapterTitle}
+              colors={colors}
+              fontSize={fontSize}
+              lineHeight={lineHeight}
+              pinyinMode={pinyinMode}
+              displayMode={conversionMode}
+              highlightsBySegment={highlightsBySegment}
+              onHighlightPress={handleHighlightPress}
+              onLongPressIndex={handleLongPressIndex}
+              onPressIndex={selectionVisible ? handleSelectionExtendPress : undefined}
+              workId={chapterId ?? undefined}
+              bookId={bookId ?? undefined}
+              pageWidth={pagerLayout.width}
+              pageHeight={visiblePageHeight}
+              index={pageIndex}
+              onIndexChange={setPageIndex}
+              onPageCountChange={setPageCount}
+              onActiveSegmentChange={handlePageActiveSegment}
+              onEdgeReached={handlePageEdge}
+              locateSegmentId={locateTarget}
+            />
+          </View>
+        ) : (
+          <FlatList
+            ref={listRef}
+            style={{ flex: 1 }}
+            // 连续滚动：正文跨章拼接（前面的章 + 当前章 + 后续已加载章），
+            // 滚到末尾自动追加下一章，滚到开头自动向前拼接上一章
+            data={continuousRows}
+            keyExtractor={(item) => item.id}
+            renderItem={renderRow}
+            // 目标段落定位：一次性渲染足够多的段落以保证 onLayout 触发。
+            // 行数按打开章内容量预算计算（scrollInitialRows）：内置书仍为 30 行，
+            // 导入书大段落按字符预算收缩，避免首帧逐字注音渲染压死 JS 线程。
+            initialNumToRender={scrollInitialRows}
+            contentContainerStyle={styles.content}
+            onViewableItemsChanged={onViewableItemsChanged}
+            viewabilityConfig={viewabilityConfig}
+            onScroll={handleScroll}
+            onScrollEndDrag={handleScrollEndDrag}
+            scrollEventThrottle={16}
+            onEndReached={handleEndReached}
+            // 预载窗口（屏高倍数）与 handleScroll / onContentSizeChange 的触发条件保持一致
+            onEndReachedThreshold={CONTIGUOUS_PRELOAD_SCREENS}
+            onStartReached={handleStartReached}
+            onStartReachedThreshold={CONTIGUOUS_PRELOAD_SCREENS}
+            onContentSizeChange={(_w, h) => {
+              // 锚点兜底补偿：锚点行若移出渲染窗口，onLayout 永不触发，此时用
+              // contentSize 增量（首次变化恰为插入高度）做一次性补偿——
+              // 优于不补偿（那会整屏跳到上一章开头）。增量非正则等锚点/超时处理。
+              const anchorNow = prependAnchor.current;
+              if (anchorNow) {
+                const delta = h - contentH.current;
+                if (delta > 0 && contentH.current > 0) {
+                  anchorNow.snapshot.forEach((oldY, key) => {
+                    if (rowOffsets.current.get(key) === oldY) {
+                      rowOffsets.current.set(key, oldY + delta);
+                    }
+                  });
+                  listRef.current?.scrollToOffset({
+                    offset: Math.max(0, scrollOffset.current + delta),
+                    animated: false,
+                  });
+                  prependAnchor.current = null;
                 }
-                accessibilityRole="button"
-                accessibilityLabel="终点后移"
-              >
-                <Text style={[styles.rangeButtonText, { color: colors.textSecondary }]}>{'＋'}</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.rangeButton, { borderColor: colors.border }]}
-                onPress={() => adjustSelection('end', -1)}
-                disabled={!selection || selection.end <= selection.start + 1}
-                accessibilityRole="button"
-                accessibilityLabel="终点前移"
-              >
-                <Text style={[styles.rangeButtonText, { color: colors.textSecondary }]}>{'−'}</Text>
-              </Pressable>
-            </View>
+              }
+              // 滑动窗口丢头补偿：头部章节被丢弃后保留内容整体上移「丢弃高度」，
+              // 把滚动偏移回退相同高度，使视口仍停留在用户正在阅读的内容上。
+              // 补偿量在丢头时按 rowOffsets 精确算出（见 maybeDropHeadChapters）。
+              const dropDelta = headDropCompensation.current;
+              if (dropDelta > 0) {
+                headDropCompensation.current = 0;
+                listRef.current?.scrollToOffset({
+                  offset: Math.max(0, scrollOffset.current - dropDelta),
+                  animated: false,
+                });
+              }
+              contentH.current = h;
+              // 短内容兜底：内容不足预载窗口时级联追加下一章（道德经级短章的
+              // 「停在第一章、无法滚动」死锁的修复点，见 fillShortContentIfNeeded）
+              fillShortContentIfNeeded();
+              // 锚点超时兜底：正常情况下锚点在行布局回调中已解析，这里只是保险
+              expireAnchorIfNeeded();
+              // 定位快速通道：模式切换会重挂载滚动列表，目标行若超出初始渲染窗口，
+              // onLayout 不会再触发；此时 rowOffsets 仍保有同一内容上一次会话的
+              // 真实布局偏移（onLayout 的 y 是相对内容容器的绝对偏移），直接落位。
+              const pending = pendingScroll.current;
+              if (!pending.done && pending.target) {
+                const known = rowOffsets.current.get(pending.target);
+                // 仅当估算内容高覆盖目标偏移时才落位，避免被钳制到错误位置
+                if (typeof known === 'number' && h > known) {
+                  pending.done = true;
+                  listRef.current?.scrollToOffset({
+                    offset: Math.max(0, known - 24),
+                    animated: false,
+                  });
+                }
+              }
+              // 顶部无法产生滚动事件（已到 offset 0，物理上滚不动），
+              // 故在内容首次量出高度后主动向前拼接上一章，打通「向上滚动」的入口。
+              if (h > 0 && scrollOffset.current <= viewH.current * CONTIGUOUS_PRELOAD_SCREENS) {
+                prependPreviousChapter();
+              }
+            }}
+            onLayout={(e) => {
+              viewH.current = e.nativeEvent.layout.height;
+              // 首帧布局完成即补一次短内容兜底：contentSize 事件可能先于 onLayout
+              // 到达（当时 viewH 尚为 0 会被口径函数跳过），错过首次时机则在此补齐
+              fillShortContentIfNeeded();
+            }}
+          />
+        )}
 
-            {/* 划线三色 */}
-            <View style={styles.actionRow}>
-              {(['yellow', 'green', 'blue'] as HighlightColor[]).map((color) => (
-                <Pressable
-                  key={color}
-                  style={[styles.colorDotButton, { backgroundColor: DOT_COLORS[color] }]}
-                  onPress={() => createHighlight(color)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`使用${color}颜色划线`}
-                />
-              ))}
-              <View style={styles.actionDivider} />
-              <Pressable style={styles.actionButton} onPress={openAnalysis}>
-                <Text style={[styles.actionButtonText, { color: colors.primary }]}>解析</Text>
-              </Pressable>
-              <Pressable style={styles.actionButton} onPress={openTranslation}>
-                <Text style={[styles.actionButtonText, { color: colors.primary }]}>翻译</Text>
-              </Pressable>
-              <Pressable style={styles.actionButton} onPress={openNoteEditorForSelection}>
-                <Text style={[styles.actionButtonText, { color: colors.primary }]}>笔记</Text>
-              </Pressable>
+        {/* 底部浮动 dock（进度 + 朗读 + 注音模式 + 工具栏）已随 UI 精简删除：
+            进度 / 朗读 / 语速 / 收藏 / 背诵并入下方「选词操作面板」（长按正文弹出），
+            注音切换迁移至右上角「音」按钮 */}
+
+        {/* 底部固定进度条：第 N/共 M 章 ·（第 i/j 页）· X% + 细进度条。
+            滚动模式进度随 activeChapterId 实时更新（progressChapterId），
+            翻页模式由当前页/总页数给出章内进度；safe-area 由外层 SafeAreaView 处理 */}
+        <View style={[styles.bottomProgress, { borderTopColor: colors.border }]}>
+          <Text style={[styles.bottomProgressText, { color: colors.textSecondary }]}>
+            {readerMode === 'page' && pageCount > 0
+              ? `第 ${Math.max(1, chapterIndex + 1)}/${totalChapters} 章 · 第 ${
+                  pageIndex + 1
+                }/${pageCount} 页 · ${Math.round(overallProgress * 100)}%`
+              : `第 ${Math.max(1, chapterIndex + 1)} / ${totalChapters} 章 · ${Math.round(
+                  overallProgress * 100,
+                )}%`}
+          </Text>
+          <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
+            <View
+              style={[
+                styles.progressFill,
+                {
+                  width: `${Math.round(overallProgress * 100)}%`,
+                  backgroundColor: colors.primary,
+                },
+              ]}
+            />
+          </View>
+        </View>
+
+        {/* 选词操作浮动层（阅读页内绝对定位，替代全屏 Modal）：
+            容器 pointerEvents="box-none" 不拦截触摸，正文子节点自接收点按
+            （选区打开时点按正文 = 扩展选区）；仅面板本体拦截触摸。
+            底部停靠于进度条上方，内容经 ScrollView 限高（maxHeight 65%）防溢出 */}
+        {selectionVisible && selection ? (
+          <View style={styles.selectionDock} pointerEvents="box-none">
+            <View style={[styles.selectionSheet, { backgroundColor: colors.background }]}>
+              {/* 内容限高滚动：内容少时自适应高度，极端情况（超长选区/大字号）可滚动不溢出 */}
+              <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
+                <Text style={[styles.sheetTitle, { color: colors.textSecondary }]}>选中文字</Text>
+                <Text style={[styles.selectionText, { color: colors.text }]} numberOfLines={2}>
+                  {selection.text}
+                </Text>
+                <Text style={[styles.selectionHint, { color: colors.pinyin }]}>
+                  点按正文任意字可扩展选区 · 长按其他字重新选字
+                </Text>
+
+                {/* 划线三色 + 解析 / 翻译 / 笔记 / 收起（作用于当前选区，实时跟随扩展更新） */}
+                <View style={styles.actionRow}>
+                  {(['yellow', 'green', 'blue'] as HighlightColor[]).map((color) => (
+                    <Pressable
+                      key={color}
+                      style={[styles.colorDotButton, { backgroundColor: DOT_COLORS[color] }]}
+                      onPress={() => createHighlight(color)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`使用${color}颜色划线`}
+                    />
+                  ))}
+                  <View style={styles.actionDivider} />
+                  <Pressable style={styles.actionButton} onPress={openAnalysis}>
+                    <Text style={[styles.actionButtonText, { color: colors.primary }]}>解析</Text>
+                  </Pressable>
+                  <Pressable style={styles.actionButton} onPress={openTranslation}>
+                    <Text style={[styles.actionButtonText, { color: colors.primary }]}>翻译</Text>
+                  </Pressable>
+                  <Pressable style={styles.actionButton} onPress={openNoteEditorForSelection}>
+                    <Text style={[styles.actionButtonText, { color: colors.primary }]}>笔记</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}
+                    onPress={closeSelection}
+                    accessibilityRole="button"
+                    accessibilityLabel="收起选区菜单"
+                  >
+                    <Text style={[styles.actionButtonText, { color: colors.textSecondary }]}>
+                      收起
+                    </Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
             </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+          </View>
+        ) : null}
+      </View>
 
       {/* 语速设置弹窗（点右上角「听」且未朗读时弹出）：本地临时值步进，
           「确认开始播放」才写回持久化并开播；取消不污染持久化语速 */}
@@ -3317,18 +3351,46 @@ const styles = StyleSheet.create({
   tocItemText: {
     fontSize: 15,
   },
-  // 选词面板
-  selectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  // 正文区域容器：包裹正文 + 底部进度条 + 选区浮动层，
+  // 使选区浮动层可相对于该区域绝对定位（不遮挡顶部栏，停靠进度条上方）
+  readerBody: {
+    flex: 1,
+  },
+  // 选词操作浮动层容器：box-none 不拦截触摸（点按穿透到正文做选区扩展），
+  // 仅面板本体拦截；满幅覆盖正文区（高度确定，maxHeight 百分比才有基准），
+  // 面板经 justifyContent flex-end 底部停靠；paddingBottom 预留底部进度条高度
+  selectionDock: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 12,
+    paddingBottom: 56,
+  },
+  // 选词面板本体：内容自适应高度，超长时经内部 ScrollView 滚动（maxHeight 65% 防溢出）
+  selectionSheet: {
+    borderRadius: 14,
+    padding: 16,
+    gap: 10,
+    maxHeight: '65%',
+    // iOS 阴影
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    // Android 阴影
+    elevation: 6,
   },
   selectionText: {
-    flex: 1,
     fontSize: 17,
     fontWeight: '600',
     textAlign: 'center',
-    marginHorizontal: 4,
+  },
+  selectionHint: {
+    fontSize: 11,
+    textAlign: 'center',
   },
   rangeButton: {
     width: 30,

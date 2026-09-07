@@ -5,7 +5,9 @@
  *   内置 DictionaryService 字义 / 部首 / 笔画 / 异体字 / 古音为补充；
  *   「在字典中查看」跳转 DictLookupScreen（RootStack 级路由，返回不丢阅读位置）
  * - 词语：词义 / 出处原文 / 用法说明 / 例句（DictionaryService）
- * - 多字词按最长前缀匹配词条；词条未收录时回退首字解析，均未收录展示空状态
+ * - 多字：按「实际选中全串」精确查词库（不再固定 4 字前缀上限，长度以选中
+ *   内容为准）；全串未收录时改为「逐字解析摘要列表」纵向排列，让用户看到
+ *   选区内每个字的解析（替代旧版「仅回退首字」）；选区超长时截断展示并提示
  * 实现说明：@gorhom/bottom-sheet 依赖 BottomSheetModalProvider 与原生手势环境，
  * App 壳尚未集成（T05 集成导航时统一接入），此处按约定采用 Modal 兜底实现。
  */
@@ -30,8 +32,8 @@ import { genId, nowISO } from '@/services/StorageService';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getColors, type ThemeColors } from '@/theme';
 
-/** 词条前缀匹配的最大长度 */
-const MAX_WORD_PREFIX = 4;
+/** 逐字解析摘要的展示上限：选区超过该字数时截断展示并提示 */
+const ANALYSIS_MAX_SHOWN_CHARS = 12;
 
 /** 字典命中信息（单字解析时优先展示） */
 interface DictHitInfo {
@@ -41,26 +43,44 @@ interface DictHitInfo {
   pinyin?: string;
 }
 
+/** 逐字解析摘要（多字未收录时的单字条目） */
+interface CharSummaryItem {
+  char: string;
+  pinyin: string;
+  meaning: string;
+}
+
 /** 面板内部解析状态 */
 interface AnalysisState {
   loading: boolean;
   /** 是否单字视图 */
   isChar: boolean;
-  /** 展示的目标字/词 */
+  /** 展示的目标字/词（实际选中内容） */
   displayText: string;
+  /** 「在字典中查看」的目标词头（词条命中=全串；逐字回退=首字；单字=该字） */
+  dictHeadword: string;
   char?: CharAnalysis;
   word?: WordAnalysis;
   /** 字典域命中（DictEngine.lookup 首个收录字典） */
   dictInfo?: DictHitInfo;
-  /** 词未收录，回退展示首字解析 */
-  fallbackToChar?: boolean;
+  /** 多字全串未收录：逐字解析摘要列表（纵向排列） */
+  charSummaries?: CharSummaryItem[];
+  /** 选区超长被截断展示 */
+  truncated?: boolean;
+  /** 截断时的选区总字数 */
+  totalChars?: number;
   /** 完全未收录 */
   notFound?: boolean;
   /** 古音拟音（Baxter-Sagart 命中时填写，中古/上古两行按需展示） */
   guyin?: GuyinEntry;
 }
 
-const INITIAL_STATE: AnalysisState = { loading: false, isChar: false, displayText: '' };
+const INITIAL_STATE: AnalysisState = {
+  loading: false,
+  isChar: false,
+  displayText: '',
+  dictHeadword: '',
+};
 
 /** 提取字典条目的义项摘要 */
 function extractDictDef(content: string, contentType: string): string {
@@ -109,9 +129,31 @@ function lookupDict(char: string): DictHitInfo | null {
   }
 }
 
+/** 单字解析摘要（逐字回退用）：内置数据优先，字典域释义兜底 */
+function summarizeChar(ch: string): CharSummaryItem {
+  const res = DictionaryService.lookupCharacter(ch);
+  const dictInfo = lookupDict(ch);
+  return {
+    char: ch,
+    pinyin:
+      res.success && res.data?.pinyin
+        ? res.data.pinyin
+        : dictInfo?.pinyin ?? '',
+    meaning:
+      res.success && res.data?.meaning
+        ? res.data.meaning
+        : dictInfo?.def ?? '',
+  };
+}
+
 /** 同步解析（供延迟调用，保证 loading 状态可见且不阻塞首帧） */
 function analyze(text: string): AnalysisState {
-  const chars = Array.from(text.trim());
+  const trimmed = text.trim();
+  const chars = Array.from(trimmed);
+
+  if (chars.length === 0) {
+    return { ...INITIAL_STATE, notFound: true };
+  }
 
   if (chars.length === 1) {
     // 古音拟音（Baxter-Sagart）：命中才展示，未命中不占位
@@ -120,51 +162,75 @@ function analyze(text: string): AnalysisState {
     const dictInfo = lookupDict(chars[0]) ?? undefined;
     const res = DictionaryService.lookupCharacter(chars[0]);
     if (res.success && res.data) {
-      return { loading: false, isChar: true, displayText: chars[0], char: res.data, dictInfo, guyin };
+      return {
+        loading: false,
+        isChar: true,
+        displayText: chars[0],
+        dictHeadword: chars[0],
+        char: res.data,
+        dictInfo,
+        guyin,
+      };
     }
     if (dictInfo) {
       // 字典收录但内置数据未收录：仅展示字典释义
-      return { loading: false, isChar: true, displayText: chars[0], dictInfo, guyin };
+      return {
+        loading: false,
+        isChar: true,
+        displayText: chars[0],
+        dictHeadword: chars[0],
+        dictInfo,
+        guyin,
+      };
     }
-    return { loading: false, isChar: true, displayText: chars[0], notFound: true, guyin };
-  }
-
-  // 多字词：最长前缀优先匹配词条
-  for (let len = Math.min(chars.length, MAX_WORD_PREFIX); len >= 2; len--) {
-    const candidate = chars.slice(0, len).join('');
-    const res = DictionaryService.lookupWord(candidate);
-    if (res.success && res.data) {
-      return { loading: false, isChar: false, displayText: candidate, word: res.data };
-    }
-  }
-
-  // 词条未收录：回退首字解析（含字典域命中）
-  const first = chars[0] ?? '';
-  const charRes = DictionaryService.lookupCharacter(first);
-  const firstDictInfo = first ? lookupDict(first) : null;
-  const firstGuyin = first ? (GuyinService.getGuyin(first) ?? undefined) : undefined;
-  if (first && charRes.success && charRes.data) {
     return {
       loading: false,
       isChar: true,
-      displayText: first,
-      char: charRes.data,
-      dictInfo: firstDictInfo ?? undefined,
-      guyin: firstGuyin,
-      fallbackToChar: true,
+      displayText: chars[0],
+      dictHeadword: chars[0],
+      notFound: true,
+      guyin,
     };
   }
-  if (first && firstDictInfo) {
+
+  // 多字：按实际选中全串精确查词库（长度以选中内容为准，不再固定 4 字前缀）
+  const exact = DictionaryService.lookupWordExact(trimmed);
+  if (exact.success && exact.data) {
     return {
       loading: false,
-      isChar: true,
-      displayText: first,
-      dictInfo: firstDictInfo,
-      guyin: firstGuyin,
-      fallbackToChar: true,
+      isChar: false,
+      displayText: trimmed,
+      dictHeadword: trimmed,
+      word: exact.data,
     };
   }
-  return { loading: false, isChar: false, displayText: text.trim(), notFound: true };
+
+  // 全串未收录：逐字解析摘要列表（每个字一条，纵向排列）。
+  // 选区超长时截断展示前若干字并提示，避免面板被撑爆。
+  const truncated = chars.length > ANALYSIS_MAX_SHOWN_CHARS;
+  const shown = truncated ? chars.slice(0, ANALYSIS_MAX_SHOWN_CHARS) : chars;
+  const summaries = shown.map(summarizeChar);
+  // 所有字均无任何解析信息时按未收录的空状态处理
+  const allEmpty = summaries.every((s) => !s.pinyin && !s.meaning);
+  if (allEmpty) {
+    return {
+      loading: false,
+      isChar: false,
+      displayText: trimmed,
+      dictHeadword: chars[0],
+      notFound: true,
+    };
+  }
+  return {
+    loading: false,
+    isChar: false,
+    displayText: trimmed,
+    // 全串未收录时「在字典中查看」跳首字，保持既有单字查询能力
+    dictHeadword: chars[0],
+    charSummaries: summaries,
+    truncated,
+    totalChars: chars.length,
+  };
 }
 
 /** 信息行：标签 + 内容 */
@@ -234,14 +300,18 @@ function AnalysisPanel({ visible, onClose, text, onBookmark }: AnalysisPanelProp
   };
 
   const handleOpenInDict = (): void => {
-    if (!state.displayText) {
+    // 词条命中跳全串；逐字回退/未收录时跳首字（保持既有单字查询能力）
+    const headword = state.dictHeadword || state.displayText;
+    if (!headword) {
       return;
     }
     onClose();
-    navigation.navigate('DictLookup', { headword: state.displayText });
+    navigation.navigate('DictLookup', { headword });
   };
 
-  const hasResult = Boolean(state.char || state.word || state.dictInfo);
+  const hasResult = Boolean(
+    state.char || state.word || state.dictInfo || (state.charSummaries && state.charSummaries.length > 0),
+  );
 
   return (
     <Modal
@@ -290,10 +360,33 @@ function AnalysisPanel({ visible, onClose, text, onBookmark }: AnalysisPanelProp
             </View>
           ) : (
             <ScrollView style={styles.content} contentContainerStyle={styles.contentInner}>
-              {state.fallbackToChar ? (
-                <Text style={[styles.fallbackTip, { color: colors.pinyin }]}>
-                  未收录该词，已展示首字「{state.displayText}」解析
-                </Text>
+              {/* 多字全串未收录：逐字解析摘要列表（每个字一条，纵向排列） */}
+              {state.charSummaries ? (
+                <View>
+                  {state.charSummaries.map((item, i) => (
+                    <View
+                      key={`${item.char}-${i}`}
+                      style={[styles.summaryItem, { borderBottomColor: colors.border }]}
+                    >
+                      <Text style={[styles.summaryChar, { color: colors.primary }]}>
+                        {item.char}
+                      </Text>
+                      <View style={styles.summaryBody}>
+                        <Text style={[styles.summaryPinyin, { color: colors.pinyin }]}>
+                          {item.pinyin || '—'}
+                        </Text>
+                        <Text style={[styles.summaryMeaning, { color: colors.text }]}>
+                          {item.meaning || '暂未收录该字释义'}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                  {state.truncated ? (
+                    <Text style={[styles.fallbackTip, { color: colors.pinyin }]}>
+                      {`选区较长，仅展示前 ${ANALYSIS_MAX_SHOWN_CHARS} 字（共 ${state.totalChars ?? 0} 字）`}
+                    </Text>
+                  ) : null}
+                </View>
               ) : null}
 
               {/* 字典域释义（来源标签 + 义项摘要） */}
@@ -476,6 +569,33 @@ const styles = StyleSheet.create({
   fallbackTip: {
     fontSize: 12,
     marginBottom: 2,
+  },
+  // 逐字解析摘要列表（多字全串未收录时）
+  summaryItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  summaryChar: {
+    fontSize: 22,
+    fontWeight: '600',
+    lineHeight: 28,
+    minWidth: 28,
+    textAlign: 'center',
+  },
+  summaryBody: {
+    flex: 1,
+    gap: 2,
+  },
+  summaryPinyin: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  summaryMeaning: {
+    fontSize: 14,
+    lineHeight: 20,
   },
   fieldRow: {
     flexDirection: 'row',

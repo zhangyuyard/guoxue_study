@@ -2,6 +2,8 @@
  * 划线高亮文本渲染组件（HighlightText）
  * 按 highlights 的偏移量将文本分段渲染：命中段叠加半透明颜色背景，
  * 支持点击高亮片段、长按任意片段（供上层扩展选词/解析）。
+ * 自由选区扩展：提供 onPressChar 时文本按「逐字 Text 节点」渲染，
+ * 每个字符可独立点按并上报自己的码点索引（选区扩展期间优先于划线点击）。
  * 使用 React.memo 优化，分段结果经 useMemo 缓存。
  */
 import React, { useMemo } from 'react';
@@ -22,6 +24,11 @@ export interface HighlightTextProps {
   onPressHighlight?: (h: Highlight) => void;
   /** 长按片段回调（含未高亮片段，用于上层扩展选词） */
   onLongPressSegment?: (segment: HighlightedSegment) => void;
+  /**
+   * 点按单字回调（参数为该字在 text 中的码点索引，供自由选区扩展）。
+   * 提供时逐字渲染（每字独立 Text 节点），并优先于划线点击生效。
+   */
+  onPressChar?: (index: number) => void;
   /** 正文字号 */
   fontSize: number;
   /** 行距倍数 */
@@ -33,6 +40,7 @@ function HighlightTextBase({
   highlights,
   onPressHighlight,
   onLongPressSegment,
+  onPressChar,
   fontSize,
   lineHeight,
 }: HighlightTextProps): React.JSX.Element {
@@ -52,6 +60,40 @@ function HighlightTextBase({
     }),
     [fontSize, lineHeight, colors],
   );
+
+  if (onPressChar) {
+    // 自由选区扩展模式：逐字渲染，每字可独立点按上报码点索引；
+    // 长按仍按片段粒度回调（与选区起点创建语义一致）。
+    return (
+      <Text style={[styles.text, baseStyle]}>
+        {segments.map((seg) => {
+          const chars = Array.from(seg.text);
+          const segStyle = seg.highlight
+            ? [
+                styles.span,
+                { backgroundColor: highlightColors[seg.highlight.color] },
+                seg.highlight.noteId ? styles.noted : null,
+              ]
+            : null;
+          return chars.map((ch, i) => {
+            const globalIndex = seg.start + i;
+            return (
+              <Text
+                key={`c${globalIndex}`}
+                style={segStyle ?? undefined}
+                onPress={() => onPressChar(globalIndex)}
+                onLongPress={
+                  onLongPressSegment ? () => onLongPressSegment(seg) : undefined
+                }
+              >
+                {ch}
+              </Text>
+            );
+          });
+        })}
+      </Text>
+    );
+  }
 
   return (
     <Text style={[styles.text, baseStyle]}>
