@@ -1209,6 +1209,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const [translationText, setTranslationText] = useState('');
   const [noteEditor, setNoteEditor] = useState<NoteEditorState | null>(null);
   const [noteContent, setNoteContent] = useState('');
+  /** 「删除划线」两步确认态：true 表示已点过一次、按钮进入警示色待确认样式 */
+  const [confirmDeleteHighlight, setConfirmDeleteHighlight] = useState(false);
+  /** 待确认态自动复位计时器（3 秒未再点恢复普通样式） */
+  const deleteConfirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [tocVisible, setTocVisible] = useState(false);
   /** 当前章节内滚动进度（0~1），用于阅读进度条（滚动模式） */
@@ -1349,11 +1353,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     }
     return chapterId ? [chapterId] : undefined;
   }, [readerMode, effectiveChapters, chapterId]);
-  const { highlights, addHighlight } = useHighlightsForChapters(
+  const { highlights, addHighlight, removeHighlight } = useHighlightsForChapters(
     bookId ?? undefined,
     annotationScope,
   );
-  const { notes, addNote, updateNote } = useNotesForChapters(bookId ?? undefined, annotationScope);
+  const { notes, addNote, updateNote, removeNote } = useNotesForChapters(
+    bookId ?? undefined,
+    annotationScope,
+  );
   const { bookmarks, addBookmark, removeBookmark } = useBookmarks();
 
   // 初始化：初始化数据库（幂等）并记录阅读位置。
@@ -2147,10 +2154,13 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   );
 
   /**
-   * 点按正文扩展选区（自由选中，替代旧版 ± 逐字步进按钮）：
+   * 点按正文扩展/收缩选区（自由选中，替代旧版 ± 逐字步进按钮）：
    * - 点按位置在当前终点之后 → 终点扩展到该字（含）；
    * - 点按位置在起点之前 → 起点扩展到该字（向左扩展）；
-   * - 点按选区内部 → 不变；
+   * - 点按选区内部 → 就近收缩（选过头的撤销路径）：以选区中点判定归入哪一侧，
+   *   前半段（含起点）→ 起点重设为该字（选区变为 [tapIdx, end)），
+   *   后半段 → 终点重设为该字右边界（选区变为 [start, tapIdx+1)）；
+   *   收缩后至少保留 1 个字（单字选区点该字不变）；
    * - 点按其它段落 → 单段限制下以新位置重新开一个 4 字初始窗口
    *   （与长按新起点行为一致，避免跨段选区破坏 Highlight 存储结构）。
    */
@@ -2178,13 +2188,25 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           const start = clamp(index, 0, prev.end - 1);
           return { ...prev, start, text: chars.slice(start, prev.end).join('') };
         }
+        // 点按选区内部：就近收缩。中点判定归入起点侧/终点侧，
+        // 边界保持 start < end（tap 在终点字上时 end 收到 tapIdx+1 = 原 end，不越界）
+        if (prev.end - prev.start > 1) {
+          const mid = (prev.start + prev.end) / 2;
+          if (index <= mid) {
+            const start = index;
+            return { ...prev, start, text: chars.slice(start, prev.end).join('') };
+          }
+          const end = index + 1;
+          return { ...prev, end, text: chars.slice(prev.start, end).join('') };
+        }
+        // 单字选区：点该字收缩后为空，保持不变
         return prev;
       });
     },
     [segmentCharsMap],
   );
 
-  /** 收起选区菜单并清空选区（面板「收起」按钮） */
+  /** 关闭选区菜单并清空选区（面板「取消」按钮：放弃当前选区） */
   const closeSelection = useCallback(() => {
     setSelectionVisible(false);
     setSelection(null);
@@ -2223,11 +2245,30 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
   // ---------- 笔记 ----------
 
-  /** 点击划线：打开笔记编辑器（已有关联笔记则预填） */
+  /** 复位「删除划线」待确认态并清理复位计时器 */
+  const resetDeleteConfirm = useCallback(() => {
+    if (deleteConfirmTimer.current) {
+      clearTimeout(deleteConfirmTimer.current);
+      deleteConfirmTimer.current = null;
+    }
+    setConfirmDeleteHighlight(false);
+  }, []);
+
+  // 卸载时清理待确认态计时器，避免卸载后 setState
+  useEffect(() => {
+    return () => {
+      if (deleteConfirmTimer.current) {
+        clearTimeout(deleteConfirmTimer.current);
+      }
+    };
+  }, []);
+
+  /** 点击划线：打开笔记编辑器（已有关联笔记则预填），并复位删除确认态 */
   const handleHighlightPress = useCallback(
     (h: Highlight) => {
       const existing = notes.find((n) => n.highlightId === h.id);
       setNoteContent(existing?.content ?? '');
+      resetDeleteConfirm();
       setNoteEditor({
         segmentId: h.segmentId,
         start: h.startOffset,
@@ -2236,7 +2277,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         noteId: existing?.id,
       });
     },
-    [notes],
+    [notes, resetDeleteConfirm],
   );
 
   /** 对当前选区新建笔记 */
@@ -2246,13 +2287,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       return;
     }
     setNoteContent('');
+    resetDeleteConfirm();
     setNoteEditor({
       segmentId: selection.segmentId,
       start: selection.start,
       end: selection.end,
     });
     setSelectionVisible(false);
-  }, [selection]);
+  }, [selection, resetDeleteConfirm]);
 
   /** 保存笔记编辑器内容 */
   const saveNoteEditor = useCallback(() => {
@@ -2302,7 +2344,74 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const closeNoteEditor = useCallback(() => {
     setNoteEditor(null);
     setNoteContent('');
-  }, []);
+    resetDeleteConfirm();
+  }, [resetDeleteConfirm]);
+
+  /**
+   * 「删除划线」两步确认：
+   * 第一次点 → 按钮进入警示色待确认态（3 秒未再点自动复位）；
+   * 确认后删除划线并关闭编辑器；若划线关联了笔记，Alert 二选一——
+   * 同时删除笔记 / 仅删划线保留笔记（updateNote 仅支持改内容，
+   * 解绑关联走「删旧存新」：同内容新记一条不带 highlightId 的笔记再删旧记录）。
+   */
+  const handleDeleteHighlightPress = useCallback(() => {
+    const hlId = noteEditor?.highlightId;
+    if (!hlId) {
+      return;
+    }
+    if (!confirmDeleteHighlight) {
+      setConfirmDeleteHighlight(true);
+      if (deleteConfirmTimer.current) {
+        clearTimeout(deleteConfirmTimer.current);
+      }
+      deleteConfirmTimer.current = setTimeout(() => {
+        deleteConfirmTimer.current = null;
+        setConfirmDeleteHighlight(false);
+      }, 3000);
+      return;
+    }
+    resetDeleteConfirm();
+    // removeHighlight 内部成功后同步过滤本地列表，划线背景当帧消失
+    removeHighlight(hlId);
+    const linkedNote = notes.find((n) => n.highlightId === hlId);
+    if (linkedNote) {
+      Alert.alert('删除划线', '该划线关联了笔记，如何处理？', [
+        {
+          text: '仅删划线保留笔记',
+          onPress: () => {
+            const note = addNote({
+              bookId: linkedNote.bookId,
+              chapterId: linkedNote.chapterId,
+              segmentId: linkedNote.segmentId,
+              startOffset: linkedNote.startOffset,
+              endOffset: linkedNote.endOffset,
+              content: linkedNote.content,
+            });
+            if (note) {
+              removeNote(linkedNote.id);
+            }
+          },
+        },
+        {
+          text: '同时删除笔记',
+          style: 'destructive',
+          onPress: () => {
+            removeNote(linkedNote.id);
+          },
+        },
+      ]);
+    }
+    setNoteEditor(null);
+    setNoteContent('');
+  }, [
+    noteEditor,
+    confirmDeleteHighlight,
+    notes,
+    removeHighlight,
+    addNote,
+    removeNote,
+    resetDeleteConfirm,
+  ]);
 
   // ---------- 收藏 ----------
 
@@ -2815,7 +2924,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                 </Text>
               </ScrollView>
               <Text style={[styles.selectionHint, { color: colors.pinyin }]}>
-                点按正文任意字可扩展选区 · 长按其他字重新选字
+                点按字扩展选区 · 点选区内收缩 · 「取消」放弃选区 · 长按重新选字
               </Text>
 
               {/* 第二段 · hairline 分隔线：内容区与固定操作栏之间 */}
@@ -2859,10 +2968,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                   ]}
                   onPress={closeSelection}
                   accessibilityRole="button"
-                  accessibilityLabel="收起选区菜单"
+                  accessibilityLabel="取消选区"
                 >
                   <Text style={[styles.actionButtonText, { color: colors.textSecondary }]}>
-                    收起
+                    取消
                   </Text>
                 </Pressable>
               </View>
@@ -3007,6 +3116,32 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                 <Text style={[styles.actionButtonText, { color: colors.primary }]}>保存</Text>
               </Pressable>
             </View>
+            {/* 删除划线入口：仅「点已有划线打开编辑器」（highlightId 已落库）时显示，
+                选区新建笔记路径尚未落划线不显示。两步确认防误删，确认态警示色 */}
+            {noteEditor?.highlightId ? (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.deleteHighlightRow,
+                  pressed && styles.pressed,
+                ]}
+                onPress={handleDeleteHighlightPress}
+                accessibilityRole="button"
+                accessibilityLabel={confirmDeleteHighlight ? '确认删除划线' : '删除划线'}
+              >
+                <Text
+                  style={[
+                    styles.deleteHighlightText,
+                    {
+                      color: confirmDeleteHighlight
+                        ? DELETE_DANGER_COLOR
+                        : colors.textSecondary,
+                    },
+                  ]}
+                >
+                  {confirmDeleteHighlight ? '确认删除划线？' : '删除划线'}
+                </Text>
+              </Pressable>
+            ) : null}
           </Pressable>
         </Pressable>
       </Modal>
@@ -3185,6 +3320,9 @@ const DOT_COLORS: Record<HighlightColor, string> = {
   green: '#4CAF50',
   blue: '#2196F3',
 };
+
+/** 删除划线确认态警示色（主题无 danger 色，固定红以免随纸色失效） */
+const DELETE_DANGER_COLOR = '#C0392B';
 
 const styles = StyleSheet.create({
   container: {
@@ -3506,7 +3644,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
   },
-  // 操作行（固定操作栏第二行）：解析/翻译/笔记/收起 4 按钮 flex:1 等宽
+  // 操作行（固定操作栏第二行）：解析/翻译/笔记/取消 4 按钮 flex:1 等宽
   // （flexBasis 0 均分剩余宽度），任何屏宽均完整显示、永不压缩截断
   selectionActionsRow: {
     flexDirection: 'row',
@@ -3565,6 +3703,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
     fontSize: 15,
+  },
+  // 删除划线入口行（操作行下方居中，两步确认警示态）
+  deleteHighlightRow: {
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 4,
+  },
+  deleteHighlightText: {
+    fontSize: 14,
   },
   // 设置弹层
   settingsSection: {
