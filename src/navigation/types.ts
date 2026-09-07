@@ -35,7 +35,7 @@ export type RootStackParamList = {
   Main: undefined;
   /** 阅读器（书架 / 搜索结果 / 收藏列表均可进入） */
   Reader: ReaderRouteParams;
-  /** 背诵练习（阅读器工具栏「背诵」直达） */
+  /** 背诵练习（背诵 Tab「背诵助手」选章进入） */
   RecitationPractice: RecitationPracticeParams;
   /** 查字页（阅读器解析面板「在字典中查看」直达；任何位置可进入） */
   DictLookup: DictLookupParams;

@@ -3,7 +3,7 @@
  * 结构：RootStack（Native Stack）
  *   ├─ Main：底部 4 Tab（书架 | 字典 | 背诵 | 我的），各 Tab 内 Native Stack
  *   ├─ Reader：全局阅读器（书架 / 搜索结果 / 收藏列表等任意位置可进入）
- *   └─ RecitationPractice：背诵练习（阅读器工具栏「背诵」直达）
+ *   └─ RecitationPractice：背诵练习（背诵 Tab「背诵助手」选章进入；阅读器不再直达）
  * Tab 图标使用 emoji 兜底，避免 react-native-vector-icons 原生字体未链接时显示问号。
  */
 import React from 'react';

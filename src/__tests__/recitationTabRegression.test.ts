@@ -69,11 +69,15 @@ describe('背诵独立为首页底部 Tab（导航结构）', () => {
     expect(profileScreen).not.toMatch(/recitationCount/);
   });
 
-  test('ReaderScreen 的背诵练习直达路径不受影响（RootStack 的 RecitationPractice 保留）', () => {
+  test('RootStack 的 RecitationPractice 保留；ReaderScreen 菜单背诵直达入口已删除（改由背诵 Tab 进入）', () => {
     expect(rootNavigator).toMatch(
       /<RootStack\.Screen\s*\n\s*name="RecitationPractice"/,
     );
     expect(navTypes).toMatch(/export type RootStackParamList = \{[\s\S]*?RecitationPractice: RecitationPracticeParams;/);
+    // 阅读器长按菜单不再保留背诵练习入口（handleRecite 直达跳转删除）
+    const readerScreen = readSrc('screens/ReaderScreen.tsx');
+    expect(readerScreen).not.toMatch(/handleRecite/);
+    expect(readerScreen).not.toMatch(/accessibilityLabel="背诵练习"/);
   });
 });
 

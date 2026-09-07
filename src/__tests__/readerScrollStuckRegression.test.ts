@@ -152,23 +152,33 @@ describe('阅读器 UI 精简：翻页条 / 底部 dock 删除 + 注音按钮迁
     expect(source).toMatch(/第 \$\{Math\.max\(1, chapterIndex \+ 1\)\}\/\$\{totalChapters\} 章/);
   });
 
-  test('收藏/朗读上移右上角「藏/听」按钮（长按菜单两项删除，背诵/语速保留）', () => {
+  test('收藏/朗读上移右上角「藏/听」按钮（听=语速弹窗→确认播放，长按菜单背诵/语速删除）', () => {
     // 藏：已收藏态 + 两步确认取消（handleToggleArticleBookmark）
     expect(source).toMatch(/const handleToggleArticleBookmark = useCallback/);
     expect(source).toMatch(/articleBookmark \? '取消收藏本章' : '收藏本章'/);
     expect(source).toMatch(/articleBookmark \? colors\.primary : colors\.pinyin/);
-    // 听：朗读中主色高亮 + 状态化无障碍标签
-    expect(source).toMatch(/ttsSpeaking \? '停止朗读' : '朗读当前段落'/);
+    // 听：朗读中主色高亮 + 状态化无障碍标签（设置语速并朗读 / 停止朗读）
+    expect(source).toMatch(/const handleListenPress = useCallback/);
+    expect(source).toMatch(/onPress=\{handleListenPress\}/);
+    expect(source).toMatch(/ttsSpeaking \? '停止朗读' : '设置语速并朗读'/);
     expect(source).toMatch(/ttsSpeaking \? colors\.primary : colors\.pinyin/);
     expect(source).toMatch(/\{ttsSpeaking \? '⏹' : '听'\}/);
-    // 长按菜单中的「收藏全文」「朗读/停止」两项删除
+    // 长按菜单中的「收藏全文」「朗读/停止」「背诵练习」「语速步进」全部删除
     expect(source).not.toMatch(/accessibilityLabel="收藏本章全文"/);
     expect(source).not.toMatch(/▶ 朗读/);
-    // 背诵练习与语速步进保留在菜单
-    expect(source).toMatch(/accessibilityLabel="背诵练习"/);
-    expect(source).toMatch(/disabled=\{speechRate <= 0\.5\}/);
-    expect(source).toMatch(/disabled=\{speechRate >= 2\.0\}/);
-    expect(source).toMatch(/speechRate\.toFixed\(2\)\}x/);
+    expect(source).not.toMatch(/accessibilityLabel="背诵练习"/);
+    expect(source).not.toMatch(/handleRecite/);
+    // 语速融入「听」：弹窗内本地临时值（确认才写回 setSpeechRate 持久化并开播）
+    expect(source).toMatch(/const \[rateModalVisible, setRateModalVisible\] = useState\(false\);/);
+    expect(source).toMatch(/const \[tempSpeechRate, setTempSpeechRate\] = useState\(speechRate\);/);
+    expect(source).toMatch(/onRequestClose=\{handleCancelSpeechRate\}/);
+    expect(source).toMatch(/disabled=\{tempSpeechRate <= 0\.5\}/);
+    expect(source).toMatch(/disabled=\{tempSpeechRate >= 2\.0\}/);
+    expect(source).toMatch(/tempSpeechRate\.toFixed\(2\)\}x/);
+    expect(source).toMatch(/accessibilityLabel="确认语速并开始播放"/);
+    expect(source).toMatch(/确认开始播放/);
+    expect(source).toMatch(/const handleConfirmSpeechRate = useCallback/);
+    expect(source).toMatch(/setSpeechRate\(tempSpeechRate\);/);
   });
 
   test('注音切换迁移右上角「音」按钮（循环切换 + 当前模式无障碍说明）', () => {

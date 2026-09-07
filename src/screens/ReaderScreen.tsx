@@ -5,11 +5,12 @@
  * - 正文：FlatList 逐段渲染（注音模式用 PinyinText，关闭注音用 HighlightText）
  * - 底部：固定进度条（第 N/共 M 章 · X% + 细进度条）
  * 交互流程：
- * - 长按正文 → 弹出选词面板（可调整范围 + 划线/解析/翻译/笔记 + 背诵/语速）
+ * - 长按正文 → 弹出选词面板（可调整范围 + 划线/解析/翻译/笔记）
  * - 点击已有划线 → 弹出笔记编辑器（新建或编辑关联笔记）
  * - 章节前进：滚动模式为滑动窗口连续拼接（无限前进）；翻页模式翻到章边界自动跨章
  * - 与 useReaderStore 联动：openChapter 保存阅读位置，滚动更新当前段落
- * 说明：「背诵」跳转 RecitationPracticeScreen；
+ * 说明：朗读入口为右上角「听」按钮——未朗读时先弹语速设置弹窗（确认后才播放），
+ * 朗读中再点直接停止；背诵练习由首页底部「背诵」Tab 进入，阅读页不再保留直达入口。
  * props 保持宽松路由签名，兼容 RootStack 注入（阅读经书架选书进入）。
  * 正文支持繁简一键切换：转换在「数据层」统一作用于段落文本，渲染、选区码点与
  * 划线偏移均基于转换后文本，保证三者一致、切换不错位。
@@ -46,7 +47,6 @@ import TranslationPanel from '@/components/reader/TranslationPanel';
 import HighlightText from '@/components/reader/HighlightText';
 import PageFlipPager from '@/components/reader/PageFlipPager';
 import PinyinText from '@/components/reader/PinyinText';
-import type { RecitationPracticeParams } from '@/navigation/types';
 import {
   StorageService,
   genId,
@@ -94,10 +94,8 @@ interface ReaderScreenProps {
   /** React Navigation 注入的 navigation */
   navigation?: {
     goBack: () => void;
-    /** 跳转背诵练习（未命中当前 Stack 时由 React Navigation 冒泡至根 Stack） */
     navigate: {
       (name: 'Reader', params: ReaderRouteParams): void;
-      (name: 'RecitationPractice', params: RecitationPracticeParams): void;
     };
   };
 }
@@ -977,6 +975,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const speechRate = useSettingsStore((s) => s.speechRate);
   const setSpeechRate = useSettingsStore((s) => s.setSpeechRate);
   const [ttsSpeaking, setTtsSpeaking] = useState(false);
+  // 「听」按钮语速设置弹窗：visible 控制显隐，tempRate 为弹窗内本地临时值
+  // （确认才写回 setSpeechRate 持久化并用于播放；取消不污染持久化设置）
+  const [rateModalVisible, setRateModalVisible] = useState(false);
+  const [tempSpeechRate, setTempSpeechRate] = useState(speechRate);
 
   const colors: ThemeColors = getPaperColors(paper);
 
@@ -1746,40 +1748,62 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     };
   }, []);
 
-  /** 朗读 / 停止当前段落：取阅读位置 store 中的当前段（无则回章首段） */
-  const handleToggleSpeech = useCallback(async () => {
+  /** 朗读当前段（用指定语速）：取阅读位置 store 中的当前段（无则回章首段） */
+  const startSpeech = useCallback(
+    async (rate: number) => {
+      const store = useReaderStore.getState();
+      const segId = store.segmentId ?? chapter?.segments[0]?.id ?? null;
+      const text = segId ? speechTextMap.get(segId) : null;
+      if (!segId || !text) {
+        Alert.alert('朗读', '当前没有可朗读的段落');
+        return;
+      }
+      const available = await TtsService.isTtsAvailable();
+      if (!available) {
+        Alert.alert('朗读', '当前设备不支持语音朗读');
+        return;
+      }
+      const res = await TtsService.speakText(text, rate);
+      if (res.success) {
+        setTtsSpeaking(true);
+      } else {
+        Alert.alert('朗读', res.error ?? '朗读启动失败');
+      }
+    },
+    [chapter, speechTextMap],
+  );
+
+  /**
+   * 「听」按钮点击：
+   * - 朗读中 → 直接停止（保留原 toggle 停止分支，不弹窗）
+   * - 未朗读 → 先弹语速设置弹窗，确认后才播放
+   */
+  const handleListenPress = useCallback(() => {
     if (ttsSpeaking) {
       TtsService.stopSpeech();
       setTtsSpeaking(false);
       return;
     }
-    const store = useReaderStore.getState();
-    const segId = store.segmentId ?? chapter?.segments[0]?.id ?? null;
-    const text = segId ? speechTextMap.get(segId) : null;
-    if (!segId || !text) {
-      Alert.alert('朗读', '当前没有可朗读的段落');
-      return;
-    }
-    const available = await TtsService.isTtsAvailable();
-    if (!available) {
-      Alert.alert('朗读', '当前设备不支持语音朗读');
-      return;
-    }
-    const res = await TtsService.speakText(text, speechRate);
-    if (res.success) {
-      setTtsSpeaking(true);
-    } else {
-      Alert.alert('朗读', res.error ?? '朗读启动失败');
-    }
-  }, [ttsSpeaking, chapter, speechTextMap, speechRate]);
+    setTempSpeechRate(speechRate);
+    setRateModalVisible(true);
+  }, [ttsSpeaking, speechRate]);
 
-  /** 语速步进（−/+ 0.25，范围 0.5–2.0，持久化到设置） */
-  const handleStepSpeechRate = useCallback(
-    (dir: 1 | -1) => {
-      setSpeechRate(stepSpeechRate(speechRate, dir));
-    },
-    [speechRate, setSpeechRate],
-  );
+  /** 语速弹窗内临时值步进（−/+ 0.25，边界由 rangeButton disabled 控制） */
+  const handleStepTempSpeechRate = useCallback((dir: 1 | -1) => {
+    setTempSpeechRate((prev) => stepSpeechRate(prev, dir));
+  }, []);
+
+  /** 语速弹窗「确认开始播放」：临时值写回持久化设置，并以确认后的语速开播 */
+  const handleConfirmSpeechRate = useCallback(async () => {
+    setRateModalVisible(false);
+    setSpeechRate(tempSpeechRate);
+    await startSpeech(tempSpeechRate);
+  }, [tempSpeechRate, setSpeechRate, startSpeech]);
+
+  /** 语速弹窗「取消」：仅关闭，不写回持久化设置（临时值丢弃） */
+  const handleCancelSpeechRate = useCallback(() => {
+    setRateModalVisible(false);
+  }, []);
 
   // ---------- 定位滚动到指定段落 ----------
 
@@ -2257,18 +2281,6 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     setSelectionVisible(false);
   }, [selection]);
 
-  /** 背诵入口：跳转背诵练习页（默认填空默写模式） */
-  const handleRecite = useCallback(() => {
-    if (!bookId || !chapterId) {
-      return;
-    }
-    navigation?.navigate('RecitationPractice', {
-      bookId,
-      chapterId,
-      mode: 'fillBlank',
-    });
-  }, [navigation, bookId, chapterId]);
-
   const goBack = useCallback(() => {
     navigation?.goBack();
   }, [navigation]);
@@ -2408,12 +2420,13 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             藏
           </Text>
         </Pressable>
-        {/* 正文朗读开关（原长按菜单「朗读/停止」迁移）：朗读中主色高亮 + 图标变停止符 */}
+        {/* 正文朗读开关（右上角「听」）：未朗读 → 先弹语速设置弹窗（确认后播放）；
+            朗读中 → 直接停止。朗读中主色高亮 + 图标变停止符，a11y 标签区分两种意图 */}
         <Pressable
-          onPress={handleToggleSpeech}
+          onPress={handleListenPress}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel={ttsSpeaking ? '停止朗读' : '朗读当前段落'}
+          accessibilityLabel={ttsSpeaking ? '停止朗读' : '设置语速并朗读'}
         >
           <Text
             style={[
@@ -2694,41 +2707,76 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                 <Text style={[styles.actionButtonText, { color: colors.primary }]}>笔记</Text>
               </Pressable>
             </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
-            {/* 全文操作区（收藏/朗读已上移右上角「藏/听」按钮）：背诵练习 */}
+      {/* 语速设置弹窗（点右上角「听」且未朗读时弹出）：本地临时值步进，
+          「确认开始播放」才写回持久化并开播；取消不污染持久化语速 */}
+      <Modal
+        visible={rateModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCancelSpeechRate}
+      >
+        <Pressable style={styles.overlay} onPress={handleCancelSpeechRate}>
+          <Pressable
+            style={[styles.sheet, { backgroundColor: colors.background }]}
+            onPress={() => undefined}
+          >
+            <Text style={[styles.sheetTitle, { color: colors.textSecondary }]}>朗读语速</Text>
+            <Text style={[styles.rateValue, { color: colors.primary }]}>
+              {tempSpeechRate.toFixed(2)}x
+            </Text>
             <View style={styles.actionRow}>
               <Pressable
-                style={({ pressed }) => [styles.menuActionButton, pressed && styles.pressed]}
-                onPress={handleRecite}
-                accessibilityRole="button"
-                accessibilityLabel="背诵练习"
-              >
-                <Text style={[styles.actionButtonText, { color: colors.text }]}>背诵练习</Text>
-              </Pressable>
-            </View>
-
-            {/* 语速步进（原底部朗读条迁移）：−/+ 0.25，边界禁用，显示当前倍率 */}
-            <View style={styles.actionRow}>
-              <Pressable
-                style={[styles.rangeButton, { borderColor: colors.border }, speechRate <= 0.5 && styles.actionDisabled]}
-                onPress={() => handleStepSpeechRate(-1)}
-                disabled={speechRate <= 0.5}
+                style={[
+                  styles.rangeButton,
+                  { borderColor: colors.border },
+                  tempSpeechRate <= 0.5 && styles.actionDisabled,
+                ]}
+                onPress={() => handleStepTempSpeechRate(-1)}
+                disabled={tempSpeechRate <= 0.5}
                 accessibilityRole="button"
                 accessibilityLabel="降低语速"
               >
                 <Text style={[styles.rangeButtonText, { color: colors.textSecondary }]}>{'−'}</Text>
               </Pressable>
               <Text style={[styles.menuRateValue, { color: colors.text }]}>
-                {speechRate.toFixed(2)}x
+                {tempSpeechRate.toFixed(2)}x
               </Text>
               <Pressable
-                style={[styles.rangeButton, { borderColor: colors.border }, speechRate >= 2.0 && styles.actionDisabled]}
-                onPress={() => handleStepSpeechRate(1)}
-                disabled={speechRate >= 2.0}
+                style={[
+                  styles.rangeButton,
+                  { borderColor: colors.border },
+                  tempSpeechRate >= 2.0 && styles.actionDisabled,
+                ]}
+                onPress={() => handleStepTempSpeechRate(1)}
+                disabled={tempSpeechRate >= 2.0}
                 accessibilityRole="button"
                 accessibilityLabel="提高语速"
               >
                 <Text style={[styles.rangeButtonText, { color: colors.textSecondary }]}>{'＋'}</Text>
+              </Pressable>
+            </View>
+            <View style={styles.actionRow}>
+              <Pressable
+                style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}
+                onPress={handleCancelSpeechRate}
+                accessibilityRole="button"
+                accessibilityLabel="取消语速设置"
+              >
+                <Text style={[styles.actionButtonText, { color: colors.textSecondary }]}>取消</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}
+                onPress={handleConfirmSpeechRate}
+                accessibilityRole="button"
+                accessibilityLabel="确认语速并开始播放"
+              >
+                <Text style={[styles.actionButtonText, { color: colors.primary }]}>
+                  确认开始播放
+                </Text>
               </Pressable>
             </View>
           </Pressable>
@@ -3100,13 +3148,11 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
   },
-  // 长按弹出菜单：全文操作按钮（收藏/背诵/朗读）与语速倍率展示
-  menuActionButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.12)',
+  // 「听」语速弹窗：当前倍率大字展示 + 步进行倍率展示
+  rateValue: {
+    fontSize: 40,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   menuRateValue: {
     fontSize: 14,
