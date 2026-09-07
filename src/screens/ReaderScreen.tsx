@@ -2793,23 +2793,44 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         {/* 选词操作浮动层（阅读页内绝对定位，替代全屏 Modal）：
             容器 pointerEvents="box-none" 不拦截触摸，正文子节点自接收点按
             （选区打开时点按正文 = 扩展选区）；仅面板本体拦截触摸。
-            底部停靠于进度条上方，内容经 ScrollView 限高（maxHeight 65%）防溢出 */}
+            底部停靠于进度条上方。三段式结构根除截断：
+            ① 内容区（选中文本独立 ScrollView 限高，短选区自适应/超长内滚）
+            ② hairline 分隔线
+            ③ 固定操作栏（划线行 + 等宽操作按钮行，脱离滚动区、永不压缩） */}
         {selectionVisible && selection ? (
           <View style={styles.selectionDock} pointerEvents="box-none">
             <View style={[styles.selectionSheet, { backgroundColor: colors.background }]}>
-              {/* 内容限高滚动：内容少时自适应高度，极端情况（超长选区/大字号）可滚动不溢出 */}
-              <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
-                <Text style={[styles.sheetTitle, { color: colors.textSecondary }]}>选中文字</Text>
-                {/* 选中文字完整换行显示（不截断）：超长选区经面板 ScrollView 限高滚动查看 */}
+              {/* 第一段 · 内容区：标题 + 选中文本独立限高滚动（固定数值 maxHeight，
+                  仅超长选区时该区域内部滚动；短选区自适应高度，不出现空滚动态） */}
+              <Text style={[styles.sheetTitle, { color: colors.textSecondary }]}>选中文字</Text>
+              {/* 选中文字完整换行显示（不截断）：超长选区经本区 ScrollView 限高滚动查看 */}
+              <ScrollView
+                nestedScrollEnabled
+                alwaysBounceVertical={false}
+                showsVerticalScrollIndicator={false}
+                style={styles.selectionContentScroll}
+              >
                 <Text style={[styles.selectionText, { color: colors.text }]}>
                   {selection.text}
                 </Text>
-                <Text style={[styles.selectionHint, { color: colors.pinyin }]}>
-                  点按正文任意字可扩展选区 · 长按其他字重新选字
-                </Text>
+              </ScrollView>
+              <Text style={[styles.selectionHint, { color: colors.pinyin }]}>
+                点按正文任意字可扩展选区 · 长按其他字重新选字
+              </Text>
 
-                {/* 划线三色 + 解析 / 翻译 / 笔记 / 收起（作用于当前选区，实时跟随扩展更新） */}
-                <View style={styles.actionRow}>
+              {/* 第二段 · hairline 分隔线：内容区与固定操作栏之间 */}
+              <View style={[styles.selectionDivider, { backgroundColor: colors.border }]} />
+
+              {/* 第三段 · 固定操作栏（不参与滚动、任何屏宽均完整显示）：
+                  第一行「划线」= 左标签 + 三色圆点；第二行 = 4 个 flex:1 等宽按钮。
+                  按钮作用于当前选区，实时跟随点按扩展更新 */}
+              <View style={styles.selectionHighlightRow}>
+                <Text
+                  style={[styles.selectionHighlightLabel, { color: colors.textSecondary }]}
+                >
+                  划线
+                </Text>
+                <View style={styles.selectionHighlightDots}>
                   {(['yellow', 'green', 'blue'] as HighlightColor[]).map((color) => (
                     <Pressable
                       key={color}
@@ -2819,28 +2840,32 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                       accessibilityLabel={`使用${color}颜色划线`}
                     />
                   ))}
-                  <View style={styles.actionDivider} />
-                  <Pressable style={styles.actionButton} onPress={openAnalysis}>
-                    <Text style={[styles.actionButtonText, { color: colors.primary }]}>解析</Text>
-                  </Pressable>
-                  <Pressable style={styles.actionButton} onPress={openTranslation}>
-                    <Text style={[styles.actionButtonText, { color: colors.primary }]}>翻译</Text>
-                  </Pressable>
-                  <Pressable style={styles.actionButton} onPress={openNoteEditorForSelection}>
-                    <Text style={[styles.actionButtonText, { color: colors.primary }]}>笔记</Text>
-                  </Pressable>
-                  <Pressable
-                    style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}
-                    onPress={closeSelection}
-                    accessibilityRole="button"
-                    accessibilityLabel="收起选区菜单"
-                  >
-                    <Text style={[styles.actionButtonText, { color: colors.textSecondary }]}>
-                      收起
-                    </Text>
-                  </Pressable>
                 </View>
-              </ScrollView>
+              </View>
+              <View style={styles.selectionActionsRow}>
+                <Pressable style={styles.selectionActionButton} onPress={openAnalysis}>
+                  <Text style={[styles.actionButtonText, { color: colors.primary }]}>解析</Text>
+                </Pressable>
+                <Pressable style={styles.selectionActionButton} onPress={openTranslation}>
+                  <Text style={[styles.actionButtonText, { color: colors.primary }]}>翻译</Text>
+                </Pressable>
+                <Pressable style={styles.selectionActionButton} onPress={openNoteEditorForSelection}>
+                  <Text style={[styles.actionButtonText, { color: colors.primary }]}>笔记</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.selectionActionButton,
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={closeSelection}
+                  accessibilityRole="button"
+                  accessibilityLabel="收起选区菜单"
+                >
+                  <Text style={[styles.actionButtonText, { color: colors.textSecondary }]}>
+                    收起
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         ) : null}
@@ -3428,7 +3453,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingBottom: 56,
   },
-  // 选词面板本体：内容自适应高度，超长时经内部 ScrollView 滚动（maxHeight 65% 防溢出）
+  // 选词面板本体：三段式（内容区 / 分隔线 / 固定操作栏），内容总高有界
+  // （选中文本区固定限高 + 操作栏两行定高），maxHeight 65% 仅作外层保险
   selectionSheet: {
     borderRadius: 14,
     padding: 16,
@@ -3449,10 +3475,53 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
+  // 选中文本独立滚动区：固定数值限高（勿用百分比——Android 上百分比 maxHeight
+  // 在 flex-end 容器内测量不稳），仅超长选区时内部滚动，短选区自适应高度；
+  // alwaysBounceVertical=false 避免短内容时出现空滚动态
+  selectionContentScroll: {
+    maxHeight: 140,
+  },
   selectionHint: {
     fontSize: 11,
     lineHeight: 16,
     textAlign: 'center',
+  },
+  // hairline 分隔线：内容区与固定操作栏之间
+  selectionDivider: {
+    height: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+  },
+  // 划线行（固定操作栏第一行）：左标签 + 右三色圆点，仅 3 圆点必放得下、无需换行
+  selectionHighlightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 28,
+  },
+  selectionHighlightLabel: {
+    fontSize: 13,
+  },
+  selectionHighlightDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  // 操作行（固定操作栏第二行）：解析/翻译/笔记/收起 4 按钮 flex:1 等宽
+  // （flexBasis 0 均分剩余宽度），任何屏宽均完整显示、永不压缩截断
+  selectionActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 8,
+  },
+  selectionActionButton: {
+    flex: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    minHeight: 40,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   rangeButton: {
     width: 30,
@@ -3475,12 +3544,6 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-  },
-  actionDivider: {
-    width: StyleSheet.hairlineWidth,
-    height: 20,
-    backgroundColor: 'rgba(0,0,0,0.15)',
-    marginHorizontal: 4,
   },
   actionButton: {
     paddingHorizontal: 20,

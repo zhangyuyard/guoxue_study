@@ -8,7 +8,8 @@
  *   3) 两渲染模式（PinyinText / HighlightText）均支持 per-char 点按上报；
  *   4) 解析：多字按实际选中全串精确查词（lookupWordExact），全串未收录逐字解析列表，
  *      超长截断展示；「在字典中查看」目标词头 dictHeadword；
- *   5) 菜单限高 + ScrollView 防溢出，不遮挡底部进度条。
+ *   5) 菜单三段式重构：内容区（选中文本独立限高滚动）+ hairline 分隔线 +
+ *      固定操作栏（划线行 + flex:1 等宽按钮行），操作栏脱离滚动区永不截断。
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -116,18 +117,59 @@ describe('② 解析跟随实际选中内容', () => {
   });
 });
 
-describe('③ 菜单溢出修复', () => {
-  test('面板限高（maxHeight 65%）+ 内容 ScrollView，底部停靠不遮挡进度条', () => {
+describe('③ 菜单三段式重构：内容区可滚动 + 固定操作栏（根除截断）', () => {
+  test('面板底部停靠（paddingBottom 56 预留进度条），maxHeight 65% 外层保险保留', () => {
     expect(reader).toMatch(/maxHeight: '65%'/);
-    expect(reader).toMatch(
-      /selectionSheet[\s\S]*?<ScrollView nestedScrollEnabled showsVerticalScrollIndicator=\{false\}>/,
-    );
     // 面板底部预留进度条高度，避免遮挡
     expect(reader).toMatch(/paddingBottom: 56/);
   });
 
-  test('选中文字不再 numberOfLines 截断，完整换行显示（超长经面板 ScrollView 滚动）', () => {
+  test('内容区：选中文本独立 ScrollView 固定数值限高（短选区自适应、超长内滚）', () => {
+    // 面板内首个 ScrollView 即选中文本滚动区（操作栏在 ScrollView 之外）
+    expect(reader).toMatch(
+      /selectionSheet[\s\S]*?<ScrollView\s*\n\s*nestedScrollEnabled/,
+    );
+    // 固定数值限高（勿用百分比——Android 上百分比 maxHeight 测量不稳导致裁切）
+    expect(reader).toMatch(/selectionContentScroll: \{\s*\n\s*maxHeight: 140,/);
+    // 选中文字完整换行，不 numberOfLines 截断
     expect(reader).not.toMatch(/styles\.selectionText[^\n]*numberOfLines/);
+  });
+
+  test('分隔线：内容区与固定操作栏之间 hairline 线（colors.border）', () => {
+    expect(reader).toMatch(
+      /styles\.selectionDivider, \{ backgroundColor: colors\.border \}/,
+    );
+  });
+
+  test('划线行独立成行：左「划线」标签 + 三色圆点，不再与操作按钮同行挤爆', () => {
+    expect(reader).toMatch(/styles\.selectionHighlightRow/);
+    expect(reader).toMatch(/styles\.selectionHighlightDots/);
+    expect(reader).toMatch(/使用\$\{color\}颜色划线/);
+  });
+
+  test('操作栏固定：解析/翻译/笔记/收起 4 按钮 flex:1 等宽（flexBasis 0）永不压缩', () => {
+    expect(reader).toMatch(/selectionActionsRow: \{/);
+    expect(reader).toMatch(
+      /selectionActionButton: \{[\s\S]*?flex: 1,[\s\S]*?flexBasis: 0,/,
+    );
+    expect(reader).toMatch(/accessibilityLabel="收起选区菜单"/);
+  });
+
+  test('旧整板 ScrollView 结构与死样式已删除：操作行必须位于 ScrollView 之外', () => {
+    // actionDivider 仅旧单行菜单使用，应删除（无死样式）
+    expect(reader).not.toMatch(/actionDivider/);
+    // 结构断言：selectionSheet 内的选中文本 ScrollView 先出现并闭合，
+    // 操作行（selectionActionsRow）位于其之后（滚动区外、固定底部）
+    const sheetStart = reader.indexOf(
+      'styles.selectionSheet, { backgroundColor: colors.background }',
+    );
+    expect(sheetStart).toBeGreaterThan(-1);
+    const scrollStart = reader.indexOf('<ScrollView', sheetStart);
+    const scrollEnd = reader.indexOf('</ScrollView>', scrollStart);
+    const actionsRow = reader.indexOf('styles.selectionActionsRow', scrollEnd);
+    expect(scrollStart).toBeGreaterThan(sheetStart);
+    expect(scrollEnd).toBeGreaterThan(scrollStart);
+    expect(actionsRow).toBeGreaterThan(scrollEnd);
   });
 });
 
