@@ -47,7 +47,7 @@ interface CharCellData {
   isRare: boolean;
   isPolyphone: boolean;
   /** 通假字信息（用于右上角「通」标识与浮窗） */
-  tongjia?: { original: string; note?: string; source?: string; sources?: string[]; verified?: boolean };
+  tongjia?: { original: string; note?: string; source?: string; sources?: string[]; verified?: boolean; context?: string };
   /** 语境读音源（多音字浮窗展示） */
   readingSources?: string[];
   /** 语境读音是否校验 */
@@ -89,7 +89,7 @@ function buildCells(
     pinyin: string;
     isRare: boolean;
     isPolyphone: boolean;
-    tongjia?: { original: string; note?: string; source?: string; sources?: string[]; verified?: boolean };
+    tongjia?: { original: string; note?: string; source?: string; sources?: string[]; verified?: boolean; context?: string };
     readingSources?: string[];
     readingVerified?: boolean;
   }[],
@@ -414,6 +414,8 @@ interface TongjiaPopupData {
   sources?: string[];
   /** 是否经 canon 校验 */
   verified?: boolean;
+  /** 命中的语料例句（canon v3 用例级锚定） */
+  context?: string;
 }
 
 interface TongjiaPopupProps {
@@ -457,6 +459,11 @@ const TongjiaPopup = React.memo(function TongjiaPopup({
             </Text>
           </View>
           <Text style={styles.tongjiaNote}>{data.note}</Text>
+          {data.context ? (
+            <Text style={styles.tongjiaSource} numberOfLines={3}>
+              {`例：${data.context}`}
+            </Text>
+          ) : null}
           {data.sources && data.sources.length > 0 ? (
             <Text style={styles.tongjiaSource} numberOfLines={3}>
               {`判定源：${data.sources.join(' · ')}${data.verified === false ? '（未校验）' : ''}`}
@@ -765,6 +772,9 @@ function PinyinTextBase({
       source: cell.tongjia.source,
       sources: cell.tongjia.sources,
       verified: cell.tongjia.verified,
+      context: cell.tongjia.context
+        ? toTrad(cell.tongjia.context)
+        : undefined,
     });
   }, [conversionMode]);
 

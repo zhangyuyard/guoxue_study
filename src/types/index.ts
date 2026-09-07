@@ -78,6 +78,11 @@ export interface PinyinAnnotation {
     sources?: string[];
     /** 是否经 canon 校验（true=权威校验；false=兜底/未校验） */
     verified?: boolean;
+    /**
+     * 命中的语料例句（canon v3 语境锚定）：标注仅在当前段落
+     * 实际命中该例句时给出，可用于浮窗展示「例：不亦说乎」。
+     */
+    context?: string;
   };
   /** 异体字列表 */
   yiti?: string[];
@@ -310,6 +315,12 @@ export interface CanonTongjiaResult {
    * 古今字广义属用字通假，UI 可统一按「通」展示，也可据此区分角标文案。
    */
   kind?: 'tongjia' | 'gujin';
+  /**
+   * 语料例句（canon v3 起）：判定所依据的原文用例（如「不亦说乎」）。
+   * 运行时据此做用例级语境锚定——同一篇内该字多处出现时，
+   * 只有落在例句跨度内的出现位置才标注（杜绝「甲句通假、全篇误标」）。
+   */
+  context?: string;
 }
 
 /** canon 语境读音结果 */
@@ -320,6 +331,8 @@ export interface CanonReadingResult {
   sources: string[];
   /** 是否经权威校验 */
   verified: boolean;
+  /** 语料例句（canon v3 起，语义同 CanonTongjiaResult.context） */
+  context?: string;
 }
 
 /**
@@ -339,4 +352,20 @@ export interface CanonProvider {
     bookId: string | undefined,
     char: string,
   ): CanonReadingResult | null;
+  /**
+   * 通假判定候选（canon v3 起，可选实现）：按层级优先序返回该字全部判定行
+   * （含各自行 context），供运行时做用例级语境锚定。未实现时调用方回退
+   * getTongjia 单行结果（旧行为：无语境校验）。
+   */
+  getTongjiaCandidates?(
+    workId: string | undefined,
+    bookId: string | undefined,
+    char: string,
+  ): CanonTongjiaResult[];
+  /** 语境读音候选（canon v3 起，可选实现，语义同上） */
+  getReadingCandidates?(
+    workId: string | undefined,
+    bookId: string | undefined,
+    char: string,
+  ): CanonReadingResult[];
 }

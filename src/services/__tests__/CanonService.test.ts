@@ -68,17 +68,15 @@ jest.mock('react-native-quick-sqlite', () => ({
       if (matched.length === 0) {
         return { rows: { _array: [] } };
       }
-      // 取优先级最高（tiers 中下标最小）的行
-      let best = matched[0];
-      let bestPri = tiers.indexOf(String(best.work_id));
-      for (const r of matched) {
-        const pri = tiers.indexOf(String(r.work_id));
-        if (pri >= 0 && (bestPri < 0 || pri < bestPri)) {
-          best = r;
-          bestPri = pri;
-        }
-      }
-      return { rows: { _array: [best] } };
+      // 复刻 ORDER BY：层级优先（tiers 下标小在前）→ 同层级有 context 的行优先 → rowid
+      const withIdx = matched.map((r, i) => ({
+        r,
+        pri: tiers.indexOf(String(r.work_id)),
+        noCtx: r.context ? 0 : 1,
+        rowid: i,
+      }));
+      withIdx.sort((a, b) => a.pri - b.pri || a.noCtx - b.noCtx || a.rowid - b.rowid);
+      return { rows: { _array: withIdx.map((x) => x.r) } };
     },
   })),
 }));
@@ -263,6 +261,163 @@ describe('PinyinService × canon 仲裁（缺陷一/二根治）', () => {
   });
 });
 
+describe('PinyinService × canon v3 用例级语境锚定', () => {
+  afterEach(() => {
+    setCanonProvider(null);
+  });
+
+  test('例句命中：候选行带 context 且字符落在例句跨度内 → 标注并透传例句', () => {
+    const provider: CanonProvider = {
+      getTongjiaCandidates: (_w, _b, char) =>
+        char === '说'
+          ? [
+              {
+                original: '悦',
+                note: '同“悦”，喜悦',
+                sources: ['北师大通假字资源库'],
+                verified: true,
+                context: '学而时习之，不亦说乎',
+              },
+            ]
+          : [],
+      getTongjia: () => null,
+      getReading: () => null,
+    };
+    setCanonProvider(provider);
+    const res = annotate('子曰：学而时习之，不亦说乎！人说的多呀', 'full', {
+      workId: 'lunyu-xueer',
+      bookId: 'lunyu',
+    });
+    const shuo = res.data!.find((a) => a.char === '说' && a.tongjia)!;
+    expect(shuo.tongjia!.original).toBe('悦');
+    expect(shuo.tongjia!.context).toBe('学而时习之，不亦说乎');
+  });
+
+  test('例句未命中（同篇另一处本义用法）：不标注（宁缺毋滥）', () => {
+    const provider: CanonProvider = {
+      getTongjiaCandidates: (_w, _b, char) =>
+        char === '说'
+          ? [
+              {
+                original: '悦',
+                note: '通悦',
+                sources: ['北师大通假字资源库'],
+                verified: true,
+                context: '学而时习之，不亦说乎',
+              },
+            ]
+          : [],
+      getTongjia: () => null,
+      getReading: () => null,
+    };
+    setCanonProvider(provider);
+    // 「成事不说」中「说」为本义（说解），例句「不亦说乎」未出现 → 不标注
+    const res = annotate('成事不说，遂事不谏', 'full', {
+      workId: 'lunyu-bayi',
+      bookId: 'lunyu',
+    });
+    const shuo = res.data!.find((a) => a.char === '说')!;
+    expect(shuo.tongjia).toBeUndefined();
+  });
+
+  test('读音候选同样受语境锚定约束：例句未命中 → 读音回退（未校验）', () => {
+    const provider: CanonProvider = {
+      getTongjia: () => null,
+      getReadingCandidates: (_w, _b, char) =>
+        char === '说'
+          ? [{ reading: 'yuè', sources: ['北师大通假字资源库'], verified: true, context: '学而时习之，不亦说乎' }]
+          : [],
+      getReading: () => null,
+    };
+    setCanonProvider(provider);
+    const res = annotate('成事不说', 'full', { workId: 'lunyu-bayi', bookId: 'lunyu' });
+    const shuo = res.data!.find((a) => a.char === '说')!;
+    // canon 读音未采用（回退内置规则 / pinyin-pro，标未校验）
+    expect(shuo.readingVerified).toBe(false);
+  });
+
+  test('候选行无 context（诗词粒度/无引文种子）：维持旧行为直接命中', () => {
+    const provider: CanonProvider = {
+      getTongjiaCandidates: (_w, _b, char) =>
+        char === '反' ? [{ original: '返', sources: ['人工标注'], verified: false }] : [],
+      getTongjia: () => null,
+      getReading: () => null,
+    };
+    setCanonProvider(provider);
+    const res = annotate('往而不反也', 'full', { workId: 'mengzi', bookId: 'mengzi' });
+    const fan = res.data!.find((a) => a.char === '反')!;
+    expect(fan.tongjia).toBeDefined();
+    expect(fan.tongjia!.original).toBe('返');
+  });
+
+  test('繁体正文：例句匹配在归一化后进行（說→说），命中不受显示字形影响', () => {
+    const provider: CanonProvider = {
+      getTongjiaCandidates: (_w, _b, char) =>
+        char === '说'
+          ? [
+              {
+                original: '悦',
+                note: '通悦',
+                sources: ['北师大通假字资源库'],
+                verified: true,
+                context: '学而时习之，不亦说乎',
+              },
+            ]
+          : [],
+      getTongjia: () => null,
+      getReading: () => null,
+    };
+    setCanonProvider(provider);
+    // 繁体正文段落（含完整例句覆盖）；「說」归一化为「说」后与简体例句匹配
+    const res = annotate('子曰：學而時習之，不亦說乎！', 'full', {
+      workId: 'lunyu-xueer',
+      bookId: 'lunyu',
+    });
+    const shuo = res.data!.find((a) => a.tongjia)!;
+    expect(shuo.char).toBe('說');
+    expect(shuo.tongjia!.original).toBe('悦');
+  });
+});
+
+
+describe('CanonService v3 用例级语境锚定（context 列）', () => {
+  beforeEach(async () => {
+    resetRows();
+    // 同篇同字的两个通假用例（context 不同）共存；无 context 的旧行殿后
+    state.tongjia = [
+      { work_id: 'lunyu-bayi', char: '说', original: '解', note: '本义', sources: '["x"]', verified: 0, type: 'tongjia', context: null },
+      { work_id: 'lunyu-xueer', char: '说', original: '悦', note: '通悦', sources: '["北师大通假字资源库"]', verified: 1, type: 'tongjia', context: '学而时习之，不亦说乎' },
+    ];
+    const ok = await CanonService.getInstance().init();
+    expect(ok).toBe(true);
+  });
+
+  afterEach(() => {
+    CanonService.getInstance().close();
+  });
+
+  test('getTongjiaCandidates 返回层级优先的全部候选并透传 context', () => {
+    const cands = CanonService.getInstance().getTongjiaCandidates('lunyu-xueer', 'lunyu', '说');
+    // 章级行在前（context 非空优先），全局/书级行在后
+    expect(cands.length).toBeGreaterThanOrEqual(1);
+    expect(cands[0]!.original).toBe('悦');
+    expect(cands[0]!.context).toBe('学而时习之，不亦说乎');
+  });
+
+  test('getTongjia = 候选首条（单行旧行为兼容）', () => {
+    const r = CanonService.getInstance().getTongjia('lunyu-xueer', 'lunyu', '说');
+    expect(r!.original).toBe('悦');
+  });
+
+  test('reading_candidates 同样透传 context', () => {
+    state.reading = [
+      { work_id: 'lunyu-xueer', char: '说', reading: 'yuè', sources: '["北师大通假字资源库"]', verified: 1, context: '学而时习之，不亦说乎' },
+    ];
+    const r = CanonService.getInstance().getReadingCandidates('lunyu-xueer', 'lunyu', '说');
+    expect(r[0]!.reading).toBe('yuè');
+    expect(r[0]!.context).toBe('学而时习之，不亦说乎');
+  });
+});
 
 describe('canon 库版本比对升级（#33）', () => {
   afterEach(() => {

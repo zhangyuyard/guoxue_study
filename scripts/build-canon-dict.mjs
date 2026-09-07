@@ -12,6 +12,11 @@
  * 产物：assets/dictionaries/canon_dict.db 与
  *       android/app/src/main/assets/dictionaries/canon_dict.db（字节级副本）。
  *
+ * v3：tongjia_judgment / reading_selection 增加 context 语料例句列
+ * （BNU「语料文本」100% 提供；本地种子从释义引文提取），主键扩为
+ * (work_id, char, context)——同一篇同一字的多个通假用例共存，
+ * 运行时按「用例级语境锚定」标注，杜绝「甲句通假、全篇误标」。
+ *
  * 幂等性：先 DROP 再建，同输入产出一致。
  *
  * ★ 网络兜底：若沙箱无法下载（curl/fetch 被阻断/超时），脚本优雅降级，
@@ -72,13 +77,15 @@ const GUJIN_SEED = resolve(ROOT, 'scripts/canon-seed-gujin.json');
 const SRC_GUJIN = '人工标注·据训诂常识（古今字），建议校对';
 
 /** ★ 与 src/services/CanonService.ts 的 CANON_DICT_VERSION 互指（修改须同步 +1） */
-const CANON_DICT_VERSION = 2;
+const CANON_DICT_VERSION = 3;
 
 /** 数据源署名常量（与架构 §4.1 一致） */
 const SRC_BNU = '北师大通假字资源库';
 const SRC_POETRY = 'chinese-poetry 开源诗词库';
 
-/** DDL（按架构 T03 表结构；sources 存 JSON 字符串数组；type 区分通假/古今字） */
+/** DDL（按架构 T03 表结构；sources 存 JSON 字符串数组；type 区分通假/古今字；
+ *  v3 起增加 context 语料例句列并把主键扩为 (work_id, char, context)——
+ *  同一篇内同一字的多个通假用例共存，运行时按用例级语境锚定标注） */
 const CREATE_TONGJIA = `
   CREATE TABLE IF NOT EXISTS tongjia_judgment (
     work_id  TEXT NOT NULL,
@@ -88,7 +95,8 @@ const CREATE_TONGJIA = `
     sources  TEXT,
     verified INTEGER,
     type     TEXT NOT NULL DEFAULT 'tongjia',
-    PRIMARY KEY (work_id, char)
+    context  TEXT,
+    PRIMARY KEY (work_id, char, context)
   );
   CREATE INDEX IF NOT EXISTS idx_tj_char ON tongjia_judgment(char);
   CREATE INDEX IF NOT EXISTS idx_tj_work ON tongjia_judgment(work_id);
@@ -100,11 +108,53 @@ const CREATE_READING = `
     reading  TEXT,
     sources  TEXT,
     verified INTEGER,
-    PRIMARY KEY (work_id, char)
+    context  TEXT,
+    PRIMARY KEY (work_id, char, context)
   );
   CREATE INDEX IF NOT EXISTS idx_rd_char ON reading_selection(char);
   CREATE INDEX IF NOT EXISTS idx_rd_work ON reading_selection(work_id);
 `;
+
+// ----------------------------- 例句提取（语境锚定 context 列） -----------------------------
+
+/** 汉字判定（与 canonContext.ts 运行时口径一致：CJK 统一表意 + 扩展 A） */
+function isHanChar(c) {
+  const n = c.codePointAt(0);
+  return n >= 0x3400 && n <= 0x9fff;
+}
+
+/** 统计字符串中的汉字数 */
+function hanCount(s) {
+  let n = 0;
+  for (const c of String(s ?? '')) {
+    if (isHanChar(c)) n += 1;
+  }
+  return n;
+}
+
+/**
+ * 从释义文本提取语料例句（语境锚定 context）：
+ * 取「含借字的最长引文」（兼容「」『』“”"" 等引号），引文汉字数 ≥3 才可信。
+ * 用于本地种子（canon-seed.json / canon-seed-gujin.json）——BNU 语料自带
+ * 「语料文本」字段无需提取。提取不到返回 null（该行无语境证据）。
+ */
+function extractContextFromNote(note, normChar) {
+  if (!note) return null;
+  const text = String(note);
+  const quotes = [];
+  const re = /[「『“"']([^」』”"']+)[」』”"']/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    quotes.push(m[1]);
+  }
+  let best = null;
+  for (const q of quotes) {
+    if (!Array.from(q).includes(normChar)) continue;
+    if (hanCount(q) < 3) continue;
+    if (!best || hanCount(q) > hanCount(best)) best = q;
+  }
+  return best;
+}
 
 // ----------------------------- 网络辅助 -----------------------------
 
@@ -502,6 +552,9 @@ function parseBnuJsonl(text, tongjiaRows, readingRows) {
     const note = pick(obj, NOTE_KEYS);
     // 判定源保留具体出处（含 BNU 库署名），供浮窗展示「判定源」
     const sources = JSON.stringify([`${SRC_BNU}·${work}`]);
+    // v3 用例级语境锚定：语料例句原样入库（繁体原貌，运行时归一化匹配）；
+    // BNU 语料 100% 带例句，运行时据此把「字 × 篇」判定收敛到「字 × 用例」
+    const corpusText = pick(obj, TEXT_KEYS);
     tongjiaRows.push({
       work_id: workId,
       char: normChar,
@@ -510,6 +563,7 @@ function parseBnuJsonl(text, tongjiaRows, readingRows) {
       sources,
       verified: 1,
       type: 'tongjia',
+      context: corpusText ?? null,
     });
     count += 1;
 
@@ -522,6 +576,7 @@ function parseBnuJsonl(text, tongjiaRows, readingRows) {
         reading: py.trim(),
         sources,
         verified: 1,
+        context: corpusText ?? null,
       });
     }
   }
@@ -641,6 +696,10 @@ function loadLocalSeed(tongjiaRows, readingRows) {
   const tj = seed.tongjia || [];
   for (const r of tj) {
     if (!r.work_id || !r.char || !r.original) continue;
+    // v3 语境锚定：显式 context 优先；否则从释义引文中提取含借字的例句
+    // （如「不亦说乎」），提取不到为 null（该行无语境证据，运行时按旧行为放行）
+    const context =
+      r.context ?? extractContextFromNote(r.note, toSimplifiedKey(r.char));
     tongjiaRows.push({
       work_id: r.work_id,
       char: r.char,
@@ -648,17 +707,21 @@ function loadLocalSeed(tongjiaRows, readingRows) {
       note: r.note ?? null,
       sources: JSON.stringify(r.sources || [SRC_BNU]),
       verified: r.verified === false ? 0 : 1,
+      context: context ?? null,
     });
   }
   const rd = seed.reading || [];
   for (const r of rd) {
     if (!r.work_id || !r.char || !r.reading) continue;
+    const context =
+      r.context ?? extractContextFromNote(r.note, toSimplifiedKey(r.char));
     readingRows.push({
       work_id: r.work_id,
       char: r.char,
       reading: r.reading,
       sources: JSON.stringify(r.sources || [SRC_POETRY]),
       verified: r.verified === false ? 0 : 1,
+      context: context ?? null,
     });
   }
   const total = tj.length + rd.length;
@@ -739,6 +802,9 @@ function loadGujinSeed(tongjiaRows) {
     const fullNote = note
       ? `${note}（古今字·人工标注，据训诂常识，建议校对）`
       : '古今字，此处同本字。（人工标注，据训诂常识，建议校对）';
+    // v3 语境锚定：从人工标注引文提取例句（如「学而时习之，不亦说乎」）；
+    // 引文过短/缺失为 null（书级行已按「正文实际出现借字」过滤，运行时放行）
+    const context = extractContextFromNote(note, normChar);
     for (const b of books) {
       if (!b.chars.has(normChar) && !b.chars.has(char)) continue; // 该书正文未出现此古字 → 不写
       tongjiaRows.push({
@@ -749,6 +815,7 @@ function loadGujinSeed(tongjiaRows) {
         sources,
         verified: 0,
         type: 'gujin',
+        context: context ?? null,
       });
       rows += 1;
     }
@@ -789,11 +856,12 @@ async function main() {
   // 源四：古今字种子（人工标注；写入范围按 10 部书正文实际出现借字过滤）
   loadGujinSeed(tongjiaRows);
 
-  // 去重（同 work_id+char 仅保留首条，避免主键冲突）
+  // 去重（同 work_id+char+context 仅保留首条，避免主键冲突；
+  // v3 起同字的不同语料用例（context 不同）共存）
   const tjSeen = new Set();
   const tjUnique = [];
   for (const r of tongjiaRows) {
-    const k = `${r.work_id}::${r.char}`;
+    const k = `${r.work_id}::${r.char}::${r.context ?? ''}`;
     if (tjSeen.has(k)) continue;
     tjSeen.add(k);
     tjUnique.push(r);
@@ -801,7 +869,7 @@ async function main() {
   const rdSeen = new Set();
   const rdUnique = [];
   for (const r of readingRows) {
-    const k = `${r.work_id}::${r.char}`;
+    const k = `${r.work_id}::${r.char}::${r.context ?? ''}`;
     if (rdSeen.has(k)) continue;
     rdSeen.add(k);
     rdUnique.push(r);
@@ -822,21 +890,21 @@ async function main() {
 
     const insTj = db.prepare(
       `INSERT OR REPLACE INTO tongjia_judgment
-       (work_id, char, original, note, sources, verified, type) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (work_id, char, original, note, sources, verified, type, context) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const insRd = db.prepare(
       `INSERT OR REPLACE INTO reading_selection
-       (work_id, char, reading, sources, verified) VALUES (?, ?, ?, ?, ?)`,
+       (work_id, char, reading, sources, verified, context) VALUES (?, ?, ?, ?, ?, ?)`,
     );
 
     const txTj = db.transaction((rows) => {
       for (const r of rows) {
-        insTj.run(r.work_id, r.char, r.original, r.note, r.sources, r.verified, r.type ?? 'tongjia');
+        insTj.run(r.work_id, r.char, r.original, r.note, r.sources, r.verified, r.type ?? 'tongjia', r.context ?? null);
       }
     });
     const txRd = db.transaction((rows) => {
       for (const r of rows) {
-        insRd.run(r.work_id, r.char, r.reading, r.sources, r.verified);
+        insRd.run(r.work_id, r.char, r.reading, r.sources, r.verified, r.context ?? null);
       }
     });
     txTj(tjUnique);

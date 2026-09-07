@@ -39,6 +39,8 @@ export interface PinyinPair {
     source?: string;
     sources?: string[];
     verified?: boolean;
+    /** 命中的语料例句（canon v3 语境锚定，供浮窗展示） */
+    context?: string;
   };
   /** 异体字列表 */
   yiti?: string[];
@@ -143,6 +145,7 @@ export function getPinyinPairs(annotations: PinyinAnnotation[]): PinyinPair[] {
           source: a.tongjia.source,
           sources: a.tongjia.sources,
           verified: a.tongjia.verified,
+          context: a.tongjia.context,
         }
       : undefined,
     yiti: a.yiti ? [...a.yiti] : undefined,

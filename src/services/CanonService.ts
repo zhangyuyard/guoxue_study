@@ -23,8 +23,8 @@ type DB = ReturnType<typeof open>;
 
 /** canon 库文件名（assets 与用户目录中同名） */
 export const CANON_DB_FILE = 'canon_dict.db';
-/** canon 库版本（随数据更新 +1；与构建脚本互指；v2：tongjia_judgment 增加 type 列并扩容 10 部书映射） */
-export const CANON_DICT_VERSION = 2;
+/** canon 库版本（随数据更新 +1；与构建脚本互指；v3：两表增加 context 语料例句列，通假判定升级为用例级语境锚定） */
+export const CANON_DICT_VERSION = 3;
 /** quick-sqlite 库目录（与 DictDatabase.DICT_DB_LOCATION 一致） */
 export const CANON_DB_LOCATION = 'dictionaries';
 /** assets 内字典目录 */
@@ -165,21 +165,23 @@ class CanonService implements CanonProvider {
   }
 
   /**
-   * 三级查询单行解析：按 pri(命中层级) 升序取最高优先级行。
-   * CASE 的 WHEN 分支数随 tiers 数量动态生成，使 SQL 的 `?` 数量与
-   * params（[...tiers, char, ...tiers]）严格对齐——否则 quick-sqlite 会抛
+   * 三级查询候选解析：按 pri(命中层级) 升序返回全部候选行（调用方取首条即为
+   * 最高优先级行）。CASE 的 WHEN 分支数随 tiers 数量动态生成，使 SQL 的 `?`
+   * 数量与 params（[...tiers, char, ...tiers]）严格对齐——否则 quick-sqlite 会抛
    * 「Too many parameter values」导致查询静默失败、角标永不显示。
    * params 结构：前半 tiers 个用于 CASE 赋值，中间 1 个 char，后半 tiers 个用于 IN 匹配。
    */
-  private selectBest(
+  private selectAll(
     table: string,
     workId: string | undefined,
     bookId: string | undefined,
     char: string,
-  ): Record<string, unknown> | null {
+  ): Record<string, unknown>[] {
     const tiers = resolveTiers(workId, bookId);
     const placeholders = tiers.map(() => '?').join(', ');
     const caseBranches = tiers.map((_, i) => `WHEN ? THEN ${i}`).join(' ');
+    // 排序：层级优先（章级 > 书级 > '*'）；同层级内有语料例句（context 非空）的行优先
+    // （v3 用例级锚定行比粒度粗的旧行更精确）；同序保持插入顺序（rowid）
     const sql = `
       SELECT *,
         CASE work_id
@@ -188,31 +190,13 @@ class CanonService implements CanonProvider {
         END AS pri
       FROM ${table}
       WHERE char = ? AND work_id IN (${placeholders})
-      ORDER BY pri ASC
-      LIMIT 1`;
+      ORDER BY pri ASC, CASE WHEN context IS NULL THEN 1 ELSE 0 END ASC, rowid ASC`;
     const params = [...tiers, char, ...tiers];
-    const rows = this.query(sql, params);
-    return rows.length > 0 ? rows[0] : null;
+    return this.query(sql, params);
   }
 
-  // ---------- CanonProvider 实现 ----------
-
-  getTongjia(
-    workId: string | undefined,
-    bookId: string | undefined,
-    char: string,
-  ): CanonTongjiaResult | null {
-    if (!db || !char) {
-      return null;
-    }
-    // 归一化到简体：canon 库按简体字建索引（如「说通悦」）。
-    // 阅读页开启繁体显示时传入的是繁体字符（如「說」），若不归一化会查询 miss、
-    // 导致通假角标在繁体下不显示。繁体→简体转换幂等，简体字符原样返回。
-    const queryChar = ConversionService.toSimplified(char).data ?? char;
-    const row = this.selectBest('tongjia_judgment', workId, bookId, queryChar);
-    if (!row) {
-      return null;
-    }
+  /** 行 → CanonTongjiaResult（context 为 v3 新列，旧库无此列时为 undefined） */
+  private rowToTongjia(row: Record<string, unknown>): CanonTongjiaResult {
     return {
       original: String(row.original),
       note: row.note ? String(row.note) : undefined,
@@ -220,7 +204,61 @@ class CanonService implements CanonProvider {
       verified: Number(row.verified) === 1,
       // 用字关系类型：通假 / 古今字（v2 库起有 type 列；旧库无此列时回退通假）
       kind: row.type === 'gujin' ? 'gujin' : 'tongjia',
+      context: row.context ? String(row.context) : undefined,
     };
+  }
+
+  /** 行 → CanonReadingResult（context 为 v3 新列，旧库无此列时为 undefined） */
+  private rowToReading(row: Record<string, unknown>): CanonReadingResult {
+    return {
+      reading: String(row.reading),
+      sources: parseSources(row.sources),
+      verified: Number(row.verified) === 1,
+      context: row.context ? String(row.context) : undefined,
+    };
+  }
+
+  // ---------- CanonProvider 实现 ----------
+
+  getTongjiaCandidates(
+    workId: string | undefined,
+    bookId: string | undefined,
+    char: string,
+  ): CanonTongjiaResult[] {
+    if (!db || !char) {
+      return [];
+    }
+    // 归一化到简体：canon 库按简体字建索引（如「说通悦」）。
+    // 阅读页开启繁体显示时传入的是繁体字符（如「說」），若不归一化会查询 miss、
+    // 导致通假角标在繁体下不显示。繁体→简体转换幂等，简体字符原样返回。
+    const queryChar = ConversionService.toSimplified(char).data ?? char;
+    return this.selectAll('tongjia_judgment', workId, bookId, queryChar).map((r) =>
+      this.rowToTongjia(r),
+    );
+  }
+
+  getReadingCandidates(
+    workId: string | undefined,
+    bookId: string | undefined,
+    char: string,
+  ): CanonReadingResult[] {
+    if (!db || !char) {
+      return [];
+    }
+    // 同上：读音选择也按简体字符索引，繁体传入需归一化后再查。
+    const queryChar = ConversionService.toSimplified(char).data ?? char;
+    return this.selectAll('reading_selection', workId, bookId, queryChar).map((r) =>
+      this.rowToReading(r),
+    );
+  }
+
+  getTongjia(
+    workId: string | undefined,
+    bookId: string | undefined,
+    char: string,
+  ): CanonTongjiaResult | null {
+    // 单行判定 = 候选首条（层级优先 + 有语境证据优先；语境校验由 PinyinService 层做）
+    return this.getTongjiaCandidates(workId, bookId, char)[0] ?? null;
   }
 
   getReading(
@@ -228,20 +266,8 @@ class CanonService implements CanonProvider {
     bookId: string | undefined,
     char: string,
   ): CanonReadingResult | null {
-    if (!db || !char) {
-      return null;
-    }
-    // 同上：读音选择也按简体字符索引，繁体传入需归一化后再查。
-    const queryChar = ConversionService.toSimplified(char).data ?? char;
-    const row = this.selectBest('reading_selection', workId, bookId, queryChar);
-    if (!row) {
-      return null;
-    }
-    return {
-      reading: String(row.reading),
-      sources: parseSources(row.sources),
-      verified: Number(row.verified) === 1,
-    };
+    // 单行判定 = 候选首条（语境校验由 PinyinService 层做）
+    return this.getReadingCandidates(workId, bookId, char)[0] ?? null;
   }
 
   // ---------- 部署 ----------

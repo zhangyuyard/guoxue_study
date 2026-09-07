@@ -21,6 +21,11 @@ import pinyinDictData from '@/data/pinyin-dict.json';
 import polyphoneRulesData from '@/data/polyphone-rules.json';
 import yitiData from '@/data/yiti-zi.json';
 import { toSimplified } from '@/utils/conversion';
+import {
+  buildHanSequence,
+  pickContextHit,
+  type HanSequence,
+} from '@/utils/canonContext';
 
 /**
  * 外部读音提供者接口（DictEngine 实现）：
@@ -300,12 +305,17 @@ export function annotate(
   if (!text || mode === 'off') {
     return { success: true, data: [] };
   }
-  const { workId, bookId } = opts ?? {};
-  try {
-    const chars = Array.from(text);
-    // 逻辑语境：整句归一化到简体，供规则 / 外部字典的语境匹配使用。
-    // 规则 pattern 与字典语境均为简体，繁体正文直接匹配会全部 miss（如「說乎」匹配不到「说乎」）。
-    const logicText = toSimplified(text);
+    const { workId, bookId } = opts ?? {};
+    try {
+      const chars = Array.from(text);
+      // 逻辑语境：整句归一化到简体，供规则 / 外部字典的语境匹配使用。
+      // 规则 pattern 与字典语境均为简体，繁体正文直接匹配会全部 miss（如「說乎」匹配不到「说乎」）。
+      const logicText = toSimplified(text);
+      // 用例级语境锚定（canon v3）：段落汉字序列 + 例句跨度缓存。
+      // 同一例句在段落内只定位一次，逐字符判定「是否落在例句跨度内」。
+      const seqInfo: HanSequence = buildHanSequence(text);
+      const tjSpanCache = new Map<string, [number, number] | null>();
+      const rdSpanCache = new Map<string, [number, number] | null>();
     // 整句语境注音（禁用变调，保持原调）
     const baseArr = pinyin(text, {
       toneType: 'symbol',
@@ -356,9 +366,21 @@ export function annotate(
         py = extReading;
         readingVerified = true;
       } else {
-        const canonReading: CanonReadingResult | null = canonProvider
-          ? canonProvider.getReading(workId, bookId, logic)
-          : null;
+        // canon 语境读音（v3：候选行经用例级语境锚定后采用；
+        // 旧 provider 只实现单行 getReading 时回退旧行为——无语境校验）
+        const rdCands = canonProvider
+          ? canonProvider.getReadingCandidates
+            ? canonProvider.getReadingCandidates(workId, bookId, logic)
+            : [canonProvider.getReading(workId, bookId, logic)].filter(
+                (r): r is CanonReadingResult => r !== null,
+              )
+          : [];
+        const canonReading: CanonReadingResult | null = pickContextHit(
+          rdCands,
+          idx,
+          seqInfo,
+          rdSpanCache,
+        );
         if (canonReading) {
           py = canonReading.reading;
           readingSources = canonReading.sources;
@@ -372,7 +394,9 @@ export function annotate(
       }
 
       // 3) 通假标注：canon 是通假展示的唯一权威。
-      //    仅当 canon 命中时才设置 tongjia；否则绝不设置（根治「通用通假属性」误标，缺陷一）。
+      //    仅当 canon 命中且通过用例级语境锚定时才设置 tongjia（v3：
+      //    候选行带语料例句，字符出现位置须落在例句跨度内；例句对不上
+      //    正文的异文场景宁缺毋滥不标注），否则绝不设置。
       const annotation: PinyinAnnotation = {
         char: ch,
         pinyin: mode === 'rare' && !isRareChar(logic) ? '' : py,
@@ -381,9 +405,20 @@ export function annotate(
         readingSources,
         readingVerified,
       };
-      const canonTj: CanonTongjiaResult | null = canonProvider
-        ? canonProvider.getTongjia(workId, bookId, logic)
-        : null;
+      // canon 通假候选（v3：多候选含各自 context；旧 provider 回退单行旧行为）
+      const tjCands = canonProvider
+        ? canonProvider.getTongjiaCandidates
+          ? canonProvider.getTongjiaCandidates(workId, bookId, logic)
+          : [canonProvider.getTongjia(workId, bookId, logic)].filter(
+              (r): r is CanonTongjiaResult => r !== null,
+            )
+        : [];
+      const canonTj: CanonTongjiaResult | null = pickContextHit(
+        tjCands,
+        idx,
+        seqInfo,
+        tjSpanCache,
+      );
       if (canonTj) {
         annotation.tongjia = {
           original: canonTj.original,
@@ -391,6 +426,7 @@ export function annotate(
           source: canonTj.sources[0],
           sources: canonTj.sources,
           verified: canonTj.verified,
+          context: canonTj.context,
         };
       }
 
