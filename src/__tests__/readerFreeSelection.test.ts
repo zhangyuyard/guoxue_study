@@ -44,12 +44,12 @@ describe('① 选区自由化：浮动层 + 点按扩展（废 ± 步进）', ()
     expect(reader).toMatch(/selectionVisible && selection \? \(/);
   });
 
-  test('存在点按扩展回调：终点之后向右扩 / 起点之前向左扩 / 跨段重开 4 字窗口', () => {
+  test('存在点按扩展回调：终点之后向右扩 / 起点之前向左扩 / 跨段重开 1 字选区', () => {
     expect(reader).toMatch(/const handleSelectionExtendPress = useCallback/);
     expect(reader).toMatch(/if \(index >= prev\.end\) \{/);
     expect(reader).toMatch(/if \(index < prev\.start\) \{/);
     expect(reader).toMatch(/segmentId !== prev\?\.segmentId/);
-    expect(reader).toMatch(/const end = Math\.min\(start \+ 4, chars\.length\);/);
+    expect(reader).toMatch(/const end = Math\.min\(start \+ 1, chars\.length\);/);
   });
 
   test('滚动/翻页两模式均传入点按扩展（仅选区打开时生效，回落划线点击）', () => {
@@ -59,11 +59,11 @@ describe('① 选区自由化：浮动层 + 点按扩展（废 ± 步进）', ()
     expect(reader).toMatch(/onPressIndex\?: \(segmentId: string, index: number\) => void;/);
   });
 
-  test('菜单含「取消」入口（放弃选区），提示语覆盖扩展/收缩/取消/长按重选', () => {
+  test('菜单含「取消」入口（放弃选区），提示语覆盖扩展/收缩/长按重选', () => {
     expect(reader).toMatch(/const closeSelection = useCallback/);
     expect(reader).toMatch(/accessibilityLabel="取消选区"/);
     expect(reader).toMatch(
-      /点按字扩展选区 · 点选区内收缩 · 「取消」放弃选区 · 长按重新选字/,
+      /点按字扩展选区 · 点选区内收缩（可缩至 1 字）· 长按重新选字/,
     );
   });
 });
@@ -234,15 +234,18 @@ describe('④ 活动选区视觉效果（selectionRange 透传链路）', () => 
 });
 
 describe('⑤ 选区撤销与删除划线（体验优化）', () => {
-  test('点选区内部 = 就近收缩（中点判定、至少保留 1 字），原扩展路径不回归', () => {
+  test('点选区内部 = 收缩（端点字移除 + 中点就近收缩，最小保留 1 字），原扩展路径不回归', () => {
     // 收缩分支存在于 handleSelectionExtendPress 的「选区内部」路径
-    expect(reader).toMatch(/点按选区内部 → 就近收缩/);
+    expect(reader).toMatch(/点按选区内部 → 收缩/);
+    // 点选区端点字 = 把该字从选区移除（二字选区由此可缩到单字）
+    expect(reader).toMatch(/if \(index === prev\.start\) \{/);
+    expect(reader).toMatch(/if \(index === prev\.end - 1\) \{/);
     expect(reader).toMatch(/const mid = \(prev\.start \+ prev\.end\) \/ 2;/);
     expect(reader).toMatch(/if \(index <= mid\) \{/);
     expect(reader).toMatch(/const end = index \+ 1;/);
     // 单字选区点该字不收缩（收缩后为空）
     expect(reader).toMatch(/if \(prev\.end - prev\.start > 1\) \{/);
-    // 原有点按扩展路径保留（终点后扩 / 起点前扩 / 跨段重开 4 字窗口）
+    // 原有点按扩展路径保留（终点后扩 / 起点前扩 / 跨段重开 1 字选区）
     expect(reader).toMatch(/if \(index >= prev\.end\) \{/);
     expect(reader).toMatch(/if \(index < prev\.start\) \{/);
     expect(reader).toMatch(/segmentId !== prev\?\.segmentId/);
@@ -283,5 +286,42 @@ describe('⑤ 选区撤销与删除划线（体验优化）', () => {
     expect(reader).toMatch(/handleHighlightPress[\s\S]*?resetDeleteConfirm\(\);/);
     expect(reader).toMatch(/closeNoteEditor = [\s\S]*?resetDeleteConfirm\(\);/);
     expect(reader).toMatch(/clearTimeout\(deleteConfirmTimer\.current\)/);
+  });
+});
+
+describe('⑥ 长按单字初始选区 + 面板「取消划线」入口（体验优化二批）', () => {
+  test('长按正文仅选中长按的单字（初始选区 1 字，不再取 4 字窗口）', () => {
+    // 4 字窗口彻底删除（长按与跨段重开两处均改为 1 字）
+    expect(reader).not.toMatch(/start \+ 4/);
+    expect(reader).toMatch(/仅选中长按的单字并打开浮动菜单/);
+    expect(reader).toMatch(/初始选区 1 字/);
+  });
+
+  test('选区与已有划线重叠时计算重叠集合（同段 + 区间相交，含部分重叠）', () => {
+    expect(reader).toMatch(/const overlappingHighlights = useMemo\(\(\) => \{/);
+    expect(reader).toMatch(/h\.segmentId === selection\.segmentId &&/);
+    expect(reader).toMatch(/h\.startOffset < selection\.end &&/);
+    expect(reader).toMatch(/selection\.start < h\.endOffset,/);
+  });
+
+  test('面板划线行提供「取消划线」入口：两步确认 + removeHighlight 接线', () => {
+    // 入口仅重叠集合非空时渲染于划线行；两步确认文案与警示色同笔记编辑器范式
+    expect(reader).toMatch(/overlappingHighlights\.length > 0 \? \(/);
+    expect(reader).toMatch(/confirmCancelHighlight \? '确认取消划线？' : '取消划线'/);
+    expect(reader).toMatch(/accessibilityLabel=\{\s*\n\s*confirmCancelHighlight \? '确认取消划线' : '取消划线'\s*\n\s*\}/);
+    expect(reader).toMatch(/const handleCancelHighlightPress = useCallback/);
+    expect(reader).toMatch(/cancelHlConfirmTimer\.current = setTimeout\(/);
+    // 确认后删除全部重叠划线并关闭选区
+    expect(reader).toMatch(/overlappingHighlights\.forEach\(\(h\) => removeHighlight\(h\.id\)\)/);
+    expect(reader).toMatch(/resetCancelHighlightConfirm\(\);[\s\S]*?closeSelection\(\);/);
+  });
+
+  test('「取消划线」关联笔记 Alert 二选一（保留笔记走「删旧存新」解绑）', () => {
+    expect(reader).toMatch(/Alert\.alert\('取消划线', '所选划线关联了笔记，如何处理？'/);
+    expect(reader).toMatch(/text: '仅删划线保留笔记'/);
+    expect(reader).toMatch(/text: '同时删除笔记'/);
+    // 待确认态有复位路径：面板关闭/重叠清空复位 + 卸载清理计时器
+    expect(reader).toMatch(/const resetCancelHighlightConfirm = useCallback/);
+    expect(reader).toMatch(/clearTimeout\(cancelHlConfirmTimer\.current\)/);
   });
 });

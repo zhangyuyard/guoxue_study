@@ -5,9 +5,10 @@
  * - 正文：FlatList 逐段渲染（注音模式用 PinyinText，关闭注音用 HighlightText）
  * - 底部：固定进度条（第 N/共 M 章 · X% + 细进度条）
  * 交互流程：
- * - 长按正文 → 以该字为起点创建初始选区，阅读页内浮动菜单（底部停靠，非全屏
+ * - 长按正文 → 仅选中长按的单字（初始选区 1 字），阅读页内浮动菜单（底部停靠，非全屏
  *   Modal，不遮挡正文）弹出；菜单打开时点按正文任意字可扩展选区（终点之后向右
- *   扩、起点之前向左扩），长按其他字重新选字；划线/解析/翻译/笔记作用于当前选区
+ *   扩、起点之前向左扩），点选区内收缩（可缩至 1 字），长按其他字重新选字；
+ *   划线/解析/翻译/笔记作用于当前选区，选区与已有划线重叠时面板提供「取消划线」
  * - 点击已有划线 → 弹出笔记编辑器（新建或编辑关联笔记）
  * - 章节前进：滚动模式为滑动窗口连续拼接（无限前进）；翻页模式翻到章边界自动跨章
  * - 与 useReaderStore 联动：openChapter 保存阅读位置，滚动更新当前段落
@@ -1213,6 +1214,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const [confirmDeleteHighlight, setConfirmDeleteHighlight] = useState(false);
   /** 待确认态自动复位计时器（3 秒未再点恢复普通样式） */
   const deleteConfirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 选词面板「取消划线」两步确认态（与笔记编辑器删除划线同一交互范式） */
+  const [confirmCancelHighlight, setConfirmCancelHighlight] = useState(false);
+  const cancelHlConfirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [tocVisible, setTocVisible] = useState(false);
   /** 当前章节内滚动进度（0~1），用于阅读进度条（滚动模式） */
@@ -2136,8 +2140,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // ---------- 选词 ----------
 
   /**
-   * 长按正文：以该字为起点向后取 4 字窗口作为初始选区并打开浮动菜单。
-   * 已有选区时再次长按 = 废弃当前选区、以新位置重新开始（自由选中语义）。
+   * 长按正文：仅选中长按的单字并打开浮动菜单（初始选区 1 字，
+   * 后续通过点按其它字自由扩展）。已有选区时再次长按 = 废弃当前选区、
+   * 以新位置重新开始（自由选中语义）。
    */
   const handleLongPressIndex = useCallback(
     (segmentId: string, index: number) => {
@@ -2146,7 +2151,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         return;
       }
       const start = clamp(index, 0, chars.length - 1);
-      const end = Math.min(start + 4, chars.length);
+      const end = Math.min(start + 1, chars.length);
       setSelection({ segmentId, start, end, text: chars.slice(start, end).join('') });
       setSelectionVisible(true);
     },
@@ -2157,11 +2162,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    * 点按正文扩展/收缩选区（自由选中，替代旧版 ± 逐字步进按钮）：
    * - 点按位置在当前终点之后 → 终点扩展到该字（含）；
    * - 点按位置在起点之前 → 起点扩展到该字（向左扩展）；
-   * - 点按选区内部 → 就近收缩（选过头的撤销路径）：以选区中点判定归入哪一侧，
-   *   前半段（含起点）→ 起点重设为该字（选区变为 [tapIdx, end)），
-   *   后半段 → 终点重设为该字右边界（选区变为 [start, tapIdx+1)）；
-   *   收缩后至少保留 1 个字（单字选区点该字不变）；
-   * - 点按其它段落 → 单段限制下以新位置重新开一个 4 字初始窗口
+   * - 点按选区内部 → 收缩（可连续收缩至 1 字）：点选区端点字 = 把该字从选区移除；
+   *   点内部字以中点判定就近收缩——前半段（含起点）→ 起点重设为该字
+   *   （选区变为 [tapIdx, end)），后半段 → 终点重设为该字右边界
+   *   （选区变为 [start, tapIdx+1)）；收缩后至少保留 1 个字，
+   *   单字选区点该字不变（放弃选区走「取消」按钮）；
+   * - 点按其它段落 → 单段限制下以新位置重新选 1 字
    *   （与长按新起点行为一致，避免跨段选区破坏 Highlight 存储结构）。
    */
   const handleSelectionExtendPress = useCallback(
@@ -2173,7 +2179,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             return prev;
           }
           const start = clamp(index, 0, chars.length - 1);
-          const end = Math.min(start + 4, chars.length);
+          const end = Math.min(start + 1, chars.length);
           return { segmentId, start, end, text: chars.slice(start, end).join('') };
         }
         const chars = segmentCharsMap.get(prev.segmentId);
@@ -2188,9 +2194,18 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           const start = clamp(index, 0, prev.end - 1);
           return { ...prev, start, text: chars.slice(start, prev.end).join('') };
         }
-        // 点按选区内部：就近收缩。中点判定归入起点侧/终点侧，
+        // 点按选区内部 → 就近收缩（可连续收缩至 1 字）：
+        // 点端点字 = 把该字从选区移除（二字选区由此可缩到单字）；
+        // 点内部字以中点判定归入起点侧/终点侧，
         // 边界保持 start < end（tap 在终点字上时 end 收到 tapIdx+1 = 原 end，不越界）
         if (prev.end - prev.start > 1) {
+          if (index === prev.start) {
+            const start = index + 1;
+            return { ...prev, start, text: chars.slice(start, prev.end).join('') };
+          }
+          if (index === prev.end - 1) {
+            return { ...prev, end: index, text: chars.slice(prev.start, index).join('') };
+          }
           const mid = (prev.start + prev.end) / 2;
           if (index <= mid) {
             const start = index;
@@ -2242,6 +2257,113 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     },
     [selection, bookId, chapterId, segmentChapterMap, addHighlight],
   );
+
+  /**
+   * 与当前选区重叠的已有划线（同段且区间相交，含部分重叠）。
+   * 选词面板据此显示「取消划线」入口——选中带划线的字/节时可直接撤销划线。
+   */
+  const overlappingHighlights = useMemo(() => {
+    if (!selection) {
+      return [];
+    }
+    return highlights.filter(
+      (h) =>
+        h.segmentId === selection.segmentId &&
+        h.startOffset < selection.end &&
+        selection.start < h.endOffset,
+    );
+  }, [highlights, selection]);
+
+  /** 「取消划线」两步确认态复位（关闭选区/选区变化时由 effect 调用） */
+  const resetCancelHighlightConfirm = useCallback(() => {
+    if (cancelHlConfirmTimer.current) {
+      clearTimeout(cancelHlConfirmTimer.current);
+      cancelHlConfirmTimer.current = null;
+    }
+    setConfirmCancelHighlight(false);
+  }, []);
+
+  // 选区面板关闭或重叠划线清空时复位「取消划线」待确认态
+  useEffect(() => {
+    if (!selectionVisible || overlappingHighlights.length === 0) {
+      resetCancelHighlightConfirm();
+    }
+  }, [selectionVisible, overlappingHighlights.length, resetCancelHighlightConfirm]);
+
+  // 卸载时清理「取消划线」待确认态计时器，避免卸载后 setState
+  useEffect(() => {
+    return () => {
+      if (cancelHlConfirmTimer.current) {
+        clearTimeout(cancelHlConfirmTimer.current);
+      }
+    };
+  }, []);
+
+  /**
+   * 面板「取消划线」：两步确认（首点进入警示色待确认态，3 秒未再点自动复位）。
+   * 确认后删除与当前选区重叠的全部划线并关闭选区；任一划线关联了笔记时
+   * Alert 二选一——同时删除笔记 / 仅删划线保留笔记（「删旧存新」解绑关联）。
+   */
+  const handleCancelHighlightPress = useCallback(() => {
+    if (overlappingHighlights.length === 0) {
+      return;
+    }
+    if (!confirmCancelHighlight) {
+      setConfirmCancelHighlight(true);
+      if (cancelHlConfirmTimer.current) {
+        clearTimeout(cancelHlConfirmTimer.current);
+      }
+      cancelHlConfirmTimer.current = setTimeout(() => {
+        cancelHlConfirmTimer.current = null;
+        setConfirmCancelHighlight(false);
+      }, 3000);
+      return;
+    }
+    resetCancelHighlightConfirm();
+    const linkedNotes = overlappingHighlights.flatMap((h) =>
+      notes.filter((n) => n.highlightId === h.id),
+    );
+    overlappingHighlights.forEach((h) => removeHighlight(h.id));
+    if (linkedNotes.length > 0) {
+      Alert.alert('取消划线', '所选划线关联了笔记，如何处理？', [
+        {
+          text: '仅删划线保留笔记',
+          onPress: () => {
+            linkedNotes.forEach((linkedNote) => {
+              const note = addNote({
+                bookId: linkedNote.bookId,
+                chapterId: linkedNote.chapterId,
+                segmentId: linkedNote.segmentId,
+                startOffset: linkedNote.startOffset,
+                endOffset: linkedNote.endOffset,
+                content: linkedNote.content,
+              });
+              if (note) {
+                removeNote(linkedNote.id);
+              }
+            });
+          },
+        },
+        {
+          text: '同时删除笔记',
+          style: 'destructive',
+          onPress: () => {
+            linkedNotes.forEach((linkedNote) => removeNote(linkedNote.id));
+          },
+        },
+      ]);
+    }
+    closeSelection();
+  }, [
+    overlappingHighlights,
+    confirmCancelHighlight,
+    notes,
+    removeHighlight,
+    addNote,
+    removeNote,
+    resetCancelHighlightConfirm,
+    closeSelection,
+  ]);
 
   // ---------- 笔记 ----------
 
@@ -2924,14 +3046,15 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                 </Text>
               </ScrollView>
               <Text style={[styles.selectionHint, { color: colors.pinyin }]}>
-                点按字扩展选区 · 点选区内收缩 · 「取消」放弃选区 · 长按重新选字
+                点按字扩展选区 · 点选区内收缩（可缩至 1 字）· 长按重新选字
               </Text>
 
               {/* 第二段 · hairline 分隔线：内容区与固定操作栏之间 */}
               <View style={[styles.selectionDivider, { backgroundColor: colors.border }]} />
 
               {/* 第三段 · 固定操作栏（不参与滚动、任何屏宽均完整显示）：
-                  第一行「划线」= 左标签 + 三色圆点；第二行 = 4 个 flex:1 等宽按钮。
+                  第一行「划线」= 左标签 + 取消划线入口（选区与已有划线重叠时显示，
+                  两步确认防误删）+ 三色圆点；第二行 = 4 个 flex:1 等宽按钮。
                   按钮作用于当前选区，实时跟随点按扩展更新 */}
               <View style={styles.selectionHighlightRow}>
                 <Text
@@ -2939,6 +3062,32 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                 >
                   划线
                 </Text>
+                {overlappingHighlights.length > 0 ? (
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.cancelHighlightButton,
+                      pressed && styles.pressed,
+                    ]}
+                    onPress={handleCancelHighlightPress}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      confirmCancelHighlight ? '确认取消划线' : '取消划线'
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.selectionHighlightLabel,
+                        {
+                          color: confirmCancelHighlight
+                            ? DELETE_DANGER_COLOR
+                            : colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      {confirmCancelHighlight ? '确认取消划线？' : '取消划线'}
+                    </Text>
+                  </Pressable>
+                ) : null}
                 <View style={styles.selectionHighlightDots}>
                   {(['yellow', 'green', 'blue'] as HighlightColor[]).map((color) => (
                     <Pressable
@@ -3638,6 +3787,12 @@ const styles = StyleSheet.create({
   },
   selectionHighlightLabel: {
     fontSize: 13,
+  },
+  // 「取消划线」入口（划线行中部，仅选区与已有划线重叠时显示）：
+  // 扩大触达面积的 padding，确认态文案由调用处以警示色渲染
+  cancelHighlightButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
   },
   selectionHighlightDots: {
     flexDirection: 'row',
