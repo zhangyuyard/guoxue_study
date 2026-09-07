@@ -219,7 +219,13 @@ describe('PinyinService × canon 仲裁（缺陷一/二根治）', () => {
     const provider: CanonProvider = {
       getTongjia: (workId, _bookId, char) =>
         char === '说'
-          ? { original: '悦', note: '同“悦”，喜悦', sources: ['北师大通假字资源库'], verified: true }
+          ? {
+              original: '悦',
+              note: '同“悦”，喜悦',
+              sources: ['北师大通假字资源库'],
+              verified: true,
+              context: '不亦说乎',
+            }
           : null,
       getReading: () => null,
     };
@@ -236,7 +242,14 @@ describe('PinyinService × canon 仲裁（缺陷一/二根治）', () => {
     const provider: CanonProvider = {
       getTongjia: () => null,
       getReading: (workId, _bookId, char) =>
-        char === '说' ? { reading: 'shuì', sources: ['chinese-poetry 开源诗词库'], verified: true } : null,
+        char === '说'
+          ? {
+              reading: 'shuì',
+              sources: ['chinese-poetry 开源诗词库'],
+              verified: true,
+              context: '不亦说乎',
+            }
+          : null,
     };
     setCanonProvider(provider);
     // 「说」在「说乎」语境下内置规则库判为 yuè，但 canon 语境读音应胜出
@@ -252,12 +265,16 @@ describe('PinyinService × canon 仲裁（缺陷一/二根治）', () => {
     // 用户字典高于 canon 已由 ReadingProvider 逻辑保证（外部 provider 先判定）。
     const provider: CanonProvider = {
       getTongjia: () => null,
-      getReading: (_w, _b, c) => (c === '重' ? { reading: 'chóng', sources: ['s'], verified: true } : null),
+      getReading: (_w, _b, c) =>
+        c === '重'
+          ? { reading: 'chóng', sources: ['s'], verified: true, context: '德高望重' }
+          : null,
     };
     setCanonProvider(provider);
-    const res = annotate('重', 'full', { workId: 'poem-1' });
-    expect(res.data![0].pinyin).toBe('chóng');
-    expect(res.data![0].readingVerified).toBe(true);
+    const res = annotate('德高望重', 'full', { workId: 'poem-1' });
+    const zhong = res.data!.find((a) => a.char === '重')!;
+    expect(zhong.pinyin).toBe('chóng');
+    expect(zhong.readingVerified).toBe(true);
   });
 });
 
@@ -336,7 +353,9 @@ describe('PinyinService × canon v3 用例级语境锚定', () => {
     expect(shuo.readingVerified).toBe(false);
   });
 
-  test('候选行无 context（诗词粒度/无引文种子）：维持旧行为直接命中', () => {
+  test('候选行无 context（人工种子/引文缺失）：不标注（v3.1 宁缺毋滥）', () => {
+    // 「其→箕」「虚→墟」教训：无例句的字级人工断言无用例支撑，
+    // 会让全书每个出现位置都被误标 → 无 context 行一律跳过
     const provider: CanonProvider = {
       getTongjiaCandidates: (_w, _b, char) =>
         char === '反' ? [{ original: '返', sources: ['人工标注'], verified: false }] : [],
@@ -346,8 +365,7 @@ describe('PinyinService × canon v3 用例级语境锚定', () => {
     setCanonProvider(provider);
     const res = annotate('往而不反也', 'full', { workId: 'mengzi', bookId: 'mengzi' });
     const fan = res.data!.find((a) => a.char === '反')!;
-    expect(fan.tongjia).toBeDefined();
-    expect(fan.tongjia!.original).toBe('返');
+    expect(fan.tongjia).toBeUndefined();
   });
 
   test('繁体正文：例句匹配在归一化后进行（說→说），命中不受显示字形影响', () => {

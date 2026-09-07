@@ -77,7 +77,7 @@ const GUJIN_SEED = resolve(ROOT, 'scripts/canon-seed-gujin.json');
 const SRC_GUJIN = '人工标注·据训诂常识（古今字），建议校对';
 
 /** ★ 与 src/services/CanonService.ts 的 CANON_DICT_VERSION 互指（修改须同步 +1） */
-const CANON_DICT_VERSION = 3;
+const CANON_DICT_VERSION = 4;
 
 /** 数据源署名常量（与架构 §4.1 一致） */
 const SRC_BNU = '北师大通假字资源库';

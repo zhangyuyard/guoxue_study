@@ -23,8 +23,8 @@ type DB = ReturnType<typeof open>;
 
 /** canon 库文件名（assets 与用户目录中同名） */
 export const CANON_DB_FILE = 'canon_dict.db';
-/** canon 库版本（随数据更新 +1；与构建脚本互指；v3：两表增加 context 语料例句列，通假判定升级为用例级语境锚定） */
-export const CANON_DICT_VERSION = 3;
+/** canon 库版本（随数据更新 +1；与构建脚本互指；v3：两表增加 context 语料例句列，通假判定升级为用例级语境锚定；v4：无例句行不再放行，删除「其→箕」「虚→墟」误导弹性条目） */
+export const CANON_DICT_VERSION = 4;
 /** quick-sqlite 库目录（与 DictDatabase.DICT_DB_LOCATION 一致） */
 export const CANON_DB_LOCATION = 'dictionaries';
 /** assets 内字典目录 */

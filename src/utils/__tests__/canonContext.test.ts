@@ -53,9 +53,17 @@ describe('findContextSpan 例句跨度定位', () => {
 describe('pickContextHit 候选选择', () => {
   const seq = buildHanSequence('子曰：学而时习之，不亦说乎！');
 
-  test('候选行无 context：直接命中（诗词粒度/无引文种子旧行为）', () => {
-    const hit = pickContextHit([{ original: '悦' }], 9, seq, new Map());
-    expect(hit).not.toBeNull();
+  test('候选行无 context：跳过（无用例级证据，宁缺毋滥）——v3.1 行为', () => {
+    // 「其→箕」人工种子教训：无例句的字级断言会让全书每个高频虚词都被误标
+    expect(pickContextHit([{ original: '悦' }], 9, seq, new Map())).toBeNull();
+  });
+
+  test('无 context 高优先行被跳过后，带 context 的低优先行仍可命中', () => {
+    const noCtxRow = { original: '墟', tier: 'book' };
+    const ctxRow = { original: '悦', context: '学而时习之，不亦说乎', tier: 'chapter' };
+    // 「说」在码点 11：无例句行跳过 → 例句行命中
+    const hit = pickContextHit([noCtxRow, ctxRow], 11, seq, new Map());
+    expect(hit).toBe(ctxRow);
   });
 
   test('有 context 且字符在跨度内：命中该行', () => {

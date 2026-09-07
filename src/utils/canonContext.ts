@@ -11,8 +11,10 @@
  * 去除一切非汉字字符（标点/空白全角半角差异免疫）。
  *
  * 例句对不上正文（版本异文）或长度不足时判为不命中（宁缺毋滥）；
- * context 缺失的行（诗词粒度读音/人工种子无引文）按旧行为放行——
- * 这类行的粒度本身已足够（诗级）或已做书级过滤（古今字种子）。
+ * context 缺失的行（人工种子/引文提取失败）同样跳过——v3.1 教训：
+ * 古今字人工种子按「书内出现该字」展开，字级断言无用例支撑，「其→箕」
+ * 这类条目会让全书每个高频虚词都被误标；读音同理（朱熹「说→yuè」
+ * 无引文行会让「成事不说」误读）。无例句 = 无证据 = 不标注。
  */
 import { toSimplified } from '@/utils/conversion';
 
@@ -101,10 +103,10 @@ export interface ContextBearingCandidate {
 
 /**
  * 从候选行中选出当前字符位置的命中行（候选已按层级优先排序）：
- * - 行无 context → 视为「无语境证据」，维持旧行为直接命中（粒度已足够）；
+ * - 行无 context → 跳过（无例句 = 无用例级证据，不标注/读音回退仲裁链）；
  * - 行有 context → 例句在段落中定位成功且字符落点在跨度内才命中；
  * - 例句未命中 → 继续看下一候选（更宽层级 / 其它用例行）；
- * - 全部未命中 → 返回 null（宁缺毋滥：不标注/读音回退仲裁链）。
+ * - 全部未命中 → 返回 null（宁缺毋滥）。
  *
  * @param charIdx 字符在原始文本中的码点下标
  * @param spanCache 例句 → 跨度 的段落内缓存（同一例句只定位一次）
@@ -118,7 +120,7 @@ export function pickContextHit<T extends ContextBearingCandidate>(
   for (const cand of candidates) {
     const context = cand.context;
     if (!context) {
-      return cand;
+      continue;
     }
     let span = spanCache.get(context);
     if (span === undefined) {

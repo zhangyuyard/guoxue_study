@@ -366,8 +366,8 @@ export function annotate(
         py = extReading;
         readingVerified = true;
       } else {
-        // canon 语境读音（v3：候选行经用例级语境锚定后采用；
-        // 旧 provider 只实现单行 getReading 时回退旧行为——无语境校验）
+        // canon 语境读音（v3.1：候选行经用例级语境锚定后采用；无 context 行
+        // 一律跳过——无例句即无用例级证据，回退仲裁链下一层）
         const rdCands = canonProvider
           ? canonProvider.getReadingCandidates
             ? canonProvider.getReadingCandidates(workId, bookId, logic)
@@ -405,7 +405,8 @@ export function annotate(
         readingSources,
         readingVerified,
       };
-      // canon 通假候选（v3：多候选含各自 context；旧 provider 回退单行旧行为）
+      // canon 通假候选（v3.1：多候选含各自 context；无 context 行跳过不标注，
+      // 根治「其→箕」「虚→墟」类无例句字级断言的全书误标）
       const tjCands = canonProvider
         ? canonProvider.getTongjiaCandidates
           ? canonProvider.getTongjiaCandidates(workId, bookId, logic)
