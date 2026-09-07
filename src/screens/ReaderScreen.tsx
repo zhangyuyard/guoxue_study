@@ -468,6 +468,8 @@ interface PageModeViewProps {
   fontSize: number;
   lineHeight: number;
   pinyinMode: PinyinMode;
+  /** 当前繁简显示模式：纳入 measureKey（繁简转换改变文本 → 分页可能变化，需重量测 + 重定位） */
+  displayMode: 'simplified' | 'traditional';
   highlightsBySegment: Map<string, Highlight[]>;
   onHighlightPress: (h: Highlight) => void;
   onLongPressIndex: (segmentId: string, index: number) => void;
@@ -494,6 +496,7 @@ function PageModeView({
   fontSize,
   lineHeight,
   pinyinMode,
+  displayMode,
   highlightsBySegment,
   onHighlightPress,
   onLongPressIndex,
@@ -541,9 +544,10 @@ function PageModeView({
   // 影响「段高测量」的因素：仅排版相关（与 pageHeight 无关，段高只取决于宽度与字号/行距）。
   // 刻意不含 pageHeight：pageHeight 只应随旋转等容器尺寸变化而变化，若纳入则会触发
   // 整段重测（清空 segHeights → 首屏闪白/空白）。pageHeight 变化只重建分页，不清测量。
-  // 注意：measureKey 含 pinyinMode（注音开关注音行高变化必然重排），重置测量前先
-  // 捕获当前页所在段，量测收敛后由定位 effect 回到该段所在页（防注音切换后章节跳动）。
-  const measureKey = `${chapterTitle}|${pinyinMode}|${fontSize}|${lineHeight}|${Math.round(
+  // 注意：measureKey 含 pinyinMode（注音开关注音行高变化必然重排）与 displayMode
+  // （繁简转换改变文本、行宽随之变化，分页可能变化），两者变化前重置测量时都先
+  // 捕获当前页所在段，量测收敛后由定位 effect 回到该段所在页（防切换后章节跳动）。
+  const measureKey = `${chapterTitle}|${pinyinMode}|${fontSize}|${lineHeight}|${displayMode}|${Math.round(
     pageWidth,
   )}`;
   useEffect(() => {
@@ -2298,6 +2302,45 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     setPinyinMode(next);
   }, [pinyinMode, setPinyinMode, captureViewportAnchor]);
 
+  /**
+   * 字号步进（阅读设置弹窗 A− / A＋，范围 14–30）：
+   * 与注音切换同款防跳动——滚动模式在 setState 生效前捕获视口锚点，
+   * 字号变化使全部行高重排，不补偿则视口内容直接跳变成其它段落。
+   * 连续快速点击时锚点按当时布局被覆盖重捕，最后一次捕获生效（可接受）；
+   * 目标行若因布局变化未触发 onLayout，由 handleRowLayout 的超时放弃兜底。
+   */
+  const handleStepFontSize = useCallback(
+    (dir: 1 | -1) => {
+      captureViewportAnchor();
+      setFontSize(dir > 0 ? Math.min(30, fontSize + 2) : Math.max(14, fontSize - 2));
+    },
+    [fontSize, setFontSize, captureViewportAnchor],
+  );
+
+  /** 行距选择（阅读设置弹窗紧凑/标准/宽松）：同款锚点防跳动 */
+  const handleSelectLineHeight = useCallback(
+    (lh: number) => {
+      captureViewportAnchor();
+      setLineHeight(lh);
+    },
+    [setLineHeight, captureViewportAnchor],
+  );
+
+  /** 繁简切换（阅读设置弹窗简体/繁體）：同款锚点防跳动 */
+  const handleSelectConversionMode = useCallback(
+    (mode: 'simplified' | 'traditional') => {
+      captureViewportAnchor();
+      setConversionMode(mode);
+    },
+    [setConversionMode, captureViewportAnchor],
+  );
+
+  /** 繁简切换（右上角「简/繁」按钮一键切换）：同款锚点防跳动 */
+  const handleToggleConversionMode = useCallback(() => {
+    captureViewportAnchor();
+    setConversionMode(conversionMode === 'traditional' ? 'simplified' : 'traditional');
+  }, [conversionMode, setConversionMode, captureViewportAnchor]);
+
   // ---------- 渲染 ----------
 
   /** 渲染一行：段落行走 SegmentItem（承载划线 / 长按选词 / 注音），标题行走章标题 */
@@ -2393,9 +2436,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         </Pressable>
         {/* 一键繁简切换：点击在当前书籍简/繁显示间切换 */}
         <Pressable
-          onPress={() =>
-            setConversionMode(conversionMode === 'traditional' ? 'simplified' : 'traditional')
-          }
+          onPress={handleToggleConversionMode}
           hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel={`切换繁简显示（当前：${conversionMode === 'traditional' ? '繁體' : '简体'}）`}
@@ -2489,6 +2530,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             fontSize={fontSize}
             lineHeight={lineHeight}
             pinyinMode={pinyinMode}
+            displayMode={conversionMode}
             highlightsBySegment={highlightsBySegment}
             onHighlightPress={handleHighlightPress}
             onLongPressIndex={handleLongPressIndex}
@@ -2871,7 +2913,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             <View style={styles.sizeRow}>
               <Pressable
                 style={[styles.sizeButton, { borderColor: colors.border }]}
-                onPress={() => setFontSize(Math.max(14, fontSize - 2))}
+                onPress={() => handleStepFontSize(-1)}
                 disabled={fontSize <= 14}
                 accessibilityRole="button"
                 accessibilityLabel="减小字号"
@@ -2881,7 +2923,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
               <Text style={[styles.sizeValue, { color: colors.textSecondary }]}>{fontSize}</Text>
               <Pressable
                 style={[styles.sizeButton, { borderColor: colors.border }]}
-                onPress={() => setFontSize(Math.min(30, fontSize + 2))}
+                onPress={() => handleStepFontSize(1)}
                 disabled={fontSize >= 30}
                 accessibilityRole="button"
                 accessibilityLabel="增大字号"
@@ -2950,7 +2992,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                   label={lh === 1.4 ? '紧凑' : lh === 1.6 ? '标准' : '宽松'}
                   active={lineHeight === lh}
                   colors={colors}
-                  onPress={() => setLineHeight(lh)}
+                  onPress={() => handleSelectLineHeight(lh)}
                 />
               ))}
             </View>
@@ -2964,7 +3006,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                   label={mode === 'simplified' ? '简体' : '繁體'}
                   active={conversionMode === mode}
                   colors={colors}
-                  onPress={() => setConversionMode(mode)}
+                  onPress={() => handleSelectConversionMode(mode)}
                 />
               ))}
             </View>

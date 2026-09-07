@@ -261,3 +261,60 @@ describe('注音切换不跳章回归（Bug：切「音」后章节跳动）', (
     expect(source).toMatch(/relocateSegIdRef\.current = null;/);
   });
 });
+
+describe('字号/行距/繁简切换不跳章回归（视口锚定与注音切换同路径）', () => {
+  test('滚动模式：字号步进 handler 在 setFontSize 前捕获视口锚点（范围 14–30）', () => {
+    expect(source).toMatch(
+      /const handleStepFontSize = useCallback\(\s*\n\s*\(dir: 1 \| -1\) => \{\s*\n\s*captureViewportAnchor\(\);/,
+    );
+    expect(source).toMatch(
+      /setFontSize\(dir > 0 \? Math\.min\(30, fontSize \+ 2\) : Math\.max\(14, fontSize - 2\)\);/,
+    );
+    // 弹窗按钮接入 handler，不允许散写裸 setFontSize（会绕过锚点捕获）
+    expect(source).toMatch(/onPress=\{\(\) => handleStepFontSize\(-1\)\}/);
+    expect(source).toMatch(/onPress=\{\(\) => handleStepFontSize\(1\)\}/);
+    expect(source).not.toMatch(/onPress=\{\(\) => setFontSize\(/);
+  });
+
+  test('滚动模式：行距选择 handler 在 setLineHeight 前捕获视口锚点', () => {
+    expect(source).toMatch(
+      /const handleSelectLineHeight = useCallback\(\s*\n\s*\(lh: number\) => \{\s*\n\s*captureViewportAnchor\(\);/,
+    );
+    expect(source).toMatch(/onPress=\{\(\) => handleSelectLineHeight\(lh\)\}/);
+    expect(source).not.toMatch(/onPress=\{\(\) => setLineHeight\(/);
+  });
+
+  test('滚动模式：繁简切换（设置弹窗 + 右上角按钮）在 setConversionMode 前捕获视口锚点', () => {
+    expect(source).toMatch(
+      /const handleSelectConversionMode = useCallback\(\s*\n\s*\(mode: 'simplified' \| 'traditional'\) => \{\s*\n\s*captureViewportAnchor\(\);/,
+    );
+    expect(source).toMatch(/const handleToggleConversionMode = useCallback\(\(\) => \{\s*\n\s*captureViewportAnchor\(\);/);
+    expect(source).toMatch(/onPress=\{handleToggleConversionMode\}/);
+    expect(source).toMatch(/onPress=\{\(\) => handleSelectConversionMode\(mode\)\}/);
+    // 不允许散写裸 setConversionMode 调用（会绕过锚点捕获）
+    expect(source).not.toMatch(/onPress=\{\(\) =>\s*\n\s*setConversionMode\(/);
+  });
+
+  test('锚点捕获与消费逻辑不回归（与注音切换共用同一条重排路径）', () => {
+    // 捕获：仅滚动模式生效（翻页模式走 relocateSegIdRef，不走视口锚点）
+    expect(source).toMatch(
+      /const captureViewportAnchor = useCallback\(\(\) => \{\s*\n\s*if \(readerMode !== 'scroll'\) \{\s*\n\s*return;\s*\n\s*\}/,
+    );
+    // 消费：目标行重排后按「新 y + 深度」落位，超时放弃（rowId 不存在即不拽人）
+    expect(source).toMatch(/const viewportAnchor = layoutAnchor\.current;/);
+    expect(source).toMatch(/Date\.now\(\) - viewportAnchor\.createdAt > LOCATE_TIMEOUT_MS/);
+  });
+
+  test('翻页模式：繁简切换纳入 measureKey（重量测 + relocateSegIdRef 重定位覆盖）', () => {
+    // measureKey 含 displayMode：繁简转换改变文本 → 分页可能变化，
+    // 重量测前由重置 effect 捕获当前页首段（relocateSegIdRef）防跳动。
+    // 段落 id 不随繁简转换变化（toDisplaySegment 仅换文本不改 id），重定位目标稳定。
+    expect(source).toMatch(
+      /const measureKey = `\$\{chapterTitle\}\|\$\{pinyinMode\}\|\$\{fontSize\}\|\$\{lineHeight\}\|\$\{displayMode\}\|\$\{Math\.round/,
+    );
+    expect(source).toMatch(/displayMode=\{conversionMode\}/);
+    expect(source).toMatch(
+      /relocateSegIdRef\.current = firstSeg \? blockSegId\(firstSeg\.id\) : null;/,
+    );
+  });
+});
