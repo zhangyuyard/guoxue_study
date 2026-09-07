@@ -355,6 +355,20 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
+      "standard": "搉",
+      "variants": [
+        "㩁"
+      ],
+      "note": "Unihan kZVariant 互为异体字"
+    },
+    {
+      "standard": "曶",
+      "variants": [
+        "㫚"
+      ],
+      "note": "Unihan kZVariant 互为异体字"
+    },
+    {
       "standard": "溯",
       "variants": [
         "㴑"
@@ -432,6 +446,13 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
+      "standard": "僊",
+      "variants": [
+        "仙"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
       "standard": "千",
       "variants": [
         "仟"
@@ -446,6 +467,13 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
+      "standard": "胄",
+      "variants": [
+        "伷"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
       "standard": "占",
       "variants": [
         "佔"
@@ -456,6 +484,20 @@
       "standard": "耒",
       "variants": [
         "來"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "值",
+      "variants": [
+        "値"
+      ],
+      "note": "Unihan kZVariant 互为异体字"
+    },
+    {
+      "standard": "隈",
+      "variants": [
+        "偎"
       ],
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
@@ -502,6 +544,13 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
+      "standard": "剌",
+      "variants": [
+        "巤"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
       "standard": "劳",
       "variants": [
         "勞"
@@ -519,6 +568,27 @@
       "standard": "卓",
       "variants": [
         "棹"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "卯",
+      "variants": [
+        "夘"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "某",
+      "variants": [
+        "厶"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "双",
+      "variants": [
+        "雙"
       ],
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
@@ -572,6 +642,13 @@
       "note": "Unihan kZVariant 互为异体字"
     },
     {
+      "standard": "阨",
+      "variants": [
+        "呃"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
       "standard": "呴",
       "variants": [
         "詬"
@@ -586,9 +663,44 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
+      "standard": "咳",
+      "variants": [
+        "欬"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "苛",
+      "variants": [
+        "哼"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "唉",
+      "variants": [
+        "欸"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "唾",
+      "variants": [
+        "涶"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
       "standard": "阿",
       "variants": [
         "啊"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "餧",
+      "variants": [
+        "喂"
       ],
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
@@ -638,6 +750,13 @@
       "standard": "基",
       "variants": [
         "抍"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "堵",
+      "variants": [
+        "鍺"
       ],
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
@@ -705,6 +824,13 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
+      "standard": "尉",
+      "variants": [
+        "熨"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
       "standard": "溺",
       "variants": [
         "尿"
@@ -719,9 +845,16 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
-      "standard": "彊",
+      "standard": "弄",
       "variants": [
-        "強"
+        "瘧"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "强",
+      "variants": [
+        "彊"
       ],
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
@@ -759,6 +892,13 @@
         "悅"
       ],
       "note": "Unihan kZVariant 互为异体字"
+    },
+    {
+      "standard": "醒",
+      "variants": [
+        "惺"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
       "standard": "愈",
@@ -817,9 +957,16 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
-      "standard": "翼",
+      "standard": "折",
       "variants": [
-        "折"
+        "翼"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "担",
+      "variants": [
+        "擔"
       ],
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
@@ -838,9 +985,23 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
+      "standard": "按",
+      "variants": [
+        "搵"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
       "standard": "掇",
       "variants": [
         "挽"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "捉",
+      "variants": [
+        "杓"
       ],
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
@@ -852,9 +1013,9 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
-      "standard": "櫂",
+      "standard": "掉",
       "variants": [
-        "掉"
+        "櫂"
       ],
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
@@ -915,11 +1076,25 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
+      "standard": "梲",
+      "variants": [
+        "棁"
+      ],
+      "note": "Unihan kZVariant 互为异体字"
+    },
+    {
       "standard": "樧",
       "variants": [
         "榝"
       ],
       "note": "Unihan kZVariant 互为异体字"
+    },
+    {
+      "standard": "酢",
+      "variants": [
+        "榨"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
       "standard": "莩",
@@ -992,13 +1167,6 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
-      "standard": "踦",
-      "variants": [
-        "犄"
-      ],
-      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
-    },
-    {
       "standard": "画",
       "variants": [
         "畫"
@@ -1062,6 +1230,27 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
+      "standard": "纂",
+      "variants": [
+        "臇"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "羶",
+      "variants": [
+        "膻"
+      ],
+      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
+    },
+    {
+      "standard": "胼",
+      "variants": [
+        "腁"
+      ],
+      "note": "Unihan kZVariant 互为异体字"
+    },
+    {
       "standard": "脱",
       "variants": [
         "脫"
@@ -1076,200 +1265,11 @@
       "note": "Unihan kSpecializedSemanticVariant 语境异体字"
     },
     {
-      "standard": "螂",
+      "standard": "蜕",
       "variants": [
-        "蜋"
-      ],
-      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
-    },
-    {
-      "standard": "蝶",
-      "variants": [
-        "蜨"
-      ],
-      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
-    },
-    {
-      "standard": "衣",
-      "variants": [
-        "衤"
-      ],
-      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
-    },
-    {
-      "standard": "解",
-      "variants": [
-        "觧"
-      ],
-      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
-    },
-    {
-      "standard": "豜",
-      "variants": [
-        "豣"
+        "蛻"
       ],
       "note": "Unihan kZVariant 互为异体字"
-    },
-    {
-      "standard": "蹶",
-      "variants": [
-        "蹷"
-      ],
-      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
-    },
-    {
-      "standard": "远",
-      "variants": [
-        "遠"
-      ],
-      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
-    },
-    {
-      "standard": "迨",
-      "variants": [
-        "逮"
-      ],
-      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
-    },
-    {
-      "standard": "门",
-      "variants": [
-        "門"
-      ],
-      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
-    },
-    {
-      "standard": "难",
-      "variants": [
-        "難"
-      ],
-      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
-    },
-    {
-      "standard": "雕",
-      "variants": [
-        "鵰"
-      ],
-      "note": "Unihan kSpecializedSemanticVariant 语境异体字"
-    },
-    {
-      "standard": "黑",
-      "variants": [
-        "黒"
-      ],
-      "note": "Unihan kZVariant 互为异体字"
-    },
-    {
-      "standard": "憍",
-      "variants": [
-        "㤭"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "䇲",
-      "variants": [
-        "筴"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "絅",
-      "variants": [
-        "䌹"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "䜣",
-      "variants": [
-        "訢"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "䲡",
-      "variants": [
-        "鰌"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "万",
-      "variants": [
-        "萬"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "与",
-      "variants": [
-        "與"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "丑",
-      "variants": [
-        "醜"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "专",
-      "variants": [
-        "專"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "业",
-      "variants": [
-        "業"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "丛",
-      "variants": [
-        "叢"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "东",
-      "variants": [
-        "東"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "丝",
-      "variants": [
-        "絲"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "两",
-      "variants": [
-        "兩"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "严",
-      "variants": [
-        "嚴"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
-    },
-    {
-      "standard": "并",
-      "variants": [
-        "並"
-      ],
-      "note": "Unihan kTraditionalVariant 繁体异形（建议校对）"
     }
   ]
 }

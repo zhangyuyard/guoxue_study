@@ -1,9 +1,11 @@
 /**
  * 文本库管理服务（TextLibraryService）
  * 负责加载与查询内置经典文本与用户导入书籍。
- * 内置数据源：src/data/texts/ 下各 JSON（daodejing、lunyu、daxue、zhongyong、
- * mengzi、zhuangzi、shijing、xunzi、chuci、tangshi 十部 + zhouyi、zuozhuan、
- * shiji、tongjian、mozi、wenxuan 六部扩充，共 16 部）。
+ * 内置数据源：src/data/texts/ 下各 JSON（16 部）。
+ * 2026-09 全本化：周易（64 卦全本）、左传、史记、墨子、庄子（33 篇全本）、
+ * 荀子已升级为全本；论语/诗经/楚辞/孟子为选本（全本体量超 4MB 预算，见
+ * scripts/build-fulltext-books.mjs 的预算逻辑），资治通鉴/文选为选篇、
+ * 唐诗三百首为选集，标题保留「（选）」。
  * 用户书籍：由 UserBookService 启动时经 registerUserBooks 注册进来。
  * App 启动时全量加载并缓存，离线可用。
  */

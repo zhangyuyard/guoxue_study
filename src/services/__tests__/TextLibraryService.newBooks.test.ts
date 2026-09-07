@@ -4,6 +4,9 @@
  * - 每部书章数与声明一致、每章 ≥1 段、每段非空
  * - 无残留 HTML 标签 / 抓取杂项 / ASCII 异常字符 / 扩展区生僻字
  * - 总字数落在合理区间；经 TextLibraryService 端到端可加载
+ * 2026-09 全本化：庄子 7 章选本 → 33 篇全本、荀子 4 章选本 → 32 篇全本
+ * （章节 id 改用「书id-序号」；孟子/诗经/楚辞因 4MB 体积预算保留选本，见
+ * scripts/build-fulltext-books.mjs）
  */
 import { TextLibraryService } from '@/services/TextLibraryService';
 import type { Book } from '@/types';
@@ -14,12 +17,12 @@ import shijingData from '@/data/texts/shijing.json';
 import xunziData from '@/data/texts/xunzi.json';
 import chuciData from '@/data/texts/chuci.json';
 
-/** 新书清单（id → 期望章数） */
+/** 新书清单（id → 期望章数与总字数区间） */
 const NEW_BOOKS: Array<{ id: string; expectedChapters: number; charRange: [number, number] }> = [
   { id: 'mengzi', expectedChapters: 5, charRange: [10000, 20000] },
-  { id: 'zhuangzi', expectedChapters: 7, charRange: [10000, 18000] },
+  { id: 'zhuangzi', expectedChapters: 33, charRange: [70000, 90000] },
   { id: 'shijing', expectedChapters: 30, charRange: [3000, 6000] },
-  { id: 'xunzi', expectedChapters: 4, charRange: [6000, 11000] },
+  { id: 'xunzi', expectedChapters: 32, charRange: [80000, 100000] },
   { id: 'chuci', expectedChapters: 6, charRange: [2500, 5000] },
 ];
 
@@ -53,7 +56,7 @@ describe('B5 新增五部经典数据完整性', () => {
     }
     // 端到端：章节与段落索引可查询（各取一个样本）
     expect(TextLibraryService.getChapter('mengzi-liang-hui-wang-shang').success).toBe(true);
-    expect(TextLibraryService.getSegment('zhuangzi-xiao-yao-you-1').success).toBe(true);
+    expect(TextLibraryService.getSegment('zhuangzi-01-1').success).toBe(true);
   });
 
   test('章数与声明一致，且章 id/bookId/order 连续一致', () => {
@@ -127,13 +130,13 @@ describe('B5 新增五部经典数据完整性', () => {
       expect(total).toBeGreaterThanOrEqual(spec.charRange[0]);
       expect(total).toBeLessThanOrEqual(spec.charRange[1]);
     }
-    // 五部合计约 2.5-5 万字（含标点）
+    // 五部合计约 15-25 万字（含标点；庄子/荀子为全本，其余为选本）
     const grandTotal = NEW_BOOKS.reduce(
       (n, spec) => n + allTexts(RAW_BY_ID[spec.id]).reduce((m, t) => m + t.length, 0),
       0,
     );
-    expect(grandTotal).toBeGreaterThanOrEqual(25000);
-    expect(grandTotal).toBeLessThanOrEqual(50000);
+    expect(grandTotal).toBeGreaterThanOrEqual(150000);
+    expect(grandTotal).toBeLessThanOrEqual(250000);
   });
 
   test('诗经 30 章均为「风/雅/颂·篇名」式标题且 20 首来自国风', () => {
@@ -187,17 +190,17 @@ describe('B5 打回修复回归（导航残留清洗）', () => {
 
   test('各章首段以传世开句开头（庄子内篇 7 + 荀子 4 + 孟子/诗经/楚辞样本）', () => {
     const OPENINGS: Array<[string, string]> = [
-      ['zhuangzi-xiao-yao-you', '北冥有鱼，其名为鲲'],
-      ['zhuangzi-qi-wu-lun', '南郭子綦'],
-      ['zhuangzi-yang-sheng-zhu', '吾生也有涯'],
-      ['zhuangzi-ren-jian-shi', '颜回见仲尼'],
-      ['zhuangzi-de-chong-fu', '鲁有兀者王骀'],
-      ['zhuangzi-da-zong-shi', '知天之所为'],
-      ['zhuangzi-ying-di-wang', '啮缺问于王倪'],
-      ['xunzi-quan-xue', '君子曰：学不可以已'],
-      ['xunzi-xiu-shen', '见善，修然必以自存也'],
-      ['xunzi-bu-gou', '君子行不贵苟难'],
-      ['xunzi-rong-ru', '憍泄者，人之殃也'],
+      ['zhuangzi-01', '北冥有鱼，其名为鲲'],
+      ['zhuangzi-02', '南郭子綦'],
+      ['zhuangzi-03', '吾生也有涯'],
+      ['zhuangzi-04', '颜回见仲尼'],
+      ['zhuangzi-05', '鲁有兀者王骀'],
+      ['zhuangzi-06', '知天之所为'],
+      ['zhuangzi-07', '啮缺问于王倪'],
+      ['xunzi-01', '君子曰：学不可以已'],
+      ['xunzi-02', '见善，修然必以自存也'],
+      ['xunzi-03', '君子行不贵苟难'],
+      ['xunzi-04', '憍泄者，人之殃也'],
       ['mengzi-liang-hui-wang-shang', '孟子见梁惠王'],
       ['chuci-li-sao', '帝高阳之苗裔兮'],
     ];
@@ -219,18 +222,18 @@ describe('B5 打回修复回归（导航残留清洗）', () => {
 
   test('各章末段以传世收句收尾（庄子内篇 7 + 荀子 4 + 离骚）', () => {
     const ENDINGS: Array<[string, string]> = [
-      // 庄子三处以引语收尾，末段含传世文本的收引号（”）
-      ['zhuangzi-xiao-yao-you', '安所困苦哉！”'],
-      ['zhuangzi-qi-wu-lun', '此之谓物化。'],
-      ['zhuangzi-yang-sheng-zhu', '不知其尽也。'],
-      ['zhuangzi-ren-jian-shi', '无用之用也。'],
-      ['zhuangzi-de-chong-fu', '子以坚白鸣！”'],
-      ['zhuangzi-da-zong-shi', '命也夫！”'],
-      ['zhuangzi-ying-di-wang', '七日而浑沌死。'],
-      ['xunzi-quan-xue', '君子贵其全也。'],
-      ['xunzi-xiu-shen', '以公义胜私欲也。'],
-      ['xunzi-bu-gou', '田仲、史䲡不如盗也。'],
-      ['xunzi-rong-ru', '此之谓也。'],
+      // 庄子多处应以引语收尾，末段含传世文本的收引号（”）
+      ['zhuangzi-01', '安所困苦哉！”'],
+      ['zhuangzi-02', '此之谓物化。'],
+      ['zhuangzi-03', '不知其尽也。'],
+      ['zhuangzi-04', '无用之用也。'],
+      ['zhuangzi-05', '子以坚白鸣。”'],
+      ['zhuangzi-06', '命也夫！”'],
+      ['zhuangzi-07', '七日而浑沌死。'],
+      ['xunzi-01', '君子贵其全也。'],
+      ['xunzi-02', '以公义胜私欲也。'],
+      ['xunzi-03', '田仲、史鰌不如盗也。'],
+      ['xunzi-04', '此之谓也。'],
       ['chuci-li-sao', '吾将从彭咸之所居。'],
     ];
     const lastSegments = new Map<string, string>();
@@ -246,12 +249,13 @@ describe('B5 打回修复回归（导航残留清洗）', () => {
     }
   });
 
-  test('逍遥游开头段完整（含齐谐/野马/风之积等全部内容），篇幅 ≥ 250 字', () => {
-    const seg = RAW_BY_ID.zhuangzi.chapters.find((c) => c.id === 'zhuangzi-xiao-yao-you')!.segments[0];
-    expect(seg.text).toContain('《齐谐》者，志怪者也');
-    expect(seg.text).toContain('野马也，尘埃也');
-    expect(seg.text).toContain('且夫水之积也不厚');
-    expect(seg.text).toContain('背负青天');
-    expect(seg.text.length).toBeGreaterThanOrEqual(250);
+  test('逍遥游全章完整（含齐谐/野马/风之积等全部内容），篇幅 ≥ 1000 字', () => {
+    const chapter = RAW_BY_ID.zhuangzi.chapters.find((c) => c.id === 'zhuangzi-01')!;
+    const text = chapter.segments.map((s) => s.text).join('');
+    expect(text).toContain('《齐谐》者，志怪者也');
+    expect(text).toContain('野马也，尘埃也');
+    expect(text).toContain('且夫水之积也不厚');
+    expect(text).toContain('背负青天');
+    expect(text.length).toBeGreaterThanOrEqual(1000);
   });
 });

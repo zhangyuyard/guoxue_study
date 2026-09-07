@@ -114,12 +114,29 @@ function parsePairs(text, fields) {
   return pairs;
 }
 
-/** 扫描 10 部书正文，返回 { set:Set(出现过的字), freq:Map(字→频次) } */
+/**
+ * 语料清单：与 src/data/__tests__/yitiData.test.ts 的 collectTextChars 完全一致
+ * （10 部书 + 章节标题）。全本化后其余大部头（史记/左传/周易/墨子等）不参与
+ * 语料交集，保证「构建期筛选项不回退」不变量在测试口径下严格成立。
+ */
+const CORPUS_FILES = [
+  'lunyu.json',
+  'daodejing.json',
+  'daxue.json',
+  'zhongyong.json',
+  'tangshi.json',
+  'mengzi.json',
+  'zhuangzi.json',
+  'shijing.json',
+  'xunzi.json',
+  'chuci.json',
+];
+
+/** 扫描语料正文（含章节标题），返回 { set:Set(出现过的字), freq:Map(字→频次) } */
 function scanBookChars() {
   const set = new Set();
   const freq = new Map();
-  for (const f of readdirSync(TEXTS_DIR)) {
-    if (!f.endsWith('.json')) continue;
+  for (const f of CORPUS_FILES) {
     let data;
     try {
       data = JSON.parse(readFileSync(resolve(TEXTS_DIR, f), 'utf8'));
@@ -127,6 +144,13 @@ function scanBookChars() {
       continue;
     }
     for (const chapter of data?.chapters ?? []) {
+      const title = typeof chapter?.title === 'string' ? chapter.title : '';
+      for (const c of title) {
+        if (isCJKChar(c)) {
+          set.add(c);
+          freq.set(c, (freq.get(c) ?? 0) + 1);
+        }
+      }
       for (const seg of chapter?.segments ?? []) {
         const t = typeof seg?.text === 'string' ? seg.text : '';
         for (const c of t) {
