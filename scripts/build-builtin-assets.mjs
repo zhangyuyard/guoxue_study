@@ -73,6 +73,54 @@ function toMarkerText(chapters) {
   return `${parts.join('\n\n')}\n`;
 }
 
+/**
+ * 从产物 marker 文本推导章节目录（与运行时 parseTxtBook 同规则）：
+ * - @@CH@@标题 行切章；空标题按标记出现顺序补「第N章」
+ * - 首标记前的非空正文运行时会成为「开篇」章（order=1，后续后移）
+ * - 正文全空的章节运行时不进 chapters（不占 order），目录跳过
+ * 返回 [{ id, title }]，id 与运行时 `${bookId}-c${order}` 逐条一致。
+ */
+function deriveToc(text, bookId) {
+  const lines = text.split('\n');
+  const raw = [];
+  let cur = null;
+  let prefaceHasBody = false;
+  let markerCount = 0;
+  for (const line of lines) {
+    const m = /^@@CH@@(.*)$/.exec(line);
+    if (m) {
+      markerCount += 1;
+      if (cur) {
+        raw.push(cur);
+      }
+      cur = { title: m[1].trim() || `第${markerCount}章`, hasBody: false };
+    } else if (cur) {
+      if (line.trim()) {
+        cur.hasBody = true;
+      }
+    } else if (line.trim()) {
+      prefaceHasBody = true;
+    }
+  }
+  if (cur) {
+    raw.push(cur);
+  }
+  const toc = [];
+  let order = 0;
+  if (prefaceHasBody) {
+    order += 1;
+    toc.push({ id: `${bookId}-c${order}`, title: '开篇' });
+  }
+  for (const ch of raw) {
+    if (!ch.hasBody) {
+      continue;
+    }
+    order += 1;
+    toc.push({ id: `${bookId}-c${order}`, title: ch.title });
+  }
+  return toc;
+}
+
 function readJson(rel) {
   return JSON.parse(fs.readFileSync(path.join(SRC_DIR, rel), 'utf8'));
 }
@@ -1081,6 +1129,12 @@ for (const spec of BOOKS) {
 
   fs.writeFileSync(path.join(ASSETS_DIR, `${spec.id}.txt`), text, 'utf8');
   const sizeBytes = Buffer.byteLength(text, 'utf8');
+  // 目录推导：与运行时 parseTxtBook 同规则解析产物文本，仅记录
+  // 「有正文的章节」的 id+title（运行时空章节不占 order、id 按
+  // `${bookId}-c${order}` 顺序生成，此处必须逐条对齐，否则惰性
+  // 水合前的目录跳转会指向失效章节 id）。前置正文（首标记前有
+  // 非空行）在运行时会成为「开篇」章，order 整体后移 1。
+  const toc = deriveToc(text, spec.id);
   report.push({ id: spec.id, title: spec.title, chapters: chapters.length, paras: paraCount, chars: charCount, kb });
   catalog.push({
     id: spec.id,
@@ -1093,6 +1147,9 @@ for (const spec of BOOKS) {
     // 不一致（升级换资产/复制中断半截文件）则覆盖复制并失效该书的
     // 解析缓存，内置书内容更新可随包静默完成。
     sizeBytes,
+    // 章节目录（id+title，无正文）：启动只注册元数据书的目录，
+    // 全文由 ensureBookLoaded 按书惰性水合（按需装载架构）。
+    toc,
   });
   console.log(`${spec.id.padEnd(16)} ${String(chapters.length).padStart(4)} 章 ${String(paraCount).padStart(6)} 段 ${String(charCount).padStart(8)} 字 ${String(kb).padStart(6)} KB`);
 }
@@ -1122,6 +1179,8 @@ export interface BuiltinBookSpec {
   dynasty: string;
   /** APK 资产字节大小（物化变更检测指纹，见 UserBookService.materializeBuiltins） */
   sizeBytes: number;
+  /** 章节目录（id+title，无正文；id 与运行时解析逐条一致） */
+  toc: Array<{ id: string; title: string }>;
 }
 
 export const BUILTIN_CATALOG: BuiltinBookSpec[] = ${JSON.stringify(catalog, null, 2)};

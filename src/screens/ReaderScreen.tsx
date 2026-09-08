@@ -18,7 +18,14 @@
  * 正文支持繁简一键切换：转换在「数据层」统一作用于段落文本，渲染、选区码点与
  * 划线偏移均基于转换后文本，保证三者一致、切换不错位。
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -56,6 +63,7 @@ import {
   nowISO,
 } from '@/services/StorageService';
 import { TextLibraryService } from '@/services/TextLibraryService';
+import { UserBookService } from '@/services/UserBookService';
 import { TtsService } from '@/services/tts/TtsService';
 import { stepSpeechRate } from '@/utils/speech';
 import { memoToSimplified, memoToTraditional } from '@/utils/conversionMemo';
@@ -1449,28 +1457,76 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // 新建的对象，若以对象引用作依赖会引发 setState 无限循环（Maximum update depth）
   const segmentId = params?.segmentId ?? null;
 
+  // 按需水合（性能）：内置书启动只注册目录元数据（书架秒开），进入阅读器
+  // 时若该书全文尚未水合，先异步 ensureBookLoaded 单本装载（单本文件解析，
+  // 几十~两百 ms），期间复用「加载中」视图；完成后 hydrateTick 自增驱动
+  // 下方同步派生重算（同步派生架构不变——水合前后都当帧可得）。
+  const [hydrateTick, setHydrateTick] = useState(0);
+  const [builtinHydrating, setBuiltinHydrating] = useState(false);
+  const [builtinHydrateFailed, setBuiltinHydrateFailed] = useState(false);
+  // useLayoutEffect：水合标记必须在首帧绘制前置位——否则「元数据章（正文空）」
+  // 会先渲染一帧空内容，effect 落地后才切换到加载中（闪一帧空白）。
+  useLayoutEffect(() => {
+    if (
+      !bookId ||
+      TextLibraryService.isUserBook(bookId) ||
+      TextLibraryService.isBookHydrated(bookId)
+    ) {
+      setBuiltinHydrating(false);
+      return;
+    }
+    let cancelled = false;
+    setBuiltinHydrating(true);
+    setBuiltinHydrateFailed(false);
+    UserBookService.ensureBookLoaded(bookId)
+      .then((res) => {
+        if (cancelled) {
+          return;
+        }
+        setBuiltinHydrating(false);
+        setBuiltinHydrateFailed(!res.success);
+        if (res.success) {
+          setHydrateTick((t) => t + 1);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBuiltinHydrating(false);
+          setBuiltinHydrateFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bookId]);
+
   // 文本数据：随路由参数【同步派生】（BugFix：切章时旧章内容多渲染一帧的闪烁）。
   // 旧实现经 init effect 异步 setState 加载：点「下一章」后参数已变、章节状态仍是
   // 旧章，当帧先渲染第一章、等 effect 落地才换新章，产生「先第一章再跳走」的闪烁。
   // getBook/getChapter 均为同步内存索引（内置书 JSON / 已注册用户书），无需异步——
   // 派生后参数一变、当帧即得新章数据；派生失败（无参数/未找到）由 loadError 表达。
   const book = useMemo<Book | null>(() => {
+    void hydrateTick; // 水合完成后强制重算（内置书全文就位）
     if (!bookId) {
       return null;
     }
     const res = TextLibraryService.getBook(bookId);
     return res.success ? res.data ?? null : null;
-  }, [bookId]);
+  }, [bookId, hydrateTick]);
   const chapter = useMemo<Chapter | null>(() => {
+    void hydrateTick; // 水合完成后强制重算（同上）
     if (!chapterId) {
       return null;
     }
     const res = TextLibraryService.getChapter(chapterId);
     return res.success ? res.data ?? null : null;
-  }, [chapterId]);
+  }, [chapterId, hydrateTick]);
   const loadError = useMemo<string | null>(() => {
     if (!bookId || !chapterId) {
       return '缺少书籍或章节参数';
+    }
+    if (builtinHydrateFailed) {
+      return '书籍内容加载失败';
     }
     if (!book) {
       return '加载书籍失败';
@@ -1479,7 +1535,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       return '加载章节失败';
     }
     return null;
-  }, [bookId, chapterId, book, chapter]);
+  }, [bookId, chapterId, book, chapter, builtinHydrateFailed]);
 
   /**
    * 滚动拼接序列的「当帧一致视图」（切章闪烁的另一半修复）。
@@ -3254,8 +3310,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     );
   }
 
-  // 加载中
-  if (!chapter || !book) {
+  // 加载中（含内置书按需水合期：单本文件解析，通常 <300ms）
+  if (!chapter || !book || builtinHydrating) {
     return (
       <SafeAreaView style={[styles.container, styles.center, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />

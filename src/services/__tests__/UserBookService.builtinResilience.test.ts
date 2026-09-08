@@ -1,11 +1,12 @@
 /**
- * UserBookService 内置书韧性回归测试（2026-09-08 真机「内置书全部消失」修复）
+ * UserBookService 内置书按需装载回归测试（2026-09-08 按需装载架构）
  * 锁定防线：
- * 1. 内置书 db 行绝不参与下架清扫（文件暂缺/目录读取失败时背诵/笔记不丢）
- * 2. 根目录扫描失败（scanOk=false）→ 内置书装载不受影响（清单驱动），
- *    但三路来源失败时注册保留上一轮结果，绝不用空列表整体替换
- * 3. 首启资产复制整体失败 → 逐书「文件/资产直读」兜底仍完整装载并注册
- * 4. 三路来源（db 缓存/文件/assets）全失败 → 注册保留上一轮 + 诊断如实记录
+ * 1. 启动只注册目录元数据（77 部卡片 + 章节目录即刻完整可见），37MB 正文不进启动路径
+ * 2. 元数据注册每进程一次（书架刷新重入绝不重置已水合书体）
+ * 3. 内置书历史 db 解析缓存行清理（37MB JSON 退出 user_books），用户书行绝不误删
+ * 4. sizeBytes 指纹不一致 → 覆盖复制（升级换全本资产随包静默生效）
+ * 5. ensureBookLoaded 单本水合：文件解析 → hydrate，正文段落就位
+ * 6. FTS 后台索引队列：逐书 upsert（幂等），不依赖内存全量注册
  */
 jest.mock('react-native-quick-sqlite', () => {
   const mockState = {
@@ -50,6 +51,13 @@ jest.mock('react-native-quick-sqlite', () => {
               },
             };
           }
+          if (/UPDATE user_books SET data = \? WHERE id = \?/.test(sql)) {
+            const idx = mockState.userBooks.findIndex((r) => r.id === params[1]);
+            if (idx >= 0) {
+              mockState.userBooks[idx] = { ...mockState.userBooks[idx], data: params[0] };
+            }
+            return { rows: { _array: [], length: 0 } };
+          }
           if (/DELETE FROM user_books WHERE id = \?/.test(sql)) {
             mockState.deletedIds.push(params[0]);
             mockState.userBooks = mockState.userBooks.filter((r) => r.id !== params[0]);
@@ -63,33 +71,55 @@ jest.mock('react-native-quick-sqlite', () => {
   };
 });
 
-/** 受控文本库：记录 registerBuiltinBooks 调用（断言不用空列表整体替换） */
+/** 受控文本库：记录 registerBuiltinBooks / hydrateBook 调用（元数据 + 水合断言） */
 jest.mock('@/services/TextLibraryService', () => {
   const mockLibState = {
     builtinCalls: [] as number[],
     userBooks: [] as unknown[],
-    /** 最近一次 registerBuiltinBooks 注册的书数组（渐进装载断言用） */
-    builtinLast: [] as Array<{ id: string; chapters: unknown[] }>,
+    /** 最近一次 registerBuiltinBooks 注册的元数据书数组 */
+    builtinLast: [] as Array<{ id: string; chapters: Array<{ id: string; segments: unknown[] }> }>,
+    /** 最近一次 hydrateBook 的水合书体 */
+    hydratedLast: null as { id: string; chapters: Array<{ id: string; segments: unknown[] }> } | null,
+    hydratedIds: [] as string[],
   };
   const mockLib = {
     __libState: mockLibState,
     registerBuiltinBooks: (books: unknown[]) => {
-      mockLibState.builtinLast = books as Array<{ id: string; chapters: unknown[] }>;
+      mockLibState.builtinLast = books as typeof mockLibState.builtinLast;
       mockLibState.builtinCalls.push(books.length);
       return { success: true, data: null };
     },
+    hydrateBook: (book: { id: string; chapters: Array<{ id: string; segments: unknown[] }> }) => {
+      mockLibState.hydratedLast = book;
+      mockLibState.hydratedIds.push(book.id);
+      return { success: true, data: null };
+    },
+    isBookHydrated: (id: string) => mockLibState.hydratedIds.includes(id),
+    evictBook: () => ({ success: true, data: null }),
     setSuppressedBuiltins: () => ({ success: true, data: null }),
     registerUserBooks: (books: unknown[]) => {
       mockLibState.userBooks = books;
       return { success: true, data: null };
     },
     getBooks: () => ({ success: true, data: [...mockLibState.userBooks] }),
+    getBook: (id: string) => {
+      const hydrated = mockLibState.hydratedIds.includes(id)
+        ? mockLibState.hydratedLast
+        : mockLibState.builtinLast.find((b) => b.id === id);
+      if (hydrated && hydrated.id === id) {
+        return { success: true, data: hydrated };
+      }
+      const user = (mockLibState.userBooks as Array<{ id: string }>).find((b) => b.id === id);
+      return user
+        ? { success: true, data: user }
+        : { success: false, error: `未找到书籍：${id}` };
+    },
     isUserBook: (id: string) => String(id).startsWith('user-'),
   };
   return { TextLibraryService: mockLib, default: mockLib };
 });
 
-/** 可编程 RNFS：readDir 显式注入优先，否则从已存在文件动态派生目录列表 */
+/** FTS 方法 spy 目标（真实 StorageService 的行为由用例内 spyOn 控制） */
 jest.mock('react-native-fs', () => {
   const state = {
     files: new Set<string>(),
@@ -164,24 +194,28 @@ const { __rnfsState } = require('react-native-fs');
 import {
   UserBookService,
   getLibrarySyncDiagnostics,
-  __resetBuiltinProgressForTests,
+  __resetBuiltinLazyStateForTests,
 } from '@/services/UserBookService';
 import { TextLibraryService } from '@/services/TextLibraryService';
+import { StorageService } from '@/services/StorageService';
 import { getBuiltinSpec } from '@/data/builtinCatalog';
 
 /** 取受控文本库的记录状态（mock 注入，真实类型上不存在） */
 interface MockLibState {
   builtinCalls: number[];
   userBooks: unknown[];
-  builtinLast: Array<{ id: string; chapters: unknown[] }>;
+  builtinLast: Array<{ id: string; chapters: Array<{ id: string; segments: unknown[] }> }>;
+  hydratedLast: { id: string; chapters: Array<{ id: string; segments: unknown[] }> } | null;
+  hydratedIds: string[];
 }
 function libState(): MockLibState {
   return (TextLibraryService as unknown as { __libState: MockLibState }).__libState;
 }
 
 const BUILTIN_ROW_ID = 'lunyu';
+const SAMPLE_BODY = '@@CH@@学而篇\n\n子曰学而时习之。';
 
-/** 预置一行内置书解析缓存（模拟上一轮成功解析后的 db 状态） */
+/** 预置一行内置书历史解析缓存（按需装载前的旧 db 状态） */
 function seedBuiltinRow(): void {
   const dir = UserBookService.getBuiltinDirPath();
   __builtinResilienceState.userBooks.push({
@@ -202,7 +236,31 @@ function seedBuiltinRow(): void {
   });
 }
 
-describe('UserBookService 内置书韧性（真机消失回归）', () => {
+/** 预置一行用户书缓存（清理内置行时绝不能误删） */
+function seedUserRow(): void {
+  __builtinResilienceState.userBooks.push({
+    id: 'user-abc',
+    title: '我的书',
+    author: '佚名',
+    data: JSON.stringify({
+      id: 'user-abc',
+      title: '我的书',
+      author: '佚名',
+      category: 'user',
+      description: '',
+      chapters: [],
+    }),
+    created_at: 2000,
+    source_path: null,
+    file_sig: null,
+  });
+}
+
+describe('UserBookService 内置书按需装载（性能架构回归）', () => {
+  let ftsIndexed: Set<string>;
+  let isIndexedSpy: jest.SpyInstance;
+  let upsertSpy: jest.SpyInstance;
+
   beforeEach(() => {
     __builtinResilienceState.userBooks = [];
     __builtinResilienceState.deletedIds = [];
@@ -213,82 +271,79 @@ describe('UserBookService 内置书韧性（真机消失回归）', () => {
     __rnfsState.readReply = '';
     __rnfsState.readReplies = {};
     __rnfsState.sizes = {};
-    __resetBuiltinProgressForTests();
+    __resetBuiltinLazyStateForTests();
     libState().builtinCalls = [];
     libState().builtinLast = [];
+    libState().hydratedLast = null;
+    libState().hydratedIds = [];
+    ftsIndexed = new Set();
+    isIndexedSpy = jest
+      .spyOn(StorageService, 'isBookIndexedInFts')
+      .mockImplementation((id: string) => ftsIndexed.has(id));
+    upsertSpy = jest
+      .spyOn(StorageService, 'upsertFtsForBook')
+      .mockImplementation((book: { id: string }) => {
+        ftsIndexed.add(book.id);
+        return { success: true, data: true };
+      });
   });
 
-  test('内置书 db 行不参与下架：builtin 目录读不到文件时行保留、学习数据不级联清理', async () => {
-    seedBuiltinRow();
-    // 根目录与 builtin 目录都返回空（文件暂缺/目录读取异常场景）
+  afterEach(() => {
+    isIndexedSpy.mockRestore();
+    upsertSpy.mockRestore();
+  });
+
+  test('启动只注册目录元数据：77 部卡片可见，目录章节 segments 为空（正文不进内存）', async () => {
     __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = [];
-    __rnfsState.readDirResults[UserBookService.getBuiltinDirPath()] = [];
 
     const res = await UserBookService.loadAndRegisterAll();
     expect(res.success).toBe(true);
 
-    // 关键断言：内置行未被删除（旧实现会在此 DELETE + 级联清理学习数据）
-    expect(__builtinResilienceState.deletedIds).toEqual([]);
-    const row = __builtinResilienceState.userBooks.find(
-      (r: Record<string, unknown>) => r.id === BUILTIN_ROW_ID,
-    );
-    expect(row).toBeDefined();
+    expect(libState().builtinCalls).toEqual([77]);
+    expect(libState().builtinLast).toHaveLength(77);
+    // 目录章节就位（章节计数/目录可展示），segments 全空（正文不进内存）
+    for (const b of libState().builtinLast) {
+      expect(b.chapters.length).toBeGreaterThan(0);
+      for (const ch of b.chapters) {
+        expect(ch.segments).toEqual([]);
+      }
+    }
+    // 目录 id 与运行时解析一致（${id}-c${order} 连续编号）
+    const lunyu = libState().builtinLast.find((b) => b.id === 'lunyu');
+    expect(lunyu?.chapters[0]).toMatchObject({ id: 'lunyu-c1', title: '学而篇' });
   });
 
-  test('根目录扫描失败（scanOk=false）：装载不中断；装载失败时注册保留上一轮，db 行保留', async () => {
-    seedBuiltinRow();
-    __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = new Error('EIO');
-
-    const res = await UserBookService.loadAndRegisterAll();
-    expect(res.success).toBe(true);
-
-    // lunyu 走 db 缓存成功；其余 76 部无缓存且内容不可解析 → 三路失败
-    // → 本轮不整体替换内置书注册（无注册调用），db 行保留
-    expect(libState().builtinCalls).toEqual([]);
-    const row = __builtinResilienceState.userBooks.find(
-      (r: Record<string, unknown>) => r.id === BUILTIN_ROW_ID,
-    );
-    expect(row).toBeDefined();
-    expect(getLibrarySyncDiagnostics().scanInterrupted).toBe(false);
-    expect(getLibrarySyncDiagnostics().builtinParseFailures.length).toBe(76);
-  });
-
-  test('首启资产复制整体失败：逐书「文件/资产直读」兜底仍完整装载 77 部并注册', async () => {
-    // 前 77 次 copyFileAssets 全部失败（首轮物化整体失败，
-    // readFileAssets 写文件回落同样不可用）→ builtin/ 目录保持为空，
-    // 但内置书装载由目录清单驱动、不经目录扫描：逐书直接解析文件内容兜底
-    __rnfsState.assetCopyFailLeft = 77;
-    // 提供可解析的资产内容（@@CH@@ 标记文本 → base64），让 77 部全部解析成功
-    __rnfsState.readReply = Buffer.from('@@CH@@第一篇\n\n正文内容。', 'utf8').toString('base64');
-
-    const res = await UserBookService.loadAndRegisterAll();
-    expect(res.success).toBe(true);
-
-    // 复制确实全部失败（诊断如实记录，下轮启动重试物化）
-    expect(__rnfsState.assetsCopied).toHaveLength(0);
-    expect(getLibrarySyncDiagnostics().assetCopyFailures).toHaveLength(77);
-    // 但内置书装载零失败：三路来源（db 缓存/文件/assets）兜底成功
-    expect(getLibrarySyncDiagnostics().builtinParseFailures).toEqual([]);
-    // 内置书注册以完整清单发生（77 部）
+  test('元数据注册每进程一次：书架刷新重入不重注册、不重置已水合书体', async () => {
+    __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = [];
+    await UserBookService.loadAndRegisterAll();
+    await UserBookService.loadAndRegisterAll();
     expect(libState().builtinCalls).toEqual([77]);
   });
 
-  test('三路来源全失败：注册保留上一轮结果（绝不用空列表清空书架）', async () => {
-    // 文件内容为空（解析 0 章 → 失败）+ assets 直读不可用 → 所有书三路全失败
+  test('内置书 db 缓存瘦身：data 清空但行保留（查重指纹不丢），用户书行不动', async () => {
+    seedBuiltinRow();
+    seedUserRow();
     __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = [];
 
     const res = await UserBookService.loadAndRegisterAll();
     expect(res.success).toBe(true);
 
-    // 装载失败如实计入诊断
-    expect(getLibrarySyncDiagnostics().builtinParseFailures.length).toBe(77);
-    // 关键断言：绝不用空列表整体替换内置书注册
-    expect(libState().builtinCalls).toEqual([]);
+    // 内置缓存行的 37MB JSON 已清空（不再拖累启动 SELECT/反解）
+    const row = __builtinResilienceState.userBooks.find(
+      (r: Record<string, unknown>) => r.id === BUILTIN_ROW_ID,
+    );
+    expect(row).toBeDefined();
+    expect(row?.data).toBe('');
+    // 行保留（content_hash 供导入查重：与内置书同内容的文件拒绝导入）
+    expect(row?.content_hash ?? row?.file_sig).toBeDefined();
+    // 无任何 DELETE（内置行不参与下架清扫，用户书行也保留）
+    expect(__builtinResilienceState.deletedIds).toEqual([]);
+    expect(
+      __builtinResilienceState.userBooks.find((r: Record<string, unknown>) => r.id === 'user-abc'),
+    ).toBeDefined();
   });
 
-  test('内置资产内容更新（sizeBytes 指纹不一致）：覆盖复制并失效该书解析缓存（文选残本→全本回归）', async () => {
-    seedBuiltinRow();
-    // 预置旧版落盘文件：存在但大小与新资产指纹不一致（模拟升级换全本资产）
+  test('sizeBytes 指纹不一致：materializeBuiltins 覆盖复制（升级换全本资产随包生效）', async () => {
     const lunyuPath = `${UserBookService.getBuiltinDirPath()}/${BUILTIN_ROW_ID}.txt`;
     __rnfsState.files.add(lunyuPath);
     __rnfsState.sizes[lunyuPath] = 8023;
@@ -296,15 +351,10 @@ describe('UserBookService 内置书韧性（真机消失回归）', () => {
 
     const res = await UserBookService.loadAndRegisterAll();
     expect(res.success).toBe(true);
-
-    // 覆盖复制确实发生
     expect(__rnfsState.assetsCopied).toContain(`books/${BUILTIN_ROW_ID}.txt`);
-    // 仅该书的解析缓存行被失效（不级联清理背诵/收藏/笔记等其他表）
-    expect(__builtinResilienceState.deletedIds).toEqual([BUILTIN_ROW_ID]);
   });
 
-  test('sizeBytes 指纹一致：不重复复制、解析缓存行保留（零开销增量装载）', async () => {
-    seedBuiltinRow();
+  test('sizeBytes 指纹一致：不重复复制（其余 76 部缺文件仍正常物化）', async () => {
     const lunyuPath = `${UserBookService.getBuiltinDirPath()}/${BUILTIN_ROW_ID}.txt`;
     __rnfsState.files.add(lunyuPath);
     const spec = getBuiltinSpec(BUILTIN_ROW_ID);
@@ -313,55 +363,57 @@ describe('UserBookService 内置书韧性（真机消失回归）', () => {
 
     const res = await UserBookService.loadAndRegisterAll();
     expect(res.success).toBe(true);
-
-    // 指纹一致的书不触发复制（其余 76 部缺文件仍正常物化，断言排除）
     expect(__rnfsState.assetsCopied).not.toContain(`books/${BUILTIN_ROW_ID}.txt`);
     expect(__rnfsState.assetsCopied).toHaveLength(76);
-    // 缓存行未失效，db 缓存命中注册
-    expect(__builtinResilienceState.deletedIds).toEqual([]);
-    const row = __builtinResilienceState.userBooks.find(
-      (r: Record<string, unknown>) => r.id === BUILTIN_ROW_ID,
-    );
-    expect(row).toBeDefined();
   });
 
-  test('渐进装载：冷启动先注册目录占位书，终批全部替换为真实书体', async () => {
-    __rnfsState.readReply = Buffer.from('@@CH@@第一篇\n\n正文内容。', 'utf8').toString('base64');
-    const onProgress = jest.fn();
+  test('ensureBookLoaded：单本文件解析 → hydrate 正文段落就位', async () => {
+    __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = [];
+    __rnfsState.readReply = Buffer.from(SAMPLE_BODY, 'utf8').toString('base64');
 
-    const res = await UserBookService.loadAndRegisterAll({ onProgress });
+    const res = await UserBookService.ensureBookLoaded(BUILTIN_ROW_ID);
     expect(res.success).toBe(true);
 
-    // 占位注册先行（onProgress 至少触发一次）
-    expect(onProgress).toHaveBeenCalled();
-    expect(libState().builtinCalls.length).toBeGreaterThanOrEqual(2);
-    // 终批：77 部全部为真实书体（chapters 非空，占位书被整体替换）
-    expect(libState().builtinLast).toHaveLength(77);
-    expect(libState().builtinLast.every((b) => b.chapters.length > 0)).toBe(true);
+    expect(libState().hydratedLast).not.toBeNull();
+    expect(libState().hydratedLast?.id).toBe(BUILTIN_ROW_ID);
+    const chapters = libState().hydratedLast?.chapters ?? [];
+    expect(chapters).toHaveLength(1);
+    expect(chapters[0].id).toBe(`${BUILTIN_ROW_ID}-c1`);
+    expect(chapters[0].segments.length).toBeGreaterThan(0);
+    expect(getLibrarySyncDiagnostics().builtinParseFailures).toEqual([]);
   });
 
-  test('渐进装载合并快照：单书装载失败沿用上一轮书体，书架不丢书', async () => {
-    __rnfsState.readReply = Buffer.from('@@CH@@第一篇\n\n正文内容。', 'utf8').toString('base64');
-    // 第一轮：全部成功 → 快照 = 77 部真实书体
-    const res1 = await UserBookService.loadAndRegisterAll({
-      onProgress: () => undefined,
-      chunkMs: 0,
-    });
-    expect(res1.success).toBe(true);
-    expect(libState().builtinLast).toHaveLength(77);
+  test('ensureBookLoaded：落盘文件指纹不一致先覆盖补写再解析（自愈）', async () => {
+    __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = [];
+    const lunyuPath = `${UserBookService.getBuiltinDirPath()}/${BUILTIN_ROW_ID}.txt`;
+    __rnfsState.files.add(lunyuPath);
+    __rnfsState.sizes[lunyuPath] = 8023;
+    __rnfsState.readReply = Buffer.from(SAMPLE_BODY, 'utf8').toString('base64');
 
-    // 第二轮：道德经内容读取失败（空内容 → 0 章 → 三路来源全失败）
-    const djPath = `${UserBookService.getBuiltinDirPath()}/daodejing.txt`;
-    __rnfsState.readReplies[djPath] = '';
-    const res2 = await UserBookService.loadAndRegisterAll({
-      onProgress: () => undefined,
-      chunkMs: 0,
-    });
-    expect(res2.success).toBe(true);
-    // 失败书沿用上一轮快照书体（书架不丢书），其余 76 部本轮重装载
-    expect(libState().builtinLast).toHaveLength(77);
-    const dj = libState().builtinLast.find((b) => b.id === 'daodejing');
-    expect(dj).toBeDefined();
-    expect((dj as { chapters: unknown[] }).chapters.length).toBeGreaterThan(0);
+    const res = await UserBookService.ensureBookLoaded(BUILTIN_ROW_ID);
+    expect(res.success).toBe(true);
+    // 指纹不一致触发了覆盖复制，随后解析成功水合
+    expect(__rnfsState.assetsCopied).toContain(`books/${BUILTIN_ROW_ID}.txt`);
+    expect(libState().hydratedIds).toContain(BUILTIN_ROW_ID);
+  });
+
+  test('FTS 后台索引队列：逐书解析 upsert（已入索引跳过），不经内存注册', async () => {
+    __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = [];
+    __rnfsState.readReply = Buffer.from(SAMPLE_BODY, 'utf8').toString('base64');
+    // 预置两本已入索引（应被跳过）
+    ftsIndexed.add('lunyu');
+    ftsIndexed.add('daodejing');
+
+    UserBookService.scheduleBuiltinFtsIndexBuild(0);
+    // 队列串行逐书 setTimeout(16ms) 让出，轮询等待跑完（上限 5s 防挂死）
+    for (let i = 0; i < 250 && upsertSpy.mock.calls.length < 75; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    }
+
+    // 只为未入索引的书 upsert；水合注册零调用（不经 TextLibraryService）
+    expect(upsertSpy).toHaveBeenCalledTimes(75);
+    expect(libState().builtinCalls).toEqual([]);
+    expect(libState().hydratedIds).toEqual([]);
   });
 });

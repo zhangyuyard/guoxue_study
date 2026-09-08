@@ -352,6 +352,27 @@ export function upsertFtsForBook(book: Book): ServiceResult<boolean> {
 }
 
 /**
+ * 该书是否已进入 FTS 索引（供 UserBookService 后台索引队列幂等跳过；
+ * db 不可用时返回 false，队列会尝试重建——重建失败也只是重复劳动）。
+ */
+export function isBookIndexedInFts(bookId: string): boolean {
+  try {
+    const instance = getDb();
+    if (!instance) {
+      return false;
+    }
+    const rows = selectRows(
+      instance,
+      'SELECT 1 AS hit FROM segments_fts WHERE book_id = ? LIMIT 1',
+      [bookId],
+    );
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 按 bookId 清除 FTS 索引行。
  * 供 UserBookService.deleteBook 在删除成功后调用，
  * 防止已删书在 segments_fts 中残留死索引、搜索命中后加载失败。
@@ -967,6 +988,7 @@ export const StorageService = {
   initDatabase,
   ensureFtsIndex,
   upsertFtsForBook,
+  isBookIndexedInFts,
   deleteFtsForBook,
   buildFtsRows,
   genId,

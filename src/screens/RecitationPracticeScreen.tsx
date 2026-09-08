@@ -13,6 +13,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RecitationHintGranularity, TextSegment } from '@/types';
 import type { T04StackParamList } from '@/screens/types';
 import { TextLibraryService } from '@/services/TextLibraryService';
+import { UserBookService } from '@/services/UserBookService';
 import { scheduleNext } from '@/services/ReviewScheduler';
 import { useAchievementStore } from '@/store/useAchievementStore';
 import { useRecitationStore } from '@/store/useRecitationStore';
@@ -109,15 +110,33 @@ export default function RecitationPracticeScreen({
   coverCharsRef.current = coverChars;
 
   useEffect(() => {
-    const res = TextLibraryService.getChapter(chapterId);
-    if (res.success && res.data) {
-      setSegments(res.data.segments);
-      setChapterTitle(res.data.title);
-      setCoverChars(buildCoverChars(res.data.segments));
-    } else {
-      setLoadError(res.error ?? '加载章节失败');
-    }
-  }, [chapterId]);
+    let cancelled = false;
+    void (async () => {
+      // 按需水合：内置书可能只注册了目录元数据（segments 空），先确保
+      // 全文装载再取章，否则练习会静默拿到 0 段落。
+      const ensure = await UserBookService.ensureBookLoaded(bookId);
+      if (!ensure.success) {
+        if (!cancelled) {
+          setLoadError(ensure.error ?? '加载书籍失败');
+        }
+        return;
+      }
+      const res = TextLibraryService.getChapter(chapterId);
+      if (cancelled) {
+        return;
+      }
+      if (res.success && res.data) {
+        setSegments(res.data.segments);
+        setChapterTitle(res.data.title);
+        setCoverChars(buildCoverChars(res.data.segments));
+      } else {
+        setLoadError(res.error ?? '加载章节失败');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [bookId, chapterId]);
 
   /** 保存背诵进度（根据正确率推导状态） */
   const persistProgress = useCallback(

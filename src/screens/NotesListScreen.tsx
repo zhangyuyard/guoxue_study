@@ -13,6 +13,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { Note } from '@/types';
 import type { T04StackParamList } from '@/screens/types';
 import { TextLibraryService } from '@/services/TextLibraryService';
+import { UserBookService } from '@/services/UserBookService';
 import { StorageService } from '@/services/StorageService';
 import { ExportService } from '@/services/ExportService';
 import {
@@ -92,9 +93,13 @@ export default function NotesListScreen(_props: Props): React.JSX.Element {
     return map;
   }, []);
 
+  /** 水合完成计数：书籍 ensureBookLoaded 完成后自增，驱动原文预览重算 */
+  const [relatedTick, setRelatedTick] = useState(0);
+
   /** 关联划线文本（有 highlightId 用高亮文本，否则用笔记偏移截取原文） */
   const relatedText = useCallback(
     (note: Note): string | null => {
+      void relatedTick; // 书籍水合完成后重算（内置书全文按需装载）
       if (note.highlightId) {
         const text = highlightTextMap.get(note.highlightId);
         if (text) {
@@ -113,8 +118,32 @@ export default function NotesListScreen(_props: Props): React.JSX.Element {
       }
       return null;
     },
-    [highlightTextMap],
+    [highlightTextMap, relatedTick],
   );
+
+  // 按需水合笔记关联书籍：内置书只注册目录元数据时 getSegment 拿不到
+  // 原文，先把笔记涉及的书逐本 ensureBookLoaded（LRU 常驻，重复调用
+  // 幂等），完成后 relatedTick 自增触发列表重算。
+  useEffect(() => {
+    if (notes.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const bookIds = Array.from(new Set(notes.map((n) => n.bookId)));
+      for (const id of bookIds) {
+        // eslint-disable-next-line no-await-in-loop
+        await UserBookService.ensureBookLoaded(id);
+        if (cancelled) {
+          return;
+        }
+      }
+      setRelatedTick((t) => t + 1);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [notes]);
 
   /** 切换书籍筛选 */
   const changeBook = useCallback(
