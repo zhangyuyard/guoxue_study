@@ -14,7 +14,7 @@ jest.mock('react-native-quick-sqlite', () => {
     /** guoxue.db segments_fts 内存行 */
     ftsRows: [] as Array<Record<string, unknown>>,
   };
-  const mockUserBookCols = ['id', 'title', 'author', 'data', 'created_at'];
+  const mockUserBookCols = ['id', 'title', 'author', 'data', 'created_at', 'source_path', 'file_sig'];
   const mockFtsCols = ['segment_id', 'book_id', 'chapter_id', 'book_title', 'chapter_title', 'text'];
   const mockRow = (cols: string[], params: unknown[]) => {
     const row: Record<string, unknown> = {};
@@ -41,10 +41,14 @@ jest.mock('react-native-quick-sqlite', () => {
               }
               return { rows: { _array: [], length: 0 } };
             }
-            if (/SELECT data FROM user_books/.test(sql)) {
+            if (/SELECT id, title, author, data, source_path, file_sig, created_at FROM user_books/.test(sql)) {
               return {
                 rows: {
-                  _array: mockState.userBooks.map((r) => ({ data: r.data })),
+                  _array: mockState.userBooks.map((r) => ({
+                    ...r,
+                    source_path: r.source_path ?? null,
+                    file_sig: r.file_sig ?? null,
+                  })),
                   length: mockState.userBooks.length,
                 },
               };

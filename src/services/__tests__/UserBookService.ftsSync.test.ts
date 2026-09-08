@@ -266,9 +266,23 @@ describe('UserBookService 与 FTS 索引同步（导入/删除）', () => {
     expect(del.success).toBe(true);
   });
 
-  test('内置经典不可删除（FTS 清理不越界触发）', async () => {
+  test('内置书可删除（FTS 清理同步触发）', async () => {
+    // 预置内置经典 FTS 行
+    __ftsSyncState.ftsRows.push({
+      segment_id: 'lunyu-c1-s1',
+      book_id: 'lunyu',
+      chapter_id: 'lunyu-c1',
+      book_title: '论语',
+      chapter_title: '学而',
+      text: '学而时习之',
+    });
     const del = await UserBookService.deleteBook('lunyu');
-    expect(del.success).toBe(false);
-    expect(del.error).toBe('内置经典不可删除');
+    // 书籍文件夹化后所有书籍均可删除，内置书删除同步清 FTS 索引
+    expect(del.success).toBe(true);
+    expect(
+      __ftsSyncState.ftsRows.some(
+        (r: Record<string, unknown>) => r.book_id === 'lunyu',
+      ),
+    ).toBe(false);
   });
 });

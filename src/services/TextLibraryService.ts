@@ -18,42 +18,10 @@ import type {
   TextSegment,
 } from '@/types';
 
-import daodejingData from '@/data/texts/daodejing.json';
-import lunyuData from '@/data/texts/lunyu.json';
-import daxueData from '@/data/texts/daxue.json';
-import zhongyongData from '@/data/texts/zhongyong.json';
-import mengziData from '@/data/texts/mengzi.json';
-import zhuangziData from '@/data/texts/zhuangzi.json';
-import shijingData from '@/data/texts/shijing.json';
-import xunziData from '@/data/texts/xunzi.json';
-import chuciData from '@/data/texts/chuci.json';
-import tangshiData from '@/data/texts/tangshi.json';
-import zhouyiData from '@/data/texts/zhouyi.json';
-import zuozhuanData from '@/data/texts/zuozhuan.json';
-import shijiData from '@/data/texts/shiji.json';
-import tongjianData from '@/data/texts/tongjian.json';
-import moziData from '@/data/texts/mozi.json';
-import wenxuanData from '@/data/texts/wenxuan.json';
+import { BUILTIN_BOOKS } from '@/data/builtinBooks';
 
-/** 内置书籍原始数据（16 部：经部 7 部 + 史部 2 部 + 子部 4 部 + 集部 3 部） */
-const RAW_BOOKS = [
-  daodejingData,
-  lunyuData,
-  daxueData,
-  zhongyongData,
-  mengziData,
-  zhuangziData,
-  shijingData,
-  xunziData,
-  chuciData,
-  tangshiData,
-  zhouyiData,
-  zuozhuanData,
-  shijiData,
-  tongjianData,
-  moziData,
-  wenxuanData,
-];
+/** 被用户删除（抑制）的内置书 ID 集合（UserBookService 启动时经 setSuppressedBuiltins 注入） */
+let suppressedBuiltins: Set<string> = new Set();
 
 /** 书籍缓存（惰性构建） */
 let booksCache: Book[] | null = null;
@@ -76,12 +44,15 @@ const CATEGORIES: Category[] = [
   { key: 'user', label: '书' },
 ];
 
-/** 构建完整书籍列表（内置在前，用户书在后；含缓存） */
+/** 构建完整书籍列表（未被删除的内置书在前，用户书在后；含缓存） */
 function buildBooks(): Book[] {
   if (booksCache) {
     return booksCache;
   }
-  booksCache = [...(RAW_BOOKS as Book[]), ...userBooks];
+  const builtins = (BUILTIN_BOOKS as Book[]).filter(
+    (b) => !suppressedBuiltins.has(b.id),
+  );
+  booksCache = [...builtins, ...userBooks];
   return booksCache;
 }
 
@@ -138,6 +109,25 @@ function filterByCategory(books: Book[], category?: BookCategory): Book[] {
     return books;
   }
   return books.filter((b) => b.category === category);
+}
+
+/**
+ * 设置被删除（抑制）的内置书 ID 集合，重建缓存与全部索引。
+ * 仅供 UserBookService 调用：内置书可被用户删除，删除后从书架移除；
+ * 「恢复内置书籍」时传空数组即可全部找回。
+ */
+function setSuppressedBuiltins(ids: string[]): ServiceResult<null> {
+  try {
+    suppressedBuiltins = new Set(ids);
+    booksCache = null;
+    chapterIndex = null;
+    segmentIndex = null;
+    buildBooks();
+    buildIndexes();
+    return { success: true, data: null };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
 }
 
 export const TextLibraryService = {
@@ -245,6 +235,12 @@ export const TextLibraryService = {
    * 仅供 UserBookService 调用；ID 必须以 user- 开头。
    */
   registerUserBooks,
+
+  /**
+   * 设置被删除（抑制）的内置书集合，重建全部索引。
+   * 仅供 UserBookService 调用；传空数组恢复全部内置书。
+   */
+  setSuppressedBuiltins,
 
   /** 判定是否用户上传书籍 */
   isUserBook: isUserBookId,

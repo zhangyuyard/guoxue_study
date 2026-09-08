@@ -5,7 +5,7 @@
  * 用可编程 quick-sqlite mock（按 db 名分流 user_books.db / guoxue.db）+
  * 真实 store（内存列表 + SQLite 持久层双断言）：
  *   - 删书成功 → 四类数据被清，他书数据保留
- *   - 内置书拒绝删除 → 无任何级联清理副作用
+ *   - 内置书可删除 → 级联清理按 bookId 生效，他书数据保留
  *   - 某一步清理失败 → 不阻断删除成功结果，其余步骤照常执行
  * 划线（highlights）刻意不在清理范围（阅读页按段落渲染，删书后自然
  * 不显示且无独立展示页），本套件不对其做断言。
@@ -343,25 +343,30 @@ describe('UserBookService.deleteBook 级联清理（孤儿数据 BugFix）', () 
     expect(useReaderStore.getState().lastRead).toEqual(keptLastRead);
   });
 
-  test('内置书拒绝删除 → 无任何级联清理副作用', async () => {
-    const keptId = 'shijing';
-    seedCascadeData('user-pending', keptId);
+  test('内置书可删除 → 级联清理按 bookId 生效，他书数据保留', async () => {
+    // 预置：user-pending（保留）与 shijing（待删内置书）各有一套数据
+    const goneId = 'shijing';
+    seedCascadeData('user-pending', goneId);
 
-    const del = await UserBookService.deleteBook('lunyu');
-    expect(del.success).toBe(false);
-    expect(del.error).toBe('内置经典不可删除');
+    const del = await UserBookService.deleteBook(goneId);
+    expect(del.success).toBe(true);
 
-    // 四类数据原样保留（含指向待删书的 lastRead）
-    expect(useRecitationStore.getState().list).toHaveLength(2);
-    expect(useBookmarkStore.getState().bookmarks).toHaveLength(2);
-    expect(useNoteStore.getState().notes).toHaveLength(2);
+    // 被删内置书的四类数据级联清理，保留书数据原样
+    expect(useRecitationStore.getState().list.map((r) => r.bookId)).toEqual([
+      'user-pending',
+    ]);
+    expect(useBookmarkStore.getState().bookmarks.map((b) => b.id)).toEqual([
+      'bm-gone',
+    ]);
+    expect(useNoteStore.getState().notes.map((n) => n.id)).toEqual(['note-gone']);
+    // 续读位置指向保留书（user-pending），不受删除影响
     expect(useReaderStore.getState().lastRead).toEqual({
       bookId: 'user-pending',
       chapterId: 'c1',
     });
-    expect(__cascadeState.recitationRows).toHaveLength(2);
-    expect(__cascadeState.bookmarkRows).toHaveLength(2);
-    expect(__cascadeState.noteRows).toHaveLength(2);
+    expect(__cascadeState.recitationRows.map((r: Record<string, unknown>) => r.book_id)).toEqual([
+      'user-pending',
+    ]);
   });
 
   test('某一步清理失败（收藏）不阻断删除成功结果，其余步骤照常执行', async () => {
