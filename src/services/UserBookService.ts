@@ -62,11 +62,109 @@ const MAX_SEGMENT_CHARS = 2500;
 const SEGMENTS_PER_PART = 60;
 /** 章节数上限（防畸形文件撑爆 db） */
 const MAX_CHAPTERS = 5000;
+/**
+ * db 解析缓存单行 JSON 上限。超大书（如数百 MB epub）的解析结果不进 db：
+ * 真机已踩坑——161MB epub 的解析 JSON 整块写入单行，诱发 db 损坏
+ * （disk I/O error）且 SELECT 全量装载时内存爆炸。超限书籍每轮启动
+ * 重新解析（正源仍是书籍文件夹文件，功能不受影响，仅启动稍慢）。
+ */
+const MAX_CACHE_JSON_CHARS = 32 * 1024 * 1024;
 
 type DB = ReturnType<typeof open>;
 
 /** 已打开连接（惰性单例） */
 let db: DB | null = null;
+
+/** 本会话是否已尝试过删库重建（防循环重建） */
+let dbRepairAttempted = false;
+
+/** 建表 + 增量迁移（新建/重建后都会走） */
+function createUserBooksSchema(instance: DB): void {
+  instance.execute(
+    `CREATE TABLE IF NOT EXISTS user_books (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      author TEXT NOT NULL DEFAULT '',
+      data TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`,
+  );
+  // 文件夹化增列（旧库原地演进；已存在时 ALTER 报错吞掉即可）：
+  //   source_path —— 书籍源文件在书籍文件夹内的绝对路径；NULL = 文件夹化
+  //                  之前的遗留书（应用内管理，扫描不触碰）；
+  //   file_sig    —— 源文件指纹「mtimeMs:size」，未变则复用解析结果。
+  for (const ddl of [
+    'ALTER TABLE user_books ADD COLUMN source_path TEXT',
+    'ALTER TABLE user_books ADD COLUMN file_sig TEXT',
+    'ALTER TABLE user_books ADD COLUMN content_hash TEXT',
+  ]) {
+    try {
+      instance.execute(ddl);
+    } catch {
+      // 列已存在
+    }
+  }
+  // 被用户删除的内置书抑制表（内置书正源在 assets，删除靠抑制记录防复活）
+  instance.execute(
+    'CREATE TABLE IF NOT EXISTS builtin_hidden (id TEXT PRIMARY KEY)',
+  );
+}
+
+/**
+ * 探针：验证连接真实可用。损坏的 db（disk I/O error）建表语句可能
+ * 假成功（CREATE TABLE IF NOT EXISTS 不触数据页），必须实际读一次。
+ */
+function probeUserBooksDb(instance: DB): boolean {
+  try {
+    instance.execute('SELECT id FROM user_books LIMIT 1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 删库重建。user_books.db 为纯解析缓存：书籍正源在书籍文件夹/assets，
+ * 学习数据（背诵/笔记/收藏）在主库与 MMKV，删除重建不丢任何用户资产。
+ * 唯一代价：被删除过的内置书（抑制记录）会复活、created_at 归零。
+ */
+function repairUserBooksDb(): DB | null {
+  try {
+    try {
+      db?.close();
+    } catch {
+      // 旧连接可能已失效
+    }
+    db = null;
+    try {
+      const stale = open({ name: USER_BOOKS_DB, location: DB_LOCATION });
+      stale.delete();
+      try {
+        stale.close();
+      } catch {
+        // delete 可能已同时关闭
+      }
+    } catch (e) {
+      console.warn('[UserBookService] 删除损坏 db 失败:', (e as Error)?.message ?? e);
+    }
+  } catch (e) {
+    console.warn('[UserBookService] db 重建准备失败:', (e as Error)?.message ?? e);
+  }
+  try {
+    const instance = open({ name: USER_BOOKS_DB, location: DB_LOCATION });
+    createUserBooksSchema(instance);
+    if (!probeUserBooksDb(instance)) {
+      console.warn('[UserBookService] db 重建后探针仍失败，本会话书籍功能降级');
+      return null;
+    }
+    console.warn('[UserBookService] user_books.db 已删库重建成功');
+    db = instance;
+    return instance;
+  } catch (e) {
+    console.warn('[UserBookService] user_books.db 重建失败:', (e as Error)?.message ?? e);
+    return null;
+  }
+}
 
 function getDb(): DB | null {
   if (db) {
@@ -74,36 +172,24 @@ function getDb(): DB | null {
   }
   try {
     const instance = open({ name: USER_BOOKS_DB, location: DB_LOCATION });
-    instance.execute(
-      `CREATE TABLE IF NOT EXISTS user_books (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        author TEXT NOT NULL DEFAULT '',
-        data TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-      )`,
-    );
-    // 文件夹化增列（旧库原地演进；已存在时 ALTER 报错吞掉即可）：
-    //   source_path —— 书籍源文件在书籍文件夹内的绝对路径；NULL = 文件夹化
-    //                  之前的遗留书（应用内管理，扫描不触碰）；
-    //   file_sig    —— 源文件指纹「mtimeMs:size」，未变则复用解析结果。
-    for (const ddl of [
-      'ALTER TABLE user_books ADD COLUMN source_path TEXT',
-      'ALTER TABLE user_books ADD COLUMN file_sig TEXT',
-    ]) {
-      try {
-        instance.execute(ddl);
-      } catch {
-        // 列已存在
+    createUserBooksSchema(instance);
+    if (!probeUserBooksDb(instance)) {
+      // 真机已踩坑：db 损坏（SQL execution error: disk I/O error）→
+      // 所有查询全灭、书架空白且无诊断。纯缓存库，直接删库重建。
+      if (!dbRepairAttempted) {
+        dbRepairAttempted = true;
+        return repairUserBooksDb();
       }
+      return null;
     }
-    // 被用户删除的内置书抑制表（内置书正源在 bundle，删除靠抑制记录防复活）
-    instance.execute(
-      'CREATE TABLE IF NOT EXISTS builtin_hidden (id TEXT PRIMARY KEY)',
-    );
     db = instance;
     return instance;
-  } catch {
+  } catch (e) {
+    console.warn('[UserBookService] 打开 user_books.db 失败:', (e as Error)?.message ?? e);
+    if (!dbRepairAttempted) {
+      dbRepairAttempted = true;
+      return repairUserBooksDb();
+    }
     return null;
   }
 }
@@ -158,6 +244,114 @@ export function stableBookIdFromPath(fileName: string): string {
     h = Math.imul(h, 0x01000193);
   }
   return `user-h${(h >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+/**
+ * 内容签名：与路径/文件名无关的文件内容指纹（导入去重用）。
+ * 全量双散列（FNV-1a 32bit ⊕ djb2）+ 字节长度——字节级相同的文件
+ * （同一本书被改名/移动/复制后再导入）必得同签名；不同书碰撞概率
+ * 可忽略。签名前缀 cs1 便于未来演进哈希算法时区分世代。
+ */
+function contentSignature(bytes: Uint8Array): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 5381;
+  for (let i = 0; i < bytes.length; i += 1) {
+    const b = bytes[i];
+    h1 ^= b;
+    h1 = Math.imul(h1, 0x01000193) >>> 0;
+    h2 = (Math.imul(h2, 33) + b) >>> 0;
+  }
+  return `cs1-${h1.toString(16)}-${h2.toString(16)}-${bytes.length}`;
+}
+
+/** 文本 → UTF-8 字节（签名口径统一为解码后文本，同书不同编码同签名） */
+function utf8Bytes(text: string): Uint8Array {
+  const out: number[] = [];
+  for (let i = 0; i < text.length; i += 1) {
+    let code = text.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
+      const lo = text.charCodeAt(i + 1);
+      if (lo >= 0xdc00 && lo <= 0xdfff) {
+        code = 0x10000 + ((code - 0xd800) << 10) + (lo - 0xdc00);
+        i += 1;
+      }
+    }
+    if (code < 0x80) {
+      out.push(code);
+    } else if (code < 0x800) {
+      out.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    } else if (code < 0x10000) {
+      out.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    } else {
+      out.push(
+        0xf0 | (code >> 18),
+        0x80 | ((code >> 12) & 0x3f),
+        0x80 | ((code >> 6) & 0x3f),
+        0x80 | (code & 0x3f),
+      );
+    }
+  }
+  return Uint8Array.from(out);
+}
+
+/** 从 file_sig「mtimeMs:size」中提取文件字节数（无信息时返回 -1） */
+function sizeFromFileSig(fileSig: string | null | undefined): number {
+  if (!fileSig) {
+    return -1;
+  }
+  const size = Number(String(fileSig).split(':').pop());
+  return Number.isFinite(size) && size >= 0 ? size : -1;
+}
+
+/**
+ * 查找书架中与给定内容签名相同的书（导入去重）。
+ * 匹配两级：① content_hash 直接相等；② 旧数据无哈希但文件大小相同 →
+ * 现场读取该书源文件计算哈希比对（仅在导入时发生，代价可接受）。
+ * 返回重复书的 id（无重复返回 null）；db 异常时返回 null（放行导入，
+ * 不因查重故障阻断正常导入）。
+ */
+async function findDuplicateBook(
+  instance: DB,
+  sig: string,
+  sizeBytes: number,
+): Promise<string | null> {
+  let rows: Array<{
+    id: string;
+    title: string;
+    source_path: string | null;
+    file_sig: string | null;
+    content_hash: string | null;
+  }> = [];
+  try {
+    const res = instance.execute(
+      'SELECT id, title, source_path, file_sig, content_hash FROM user_books',
+    );
+    rows = (res.rows?._array ?? []) as typeof rows;
+  } catch (e) {
+    console.warn('[UserBookService] 导入查重查询失败（放行导入）:', (e as Error)?.message ?? e);
+    return null;
+  }
+  for (const r of rows) {
+    if (r.content_hash) {
+      if (r.content_hash === sig) {
+        return r.id;
+      }
+      continue;
+    }
+    // 旧数据无哈希：先比文件大小（字节级相同必同大小），大小相同才读文件比对
+    if (sizeFromFileSig(r.file_sig) === sizeBytes && r.source_path) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const bytesRes = await readFileBytes(r.source_path);
+        if (bytesRes.success && bytesRes.data && contentSignature(bytesRes.data) === sig) {
+          return r.id;
+        }
+      } catch {
+        // 单行比对失败不影响整体查重
+      }
+    }
+  }
+  return null;
 }
 
 /** 内置书 → 带章节标记的纯文本（@@CH@@标题 + 段落空行分隔，资源副本格式） */
@@ -577,11 +771,13 @@ export function parseTxtBook(
 /** 内存中的用户书列表（注册进 TextLibraryService 的数据源） */
 let loadedBooks: Book[] = [];
 
-/** 单个文件夹文件的解析结果（含文件指纹） */
+/** 单个文件夹文件的解析结果（含文件指纹与内容签名，导入去重用） */
 interface ParsedFileBook {
   book: Book;
   sourcePath: string;
   fileSig: string;
+  /** 内容签名（与路径/文件名无关，解析时顺带产出，零额外读取） */
+  contentHash?: string;
 }
 
 /**
@@ -631,7 +827,8 @@ async function parseBookFile(
       book.category = spec.category;
       book.description = spec.description;
     }
-    return { book, sourcePath, fileSig };
+    // 内容签名：解码后文本口径（同书不同编码同签名），解析时顺带产出
+    return { book, sourcePath, fileSig, contentHash: contentSignature(utf8Bytes(text)) };
   } catch {
     return null;
   }
@@ -669,7 +866,12 @@ async function parseBuiltinFromAssets(
     } catch {
       // 未物化：占位签名
     }
-    return { book, sourcePath: canonicalPath, fileSig };
+    return {
+      book,
+      sourcePath: canonicalPath,
+      fileSig,
+      contentHash: contentSignature(utf8Bytes(text)),
+    };
   } catch {
     return null;
   }
@@ -729,7 +931,8 @@ export function getLibrarySyncDiagnostics(): LibrarySyncDiagnostics {
  * 不阻断书架可用性。
  */
 export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSummary>> {
-  const instance = getDb();
+  // let：db 损坏自愈重建后需替换为新鲜连接（旧连接所有查询报 disk I/O error）
+  let instance = getDb();
   if (!instance) {
     return { success: false, error: '用户书籍数据库不可用' };
   }
@@ -777,29 +980,48 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
       data: string;
       source_path: string | null;
       file_sig: string | null;
+      content_hash: string | null;
       created_at: number;
     }> = [];
     try {
       const allRes = instance.execute(
-        'SELECT id, title, author, data, source_path, file_sig, created_at FROM user_books ORDER BY created_at DESC',
+        'SELECT id, title, author, data, source_path, file_sig, content_hash, created_at FROM user_books ORDER BY created_at DESC',
       );
       rows = (allRes.rows?._array ?? []) as typeof rows;
     } catch (e) {
-      console.warn('[UserBookService] user_books 全量查询失败，降级为仅读 data 列:', (e as Error)?.message ?? e);
-      try {
-        const fbRes = instance.execute('SELECT data FROM user_books ORDER BY created_at DESC');
-        rows = ((fbRes.rows?._array ?? []) as Array<{ data: string }>).map((r) => ({
-          id: '',
-          title: '',
-          author: '',
-          data: r.data,
-          source_path: null,
-          file_sig: null,
-          created_at: 0,
-        }));
-      } catch (e2) {
-        console.warn('[UserBookService] user_books 降级查询亦失败:', (e2 as Error)?.message ?? e2);
-        rows = [];
+      console.warn('[UserBookService] user_books 全量查询失败:', (e as Error)?.message ?? e);
+      // 损坏 db 自愈（真机：SQL execution error: disk I/O error）：删库重建
+      // 后重试一次。user_books 为纯缓存表，重建不丢任何用户资产。
+      const repaired = repairUserBooksDb();
+      if (repaired) {
+        instance = repaired;
+        try {
+          const retryRes = instance.execute(
+            'SELECT id, title, author, data, source_path, file_sig, content_hash, created_at FROM user_books ORDER BY created_at DESC',
+          );
+          rows = (retryRes.rows?._array ?? []) as typeof rows;
+        } catch (e1) {
+          console.warn('[UserBookService] 重建后重试仍失败:', (e1 as Error)?.message ?? e1);
+        }
+      }
+      if (rows.length === 0) {
+        // 仍不可用：退化为仅读 data 列（旧库/异常库尽量显示书籍）
+        try {
+          const fbRes = instance.execute('SELECT data FROM user_books ORDER BY created_at DESC');
+          rows = ((fbRes.rows?._array ?? []) as Array<{ data: string }>).map((r) => ({
+            id: '',
+            title: '',
+            author: '',
+            data: r.data,
+            source_path: null,
+            file_sig: null,
+            content_hash: null,
+            created_at: 0,
+          }));
+        } catch (e2) {
+          console.warn('[UserBookService] user_books 降级查询亦失败:', (e2 as Error)?.message ?? e2);
+          rows = [];
+        }
       }
     }
     type Row = (typeof rows)[number];
@@ -865,18 +1087,24 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
             summary.imported += 1;
           }
           try {
-            instance.execute(
-              'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at, source_path, file_sig) VALUES (?, ?, ?, ?, ?, ?, ?)',
-              [
-                parsed.book.id,
-                parsed.book.title,
-                parsed.book.author,
-                JSON.stringify(parsed.book),
-                row ? row.created_at : Date.now(),
-                parsed.sourcePath,
-                parsed.fileSig,
-              ],
-            );
+            const cacheJson = JSON.stringify(parsed.book);
+            // 超限大书不进 db（防 db 损坏与装载内存爆炸）：本会话内存可用，
+            // 下轮启动重新解析。content_hash 顺带回填（导入查重用）
+            if (cacheJson.length <= MAX_CACHE_JSON_CHARS) {
+              instance.execute(
+                'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at, source_path, file_sig, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                [
+                  parsed.book.id,
+                  parsed.book.title,
+                  parsed.book.author,
+                  cacheJson,
+                  row ? row.created_at : Date.now(),
+                  parsed.sourcePath,
+                  parsed.fileSig,
+                  parsed.contentHash,
+                ],
+              );
+            }
           } catch {
             // 持久化失败仍注册进内存（本会话可读，下次启动重解析）
           }
@@ -933,12 +1161,15 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
         let loaded: Book | null = null;
         let sourcePath = canonicalPath;
         let fileSig = row?.file_sig ?? '0:0';
+        let contentHash: string | null = row?.content_hash ?? null;
+        let fromCache = false;
         if (row) {
           // db 缓存优先（零 IO）；标题比对覆盖 App 升级换元数据的场景
           try {
             const cached = JSON.parse(row.data) as Book;
             if (cached && cached.id === spec.id && cached.title === spec.title && Array.isArray(cached.chapters)) {
               loaded = cached;
+              fromCache = true;
             }
           } catch {
             // 缓存损坏走重解析
@@ -950,12 +1181,14 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
             loaded = parsed.book;
             sourcePath = parsed.sourcePath;
             fileSig = parsed.fileSig;
+            contentHash = parsed.contentHash ?? null;
           } else {
             const fromAssets = await parseBuiltinFromAssets(spec, canonicalPath);
             if (fromAssets) {
               loaded = fromAssets.book;
               sourcePath = fromAssets.sourcePath;
               fileSig = fromAssets.fileSig;
+              contentHash = fromAssets.contentHash ?? null;
             }
           }
         }
@@ -964,21 +1197,26 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
           console.warn(`[UserBookService] 内置书三路来源全部失败：${spec.id}`);
           continue;
         }
-        try {
-          instance.execute(
-            'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at, source_path, file_sig) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [
-              loaded.id,
-              loaded.title,
-              loaded.author,
-              JSON.stringify(loaded),
-              row ? row.created_at : Date.now(),
-              sourcePath,
-              fileSig,
-            ],
-          );
-        } catch {
-          // 持久化失败仍注册进内存（本会话可读，下次启动重解析）
+        // 缓存命中且行已完整时跳过重写（写失败/重建后的行才补写）；
+        // 重解析行顺带回填 content_hash（导入查重用）
+        if (!fromCache || !contentHash) {
+          try {
+            instance.execute(
+              'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at, source_path, file_sig, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+              [
+                loaded.id,
+                loaded.title,
+                loaded.author,
+                JSON.stringify(loaded),
+                row ? row.created_at : Date.now(),
+                sourcePath,
+                fileSig,
+                contentHash,
+              ],
+            );
+          } catch {
+            // 持久化失败仍注册进内存（本会话可读，下次启动重解析）
+          }
         }
         builtinLoaded.push(loaded);
         lastSyncDiagnostics.builtinFilesSeen += 1;
@@ -1166,10 +1404,16 @@ export async function restoreUserBooks(
     try {
       // 同 id 幂等覆盖；created_at 取恢复时刻（书架按 created_at 排序，
       // 恢复书排在最近，与「刚导入了书」的用户直觉一致）
-      instance.execute(
-        'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at) VALUES (?, ?, ?, ?, ?)',
-        [book.id, book.title, book.author, JSON.stringify(book), Date.now()],
-      );
+      const cacheJson = JSON.stringify(book);
+      if (cacheJson.length <= MAX_CACHE_JSON_CHARS) {
+        instance.execute(
+          'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at) VALUES (?, ?, ?, ?, ?)',
+          [book.id, book.title, book.author, cacheJson, Date.now()],
+        );
+      } else {
+        // 超限大书不进 db（防 db 损坏）：本会话内存可读，冷启动后不保留
+        console.warn(`[UserBookService] 恢复书超缓存上限，仅本会话内存可读：${book.title}`);
+      }
     } catch (e) {
       return { success: false, error: `恢复书籍失败：${(e as Error).message}` };
     }
@@ -1249,6 +1493,12 @@ export async function importBook(
 
   const fileNameInFolder = destPath.split('/').pop() ?? file.fileName;
   const id = stableBookIdFromPath(fileNameInFolder);
+
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: '用户书籍数据库不可用' };
+  }
+
   const parsed = await parseBookFile(destPath, fileNameInFolder, id);
   if (!parsed) {
     // 解析失败不残留半截文件（已复制但无有效内容）
@@ -1260,23 +1510,63 @@ export async function importBook(
     return { success: false, error: '未解析出任何内容（文件可能为空或格式损坏）' };
   }
 
-  const instance = getDb();
-  if (!instance) {
-    return { success: false, error: '用户书籍数据库不可用' };
-  }
-  try {
-    instance.execute(
-      'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at, source_path, file_sig) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [
-        parsed.book.id,
-        parsed.book.title,
-        parsed.book.author,
-        JSON.stringify(parsed.book),
-        Date.now(),
-        parsed.sourcePath,
-        parsed.fileSig,
-      ],
+  // 内容去重：与路径/文件名无关——同一本书（内容相同，含改名/换目录/
+  // 与内置书同内容）已在书架即拒绝导入。签名由解析顺带产出（零额外读取）；
+  // 解析失败/签名缺失时放行导入，不因查重故障阻断正常功能。
+  if (parsed.contentHash) {
+    const dupId = await findDuplicateBook(
+      instance,
+      parsed.contentHash,
+      sizeFromFileSig(parsed.fileSig),
     );
+    // 同 id 豁免：同名文件（stableBookId 相同）= 幂等覆盖（重导/半截修复
+    // 场景）；不同 id 的同内容书才判定为重复（改名/换目录再导入）。
+    if (dupId && dupId !== id) {
+      try {
+        await RNFS.unlink(destPath);
+      } catch {
+        // 清理失败不影响结果
+      }
+      const dupTitle = TextLibraryService.getBook(dupId).data?.title ?? dupId;
+      return {
+        success: false,
+        error: `书架已有内容相同的书：《${dupTitle}》，同一本书无需重复导入`,
+      };
+    }
+  }
+
+  try {
+    const cacheJson = JSON.stringify(parsed.book);
+    if (cacheJson.length <= MAX_CACHE_JSON_CHARS) {
+      instance.execute(
+        'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at, source_path, file_sig, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          parsed.book.id,
+          parsed.book.title,
+          parsed.book.author,
+          cacheJson,
+          Date.now(),
+          parsed.sourcePath,
+          parsed.fileSig,
+          parsed.contentHash,
+        ],
+      );
+    } else {
+      // 超限大书不进 db（防 db 损坏与装载内存爆炸）：本会话内存可用，
+      // 下轮启动重新解析
+      instance.execute(
+        'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at, source_path, file_sig) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [
+          parsed.book.id,
+          parsed.book.title,
+          parsed.book.author,
+          cacheJson,
+          Date.now(),
+          parsed.sourcePath,
+          parsed.fileSig,
+        ],
+      );
+    }
   } catch (e) {
     return { success: false, error: `保存书籍失败：${(e as Error).message}` };
   }

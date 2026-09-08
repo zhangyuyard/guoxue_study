@@ -52,7 +52,7 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
     });
     // 阶段二：装载用户上传书籍后整体刷新。
     // 最终状态与旧实现一致：内置 + 用户书全量、loading 收敛为 false。
-    await UserBookService.loadAndRegisterAll();
+    const loadRes = await UserBookService.loadAndRegisterAll();
     const booksRes = TextLibraryService.getBooks();
     const catRes = TextLibraryService.getCategories();
     if (booksRes.success && booksRes.data) {
@@ -60,10 +60,14 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
         books: booksRes.data,
         categories: catRes.success && catRes.data ? catRes.data : [],
         loading: false,
-        error: undefined,
+        // 装载失败不再静默（如 db 不可用）：书架显示错误而不是无声空白
+        error: loadRes.success ? undefined : loadRes.error ?? '加载书籍失败',
       });
     } else {
-      set({ loading: false, error: booksRes.error ?? '加载文本库失败' });
+      set({
+        loading: false,
+        error: booksRes.error ?? loadRes.error ?? '加载文本库失败',
+      });
     }
   },
 

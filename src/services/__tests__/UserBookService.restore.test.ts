@@ -41,7 +41,7 @@ jest.mock('react-native-quick-sqlite', () => {
               }
               return { rows: { _array: [], length: 0 } };
             }
-            if (/SELECT id, title, author, data, source_path, file_sig, created_at FROM user_books/.test(sql)) {
+            if (/SELECT id, title, author, data, source_path, file_sig, content_hash, created_at FROM user_books/.test(sql)) {
               return {
                 rows: {
                   _array: mockState.userBooks.map((r) => ({
