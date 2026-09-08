@@ -61,15 +61,17 @@ describe('Bug 2：向前拼接的触发与补偿', () => {
   test('定位落位贴近顶部时主动触发一次向前拼接（统一走 shouldAutoPrepend 判定）', () => {
     // 【4】切章防跳动：定位落位属程序化滚动（非手势窗口），正常不触发拼接；
     // 仅当用户恰在此刻手势滚动且朝顶部移动时才拼接
+    // 【5】执行统一收敛到 requestAutoPrepend（手势进行中只记延迟意图）
     expect(source).toMatch(
-      /if \(shouldAutoPrepend\(targetOffset\)\) \{\s*\n\s*prependPreviousChapter\(\);/,
+      /if \(shouldAutoPrepend\(targetOffset\)\) \{\s*\n\s*requestAutoPrepend\(targetOffset\);/,
     );
   });
 
   test('onContentSizeChange 保留顶部主动拼接兜底（统一走 shouldAutoPrepend 判定）', () => {
     // 【4】同上：兜底保留，仅在用户手势窗口内且朝顶部方向时触发
+    // 【5】执行统一收敛到 requestAutoPrepend（手势进行中只记延迟意图）
     expect(source).toMatch(
-      /if \(h > 0 && shouldAutoPrepend\(scrollOffset\.current\)\) \{\s*\n\s*prependPreviousChapter\(\);/,
+      /if \(h > 0 && shouldAutoPrepend\(scrollOffset\.current\)\) \{\s*\n\s*requestAutoPrepend\(scrollOffset\.current\);/,
     );
   });
 
@@ -82,6 +84,15 @@ describe('Bug 2：向前拼接的触发与补偿', () => {
     );
     expect(source).toMatch(
       /return offset <= 0 \|\| offset < lastScrollOffsetRef\.current;/,
+    );
+  });
+
+  test('统一执行入口 requestAutoPrepend：手势进行中只记延迟意图不立即 prepend', () => {
+    expect(source).toMatch(/const requestAutoPrepend = useCallback/);
+    // 手指按住拖拽（dragActiveRef）或惯性滚动中（userScrollActiveRef）时
+    // 置位 deferredPrependIntentRef，待手势完全结束后消费
+    expect(source).toMatch(
+      /if \(dragActiveRef\.current \|\| userScrollActiveRef\.current\) \{\s*\n\s*deferredPrependIntentRef\.current = true;/,
     );
   });
 
@@ -182,6 +193,92 @@ describe('第四轮：贪心填充拆分 + 黑影自愈 + 预加载与触发可�
     expect(source).toMatch(/viewH\.current \* CONTIGUOUS_PRELOAD_SCREENS/);
     expect(source).toMatch(/onStartReachedThreshold=\{CONTIGUOUS_PRELOAD_SCREENS\}/);
     expect(source).toMatch(/onEndReachedThreshold=\{CONTIGUOUS_PRELOAD_SCREENS\}/);
+  });
+});
+
+describe('第五轮：跳章后立即上滑防跳章（章首驻留期 + 手势结束后置补偿）', () => {
+  test('显式跳章进入章首驻留期：切章 effect 消费 explicitChapterJumpRef 时置位', () => {
+    expect(source).toMatch(
+      /const chapterHeadDwellRef = useRef<\{ chapterId: string \} \| null>\(null\);/,
+    );
+    expect(source).toMatch(
+      /chapterHeadDwellRef\.current =\s*\n\s*explicitJump && chapterId \? \{ chapterId \} : null;/,
+    );
+  });
+
+  test('驻留期内 shouldAutoPrepend 拦截 offset > 0 的手势拼接（保留 offset ≤ 0 回弹路径）', () => {
+    // 驻留判定在方向判定之前：仅拦截「未压顶/回弹」的手势滚动，
+    // 章首回弹（offset ≤ 0，endDrag 放行）的读上一章入口不受影响
+    expect(source).toMatch(
+      /const dwell = chapterHeadDwellRef\.current;\s*\n\s*if \(dwell && offset > 0 && dwell\.chapterId === activeChapterIdRef\.current\) \{\s*\n\s*return false;\s*\n\s*\}\s*\n\s*return offset <= 0 \|\| offset < lastScrollOffsetRef\.current;/,
+    );
+  });
+
+  test('驻留期解除：读出超过 CHAPTER_HEAD_DWELL_SCREENS 屏高或当前章已前移', () => {
+    expect(source).toMatch(/const CHAPTER_HEAD_DWELL_SCREENS = 0\.5;/);
+    expect(source).toMatch(
+      /\(viewH\.current > 0 && offset > viewH\.current \* CHAPTER_HEAD_DWELL_SCREENS\) \|\|\s*\n\s*dwell\.chapterId !== activeChapterIdRef\.current/,
+    );
+    expect(source).toMatch(/chapterHeadDwellRef\.current = null;/);
+  });
+
+  test('endDrag offset ≤ 0 路径只记延迟意图，不在拖拽刚结束时刻立即 prepend', () => {
+    // endDrag ≠ 手势完全结束（惯性可能随后进行）：补偿 scrollTo 必须等
+    // onMomentumScrollEnd / 关窗计时器确认原生滚动停止后执行（原子性）
+    expect(source).toMatch(
+      /const allow = shouldAutoPrepend\(offset\);\s*\n\s*dragActiveRef\.current = false;[\s\S]*?if \(allow\) \{\s*\n\s*\/\/ 【5】延迟到手势完全结束后消费[\s\S]*?deferredPrependIntentRef\.current = true;\s*\n\s*\}/,
+    );
+    // endDrag 的直接 prepend 调用必须移除（改经 consumeDeferredPrepend）
+    const endDragBody = source.match(
+      /const handleScrollEndDrag = useCallback\([\s\S]*?\n  \}, \[[^\]]*\]\);/,
+    );
+    expect(endDragBody).toBeTruthy();
+    expect(endDragBody![0]).not.toMatch(/prependPreviousChapter\(\);/);
+  });
+
+  test('延迟意图的两个统一消费出口：onMomentumScrollEnd 与 endDrag 关窗计时器', () => {
+    expect(source).toMatch(/const consumeDeferredPrepend = useCallback/);
+    // 惯性结束 + 无惯性关窗兜底两处都要消费（各自原生滚动已停止）
+    expect(
+      (source.match(/consumeDeferredPrepend\(\);/g) ?? []).length,
+    ).toBeGreaterThanOrEqual(2);
+    // 消费前重新校验位置（预载窗口内）与方向（朝顶部/压顶），意图过期即丢弃
+    expect(source).toMatch(
+      /if \(offset > viewH\.current \* CONTIGUOUS_PRELOAD_SCREENS\) \{\s*\n\s*return;\s*\n\s*\}\s*\n\s*\/\/ 方向校验[\s\S]*?if \(!\(offset <= 0 \|\| offset < lastScrollOffsetRef\.current\)\) \{\s*\n\s*return;\s*\n\s*\}\s*\n\s*prependPreviousChapter\(\);/,
+    );
+  });
+
+  test('拖拽开/关标记 dragActiveRef 与手势窗口生命周期同步', () => {
+    expect(source).toMatch(/const dragActiveRef = useRef\(false\);/);
+    expect(source).toMatch(
+      /const handleScrollBeginDrag = useCallback\(\(\) => \{\s*\n\s*userScrollActiveRef\.current = true;\s*\n\s*dragActiveRef\.current = true;/,
+    );
+  });
+
+  test('补偿单一源：补偿 scrollTo 仅存在于 prependAnchor 守卫的两处消费点', () => {
+    // handleRowLayout 锚点行路径 + onContentSizeChange 增量兜底路径，
+    // 均以 prependAnchor 非空为前提且消费后立即置空（一次 prepend 至多一处补偿）
+    expect(source).toMatch(
+      /const anchor = prependAnchor\.current;\s*\n\s*if \(anchor != null && rowId === anchor\.firstRowId && y > 0\) \{/,
+    );
+    expect(source).toMatch(
+      /const anchorNow = prependAnchor\.current;\s*\n\s*if \(anchorNow\) \{/,
+    );
+    // 锚点置空点：种子重置 / 丢头放弃 / 行布局消费 / contentSize 兜底消费 ≥ 4 处
+    expect(
+      (source.match(/prependAnchor\.current = null;/g) ?? []).length,
+    ).toBeGreaterThanOrEqual(4);
+  });
+
+  test('切章/换模式残留清零：延迟意图与驻留期不得跨章消费', () => {
+    // 模式切换 effect（列表重挂载）清空手势窗口 + 延迟意图 + 驻留期
+    expect(source).toMatch(
+      /userScrollActiveRef\.current = false;\s*\n\s*dragActiveRef\.current = false;\s*\n\s*deferredPrependIntentRef\.current = false;\s*\n\s*chapterHeadDwellRef\.current = null;/,
+    );
+    // 拼接种子重置 effect 清空延迟意图（旧手势周期不得消费到新章列表）
+    expect(source).toMatch(
+      /\/\/ 【5】清空延迟拼接意图：旧手势周期的意图不得消费到新章的列表上\s*\n\s*deferredPrependIntentRef\.current = false;/,
+    );
   });
 });
 

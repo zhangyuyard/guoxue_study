@@ -198,6 +198,16 @@ const SIZER_BATCH_INTERVAL = 16;
 const CONTIGUOUS_PRELOAD_SCREENS = 2;
 
 /**
+ * 显式跳章后的「章首驻留期」阈值（屏高倍数）：目录跳章落到章首后，用户尚未把
+ * 当前章读出超过该倍数屏高之前，自动向前拼接只保留「章首回弹 offset ≤ 0 的
+ * endDrag 放行」一条路径，手势滚动途中的前置拼接全部被驻留期拦截。
+ * 背景：跳章落章首时 offset = 0，立即上滑会同时满足手势窗口 + 顶部预载窗口 +
+ * 朝顶方向 → 切章过渡态（remeasure / 定位尚未完全收敛）中触发 prepend，锚点
+ * 补偿基于过渡态基准，与进行中的拖拽/惯性互相争夺 scrollTo → 落点失准跳章。
+ */
+const CHAPTER_HEAD_DWELL_SCREENS = 0.5;
+
+/**
  * 阅读行（滚动模式 FlatList 的数据单元）
  * 连续滚动时正文跨章拼接：每章先渲染一个「标题行」，再渲染该章的若干「段落行」。
  */
@@ -1222,6 +1232,30 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    * 判定（见 shouldAutoPrepend）后，向下阅读永不触发拼接。
    */
   const userScrollActiveRef = useRef(false);
+  /**
+   * 手指是否仍按在屏幕上拖拽（onScrollBeginDrag 开、onScrollEndDrag 关）。
+   * 与 userScrollActiveRef 的区别：后者在 endDrag 后还会存活至惯性结束或
+   * 500ms 兜底关窗，用于拼接判定；本 ref 专门用于「手指还按着」的判定——
+   * 手指按下期间绝不能执行 prepend + 补偿 scrollTo（与原生拖拽争夺视口）。
+   */
+  const dragActiveRef = useRef(false);
+  /**
+   * 延迟拼接意图：手势进行中（拖拽/惯性）满足了拼接条件时不立即执行，置位
+   * 本标记，待拖拽完全结束（onMomentumScrollEnd / endDrag 后关窗计时器）后
+   * 由 consumeDeferredPrepend 统一消费。这保证「插入内容 + 补偿 scrollTo」
+   * 永不与进行中的原生滚动争夺视口（跳章根因之一），同时保留手势结束时刻
+   * 的拼接意图（章首回弹加载上一章仍可用）。
+   */
+  const deferredPrependIntentRef = useRef(false);
+  /**
+   * 显式跳章后的「章首驻留期」守卫：goToChapter 跳章落定（切章 effect 消费
+   * explicitChapterJumpRef）时以目标章置位；用户把当前章读出超过
+   * CHAPTER_HEAD_DWELL_SCREENS 屏高（handleScroll 观察）或切章/换模式后解除。
+   * 驻留期内 shouldAutoPrepend 拦截 offset > 0 的手势拼接（保留 offset ≤ 0
+   * 的章首回弹 endDrag 路径），防止「跳章后立即上滑」在切章过渡态触发
+   * prepend 导致的跳章。
+   */
+  const chapterHeadDwellRef = useRef<{ chapterId: string } | null>(null);
   /** 无惯性手势的关窗兜底延时（有惯性时由 onMomentumScrollEnd 先行关窗） */
   const scrollWindowCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 拖拽结束但无惯性时的关窗延时 */
@@ -1270,6 +1304,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    * ④保证「向下阅读」（offset 增大）永不触发拼接——这是上一版「首拖即永开」
    * 门闩在短章书上把切章后的正常下滑误判为需要拼接、造成跳动/闪现上一章
    * 的根因；程序化 scrollTo（切章复位、补偿落位）则因非手势窗口被排除。
+   * 【5】显式跳章后的章首驻留期（chapterHeadDwellRef）：跳章落章首后用户尚未
+   * 读出超过阈值屏高时，拦截 offset > 0 的手势拼接——此时切章的 remeasure /
+   * 定位可能尚未收敛，prepend 的补偿基于过渡态基准会跳章；「读上一章」入口
+   * 保留 offset ≤ 0 的章首回弹路径（endDrag 放行，见 handleScrollEndDrag）。
    */
   const shouldAutoPrepend = useCallback(
     (offset: number): boolean => {
@@ -1277,6 +1315,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         return false;
       }
       if (offset > viewH.current * CONTIGUOUS_PRELOAD_SCREENS) {
+        return false;
+      }
+      const dwell = chapterHeadDwellRef.current;
+      if (dwell && offset > 0 && dwell.chapterId === activeChapterIdRef.current) {
         return false;
       }
       return offset <= 0 || offset < lastScrollOffsetRef.current;
@@ -1656,6 +1698,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     // 【4】模式切换后滚动列表重挂载，与切章同款：重置手势窗口与方向基准，
     // 防止挂载后的 onContentSizeChange 兜底把视口推到上一章再拉回（跳动）
     userScrollActiveRef.current = false;
+    dragActiveRef.current = false;
+    deferredPrependIntentRef.current = false;
+    chapterHeadDwellRef.current = null;
     lastScrollOffsetRef.current = 0;
     // 模式切换定位：两种模式都会把当前段上报到 useReaderStore（滚动模式经
     // onViewableItemsChanged、翻页模式经 onActiveSegmentChange），切换后以它
@@ -1722,6 +1767,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     prependAnchor.current = null;
     scrollOffset.current = 0;
     lastScrollOffsetRef.current = 0;
+    // 【5】清空延迟拼接意图：旧手势周期的意图不得消费到新章的列表上
+    deferredPrependIntentRef.current = false;
     rowOffsets.current.clear();
     // 【4】切章残留清零：旧列表的丢头补偿若跨章遗留，会在新章首次
     // onContentSizeChange 时被消费，把视口拉到错误位置（跳错章节）；
@@ -1896,6 +1943,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    * 在连续滚动序列【头部】插入上一章。
    * 五重守卫：①仅滚动模式 ②无并发加载 ③无尚未完成的偏移补偿 ④未达拼接上限
    * ⑤存在上一章（不越过首章）且未重复插入。
+   * 【5】补偿单一源：本函数只负责「插入 + 登记 prependAnchor（含插入前
+   * offset / rowOffsets 快照）」，实际补偿 scrollTo 只发生在两处锚点消费点
+   * （handleRowLayout 的锚点行布局路径 / onContentSizeChange 的增量兜底路径），
+   * 二者均由 prependAnchor 守卫且消费后立即置空——一次 prepend 至多执行一处
+   * 补偿，触发点不重复补偿。触发时机统一经 requestAutoPrepend：手势进行中
+   * 只记延迟意图，手势完全结束后才执行本函数（补偿不与原生滚动争夺视口）。
    */
   const prependPreviousChapter = useCallback(() => {
     // 入口先做锚点超时清理：停在顶部无滚动事件时，残留锚点若不在此处过期，
@@ -1948,15 +2001,66 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     setContinuousChapters(merged);
   }, [book, readerMode, pendingScroll, rowOffsets, expireAnchorIfNeeded]);
 
+  /**
+   * 【5】自动向前拼接的统一执行入口（全部触发点共用，触发点只负责判定）：
+   * 条件满足但手势仍在进行（手指按住拖拽 / 惯性滚动中）时不立即执行——此时
+   * prepend 的补偿 scrollTo 会与原生拖拽/惯性互相争夺视口，落点失准跳章——
+   * 置位延迟意图，待手势完全结束后由 consumeDeferredPrepend 消费；
+   * 手势已结束（如程序化时机恰逢窗口外）则直接执行。
+   */
+  const requestAutoPrepend = useCallback(
+    (offset: number): void => {
+      if (!shouldAutoPrepend(offset)) {
+        return;
+      }
+      if (dragActiveRef.current || userScrollActiveRef.current) {
+        deferredPrependIntentRef.current = true;
+        return;
+      }
+      prependPreviousChapter();
+    },
+    [shouldAutoPrepend, prependPreviousChapter],
+  );
+
+  /**
+   * 【5】消费延迟拼接意图（手势完全结束后的两个统一出口调用：
+   * onMomentumScrollEnd / endDrag 后的关窗计时器）。
+   * 消费时刻原生滚动必然已停止（惯性结束或无惯性的关窗兜底），此刻执行
+   * prepend + 补偿 scrollTo 不再有争夺；补偿基准 = 解析时刻实测的
+   * 「原首章标题行新 y（= 插入内容总高）+ 补偿前实际 offset」，不依赖
+   * 切章过渡态的 anchor / contentSize。
+   * 重新校验位置与方向：意图置位到消费之间用户可能已改变意图（如拖拽反向
+   * 甩出预载窗口），出窗或方向背离顶部则丢弃意图不做拼接。
+   */
+  const consumeDeferredPrepend = useCallback((): void => {
+    if (!deferredPrependIntentRef.current) {
+      return;
+    }
+    deferredPrependIntentRef.current = false;
+    if (readerMode !== 'scroll') {
+      return;
+    }
+    const offset = scrollOffset.current;
+    if (offset > viewH.current * CONTIGUOUS_PRELOAD_SCREENS) {
+      return;
+    }
+    // 方向校验：惯性收尾帧仍在朝顶部移动，或已压顶/回弹到顶（offset ≤ 0）
+    if (!(offset <= 0 || offset < lastScrollOffsetRef.current)) {
+      return;
+    }
+    prependPreviousChapter();
+  }, [readerMode, prependPreviousChapter]);
+
   /** 滚至接近顶部：向前拼接上一章（FlatList onStartReached 回调）。
    *  RN 0.74 尚未实现 onStartReached（0.75+ 才加入），本回调当前为前向兼容
-   *  空转路径；一旦升级生效也必须走统一判定（手势窗口 + 方向），防止无害化
-   *  失效后回归「非用户意图触发拼接 → 跳动/闪现上一章」。 */
+   *  空转路径；一旦升级生效也必须走统一判定（手势窗口 + 方向 + 驻留期）与
+   *  统一执行入口（手势进行中只记延迟意图），防止无害化失效后回归
+   *  「非用户意图触发拼接 → 跳动/闪现上一章」。 */
   const handleStartReached = useCallback(() => {
     if (shouldAutoPrepend(scrollOffset.current)) {
-      prependPreviousChapter();
+      requestAutoPrepend(scrollOffset.current);
     }
-  }, [shouldAutoPrepend, prependPreviousChapter]);
+  }, [shouldAutoPrepend, requestAutoPrepend]);
 
   /** 连续滚动行：每章 = 1 个章标题行 + N 个段落行 */
   const continuousRows = useMemo<ReaderRow[]>(() => {
@@ -2175,8 +2279,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         // 而停在 offset≈0 处不会再产生滚动事件，用户必须「来回滚动」才能触发。
         // 【4】统一走 shouldAutoPrepend：定位落位属程序化滚动（非手势窗口），
         // 正常情况下不会触发；仅当用户恰在此刻手势滚动且朝顶部时才拼接。
+        // 【5】经 requestAutoPrepend 统一执行：手势进行中只记意图，待手势
+        // 完全结束后再插入 + 补偿，避免与拖拽/惯性争夺视口。
         if (shouldAutoPrepend(targetOffset)) {
-          prependPreviousChapter();
+          requestAutoPrepend(targetOffset);
         }
       }
       const anchor = prependAnchor.current;
@@ -2199,7 +2305,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         prependAnchor.current = null;
       }
     },
-    [rowOffsets, prependPreviousChapter, shouldAutoPrepend],
+    [rowOffsets, requestAutoPrepend, shouldAutoPrepend],
   );
 
   /**
@@ -2337,15 +2443,27 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       // （顶部无法产生滚动事件，真正的首次触发由 onContentSizeChange 兜底）
       // 【4】统一判定（手势窗口 + 朝顶部方向）：向下阅读/程序化滚动永不触发，
       // 仅用户主动朝顶部拖拽/惯性时拼接（详见 shouldAutoPrepend）。
+      // 【5】显式跳章后的章首驻留期：用户读出超过阈值屏高即解除拦截。
+      const dwell = chapterHeadDwellRef.current;
+      if (dwell) {
+        if (
+          (viewH.current > 0 && offset > viewH.current * CHAPTER_HEAD_DWELL_SCREENS) ||
+          dwell.chapterId !== activeChapterIdRef.current
+        ) {
+          chapterHeadDwellRef.current = null;
+        }
+      }
+      // 【5】经 requestAutoPrepend 统一执行：手势进行中只记延迟意图，
+      // 待手势完全结束后再插入 + 补偿（单一补偿源，不与原生滚动争夺视口）。
       if (shouldAutoPrepend(offset)) {
-        prependPreviousChapter();
+        requestAutoPrepend(offset);
       }
       // 方向基准在本帧判定全部完成后更新（shouldAutoPrepend 需要上一帧值）
       lastScrollOffsetRef.current = offset;
     },
     [
       appendNextChapter,
-      prependPreviousChapter,
+      requestAutoPrepend,
       rowOffsets,
       expireAnchorIfNeeded,
       shouldAutoPrepend,
@@ -2355,9 +2473,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   /**
    * 【4】用户开始拖拽：打开手势窗口（见 userScrollActiveRef）。
    * 拼接不再「首拖永开」，而是仅在本窗口内且方向朝顶部时触发。
+   * 【5】同步标记手指按住（dragActiveRef）：拖拽进行中满足拼接条件时只记
+   * 延迟意图，绝不立即执行 prepend + 补偿 scrollTo（与原生拖拽争夺视口）。
    */
   const handleScrollBeginDrag = useCallback(() => {
     userScrollActiveRef.current = true;
+    dragActiveRef.current = true;
     if (scrollWindowCloseTimer.current) {
       clearTimeout(scrollWindowCloseTimer.current);
       scrollWindowCloseTimer.current = null;
@@ -2365,19 +2486,28 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     expireAnchorIfNeeded();
   }, [expireAnchorIfNeeded]);
 
-  /** 【4】惯性结束：关闭手势窗口（拖拽结束后的无惯性场景由 endDrag 延时兜底） */
+  /**
+   * 【4】惯性结束：关闭手势窗口（拖拽结束后的无惯性场景由 endDrag 延时兜底）。
+   * 【5】惯性结束 = 原生滚动完全停止，此刻消费延迟拼接意图是安全的：
+   * prepend 的插入 + 补偿 scrollTo 不再与惯性滚动互相争夺。
+   */
   const handleMomentumScrollEnd = useCallback(() => {
     userScrollActiveRef.current = false;
+    dragActiveRef.current = false;
     if (scrollWindowCloseTimer.current) {
       clearTimeout(scrollWindowCloseTimer.current);
       scrollWindowCloseTimer.current = null;
     }
-  }, []);
+    consumeDeferredPrepend();
+  }, [consumeDeferredPrepend]);
 
   /**
    * 拖拽结束时的顶部触发兜底：在 offset≈0 处向上回弹（Android 拉出 overscroll）
    * 时 contentOffset 不变化，onScroll 可能不产生有效事件，导致「停在顶部向上
    * 滑动」永远触发不了向前拼接。拖拽结束时刻补一次距顶判断。
+   * 【5】本路径只记录延迟意图，不立即 prepend：endDrag ≠ 手势完全结束
+   * （惯性可能随后进行），补偿 scrollTo 必须等 onMomentumScrollEnd 或关窗
+   * 计时器确认滚动停止后再执行（端到端原子性：判定 → 意图 → 无滚动时补偿）。
    */
   const handleScrollEndDrag = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -2385,10 +2515,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       // 先用「上一帧偏移」做方向判定再写回（顶部压住的回弹拖拽 offset 恒 0
       // 不产生方向差，靠 offset ≤ 0 分支放行——这是停在章首拉出上一章的入口）
       const allow = shouldAutoPrepend(offset);
+      dragActiveRef.current = false;
       scrollOffset.current = offset;
       expireAnchorIfNeeded();
       if (allow) {
-        prependPreviousChapter();
+        // 【5】延迟到手势完全结束后消费（consumeDeferredPrepend）：
+        // 补偿将 scrollTo 精确到「当前章首在新列表中的绝对 offset」
+        // （插入高度 = 原首章标题行新 y = 新旧 contentSize 差）。
+        deferredPrependIntentRef.current = true;
       }
       // 【4】无惯性收尾的手势也要关窗：有惯性时 onMomentumScrollEnd 先到，
       // 本计时器空转；无惯性（如顶部小幅拖拽）时延时 500ms 关窗，
@@ -2398,10 +2532,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       }
       scrollWindowCloseTimer.current = setTimeout(() => {
         userScrollActiveRef.current = false;
+        dragActiveRef.current = false;
         scrollWindowCloseTimer.current = null;
+        consumeDeferredPrepend();
       }, SCROLL_WINDOW_CLOSE_MS);
     },
-    [shouldAutoPrepend, prependPreviousChapter, expireAnchorIfNeeded],
+    [shouldAutoPrepend, consumeDeferredPrepend, expireAnchorIfNeeded],
   );
 
   // 切换章节时列表回到顶部（导航跳回 Reader 会复用当前组件实例，offset 需手动复位）
@@ -2420,6 +2556,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     // 【4】目录显式跳章：落章首，不恢复该章上次阅读段落（见 explicitChapterJumpRef）
     const explicitJump = explicitChapterJumpRef.current;
     explicitChapterJumpRef.current = false;
+    // 【5】显式跳章进入「章首驻留期」：落章首后用户尚未读出超过阈值屏高之前，
+    // 拦截 offset > 0 的手势自动拼接（只留 offset ≤ 0 的章首回弹 endDrag 路径）。
+    // 跳章落点 offset = 0 时立即上滑会同时满足手势窗口 + 预载窗口 + 朝顶方向，
+    // 而此刻切章的 remeasure / 定位可能尚未收敛，prepend 补偿基于过渡态基准
+    // 会跳章——驻留期内由驻留判定挡掉，驻留期在 handleScroll 读出超过
+    // CHAPTER_HEAD_DWELL_SCREENS 屏高后解除。
+    chapterHeadDwellRef.current =
+      explicitJump && chapterId ? { chapterId } : null;
     // 重新武装「打开时定位」：目标段落变了要重新定位一次
     // （含超时放弃兜底；模式切换跨章跟随也经由本 effect 完成武装）
     armScrollLocate(segmentId ?? '');
@@ -3298,8 +3442,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
               // 【4】统一判定（手势窗口 + 朝顶部方向）：切章/打开后的程序化布局
               // 与向下阅读中的追加（fillShort）引发的内容尺寸变化都不满足条件，
               // 不会把视口推到上一章再拉回（跳错章节/跳动的根因）。
+              // 【5】经 requestAutoPrepend 统一执行：手势进行中只记延迟意图，
+              // 且 onContentSizeChange 兜底不直接做补偿——补偿单一源在
+              // handleRowLayout 锚点路径 / 本回调的锚点增量兜底（均由
+              // prependAnchor 守卫，一次 prepend 至多执行一处补偿）。
               if (h > 0 && shouldAutoPrepend(scrollOffset.current)) {
-                prependPreviousChapter();
+                requestAutoPrepend(scrollOffset.current);
               }
             }}
             onLayout={(e) => {
