@@ -1334,13 +1334,26 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   /**
    * 按当前繁简模式转换文本：正文段落、章标题、书名统一走此入口，
    * 保证「已展示章」与「后续拼接章」视觉一致、切换不错位。
+   * 语种自适应（BugFix：导入繁体书在简体模式下不生效）：以单次 tw2cn
+   * 探测源文语种——结果与原文一致为简体源，不同为繁体源。简体显示时
+   * 仅繁体源转简（简体源直通，避免 opencc 归一化改动原文）；繁体显示
+   * 时仅简体源转繁（繁体源直通，切换即直通更快）。
    */
   const toDisplayText = useCallback(
     (text: string): string => {
-      if (conversionMode === 'simplified') {
-        return text;
+      const asSimplified = ConversionService.toSimplified(text).data ?? text;
+      if (asSimplified === text) {
+        // 简体源
+        if (conversionMode === 'simplified') {
+          return text;
+        }
+        return ConversionService.toTraditional(text).data ?? text;
       }
-      return ConversionService.toTraditional(text).data ?? text;
+      // 繁体源
+      if (conversionMode === 'simplified') {
+        return asSimplified;
+      }
+      return text;
     },
     [conversionMode],
   );

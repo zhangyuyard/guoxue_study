@@ -674,25 +674,31 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
       folderRows.map((r) => [r.source_path as string, r]),
     );
 
-    // 1) 扫描书籍根目录顶层文件（builtin/ 子目录为 App 托管的内置书资源，不扫）
-    let files: Array<{
+    // 1) 扫描书籍根目录顶层文件（builtin/ 子目录为 App 托管的内置书资源，不扫）。
+    // 扫描失败（readDir 抛错）时 scanOk=false：跳过本轮扫描与下架比对，
+    // 绝不把「读不到目录」当「文件夹为空」——否则一次瞬时 IO 故障就会
+    // 误删全部已导入书籍（BugFix：导入书重启后消失）。
+    let scanOk = false;
+    const files: Array<{
       name: string;
       path: string;
       isFile: () => boolean;
     }> = [];
     try {
       const entries = await RNFS.readDir(getBooksRootPath());
-      files = entries.filter(
-        (e) =>
-          e.isFile() &&
-          isSupportedBookFile(e.name) &&
-          !e.name.startsWith(`${BUILTIN_DIR_NAME}/`),
-      );
+      for (const e of entries) {
+        const isFile = typeof e.isFile === 'function' ? e.isFile() : !e.isDirectory?.();
+        if (isFile && isSupportedBookFile(e.name)) {
+          files.push(e as { name: string; path: string; isFile: () => boolean });
+        }
+      }
+      scanOk = true;
     } catch {
-      files = [];
+      scanOk = false;
     }
 
-    const seenPaths = new Set<string>();
+    if (scanOk) {
+      const seenPaths = new Set<string>();
     for (const f of files) {
       seenPaths.add(f.path);
       const row = folderRowsByPath.get(f.path);
@@ -741,17 +747,19 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
       folderBooks.push(parsed.book);
     }
 
-    // 2) 下架：db 中有 source_path 但扫描未见的书（文件被用户移走/删除）
-    for (const row of folderRows) {
-      if (!seenPaths.has(row.source_path as string)) {
-        summary.removed += 1;
-        try {
-          instance.execute('DELETE FROM user_books WHERE id = ?', [row.id]);
-        } catch {
-          // 下次启动会再次尝试清理
+      // 2) 下架：db 中有 source_path 但扫描未见的书（文件被用户移走/删除）。
+      // 仅在扫描成功时执行（scanOk=false 时保留全部书籍，下轮再比对）。
+      for (const row of folderRows) {
+        if (!seenPaths.has(row.source_path as string)) {
+          summary.removed += 1;
+          try {
+            instance.execute('DELETE FROM user_books WHERE id = ?', [row.id]);
+          } catch {
+            // 下次启动会再次尝试清理
+          }
+          StorageService.deleteFtsForBook(row.id);
+          cascadeCleanupAfterDelete(row.id);
         }
-        StorageService.deleteFtsForBook(row.id);
-        cascadeCleanupAfterDelete(row.id);
       }
     }
 

@@ -17,6 +17,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { Book, BookCategory } from '@/types';
 import type { T04StackParamList } from '@/screens/types';
 import { useLibraryStore } from '@/store/useLibraryStore';
+import { useReaderStore } from '@/store/useReaderStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getColors, PAGE_TITLE_FONT_SIZE } from '@/theme';
 import { BookCard } from '@/components/common/BookCard';
@@ -61,16 +62,23 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
     return books.filter((b) => b.category === (activeCategory as BookCategory));
   }, [books, activeCategory]);
 
-  /** 打开书籍 → 阅读器（第一章） */
+  /** 打开书籍 → 阅读器（BugFix 进度续读：该书有持久化阅读位置时恢复到
+   * 上次的章节与段落，无记录或记录越界回落第一章） */
   const openBook = useCallback(
     (book: Book) => {
-      const firstChapter = book.chapters[0];
-      if (!firstChapter) {
+      if (book.chapters.length === 0) {
         return;
       }
+      const last = useReaderStore.getState().lastRead;
+      const resume =
+        last !== null && last.bookId === book.id
+          ? book.chapters.find((c) => c.id === last.chapterId)
+          : undefined;
+      const chapter = resume ?? book.chapters[0];
       navigation.navigate('Reader', {
         bookId: book.id,
-        chapterId: firstChapter.id,
+        chapterId: chapter.id,
+        segmentId: resume ? last?.segmentId : undefined,
       });
     },
     [navigation],
