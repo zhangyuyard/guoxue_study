@@ -1080,6 +1080,7 @@ for (const spec of BOOKS) {
   }
 
   fs.writeFileSync(path.join(ASSETS_DIR, `${spec.id}.txt`), text, 'utf8');
+  const sizeBytes = Buffer.byteLength(text, 'utf8');
   report.push({ id: spec.id, title: spec.title, chapters: chapters.length, paras: paraCount, chars: charCount, kb });
   catalog.push({
     id: spec.id,
@@ -1088,6 +1089,10 @@ for (const spec of BOOKS) {
     category: spec.category,
     description: meta.description,
     dynasty: spec.dynasty,
+    // 资产字节大小指纹：UserBookService 物化时与落盘文件大小比对，
+    // 不一致（升级换资产/复制中断半截文件）则覆盖复制并失效该书的
+    // 解析缓存，内置书内容更新可随包静默完成。
+    sizeBytes,
   });
   console.log(`${spec.id.padEnd(16)} ${String(chapters.length).padStart(4)} 章 ${String(paraCount).padStart(6)} 段 ${String(charCount).padStart(8)} 字 ${String(kb).padStart(6)} KB`);
 }
@@ -1115,6 +1120,8 @@ export interface BuiltinBookSpec {
   description: string;
   /** 朝代（与 bookMeta.BOOK_DYNASTIES 取值一致，供筛选） */
   dynasty: string;
+  /** APK 资产字节大小（物化变更检测指纹，见 UserBookService.materializeBuiltins） */
+  sizeBytes: number;
 }
 
 export const BUILTIN_CATALOG: BuiltinBookSpec[] = ${JSON.stringify(catalog, null, 2)};

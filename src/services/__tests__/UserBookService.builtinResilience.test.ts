@@ -97,6 +97,8 @@ jest.mock('react-native-fs', () => {
     assetCopyFailLeft: 0,
     /** RNFS.read 的 base64 返回（内置资产分块读取内容） */
     readReply: '',
+    /** path -> stat.size 覆盖值（默认 128，模拟落盘文件大小指纹） */
+    sizes: {} as Record<string, number>,
   };
   return {
     DocumentDirectoryPath: '/data/user/0/com.guoxue.app/files',
@@ -124,7 +126,7 @@ jest.mock('react-native-fs', () => {
     }),
     stat: jest.fn(async (path: string) => ({
       path,
-      size: 128,
+      size: state.sizes[path] ?? 128,
       isFile: () => true,
       isDirectory: () => false,
       mtime: new Date(),
@@ -159,6 +161,7 @@ import {
   getLibrarySyncDiagnostics,
 } from '@/services/UserBookService';
 import { TextLibraryService } from '@/services/TextLibraryService';
+import { getBuiltinSpec } from '@/data/builtinCatalog';
 
 /** 取受控文本库的记录状态（mock 注入，真实类型上不存在） */
 interface MockLibState {
@@ -201,6 +204,7 @@ describe('UserBookService 内置书韧性（真机消失回归）', () => {
     __rnfsState.readDirResults = {};
     __rnfsState.assetCopyFailLeft = 0;
     __rnfsState.readReply = '';
+    __rnfsState.sizes = {};
     libState().builtinCalls = [];
   });
 
@@ -270,5 +274,44 @@ describe('UserBookService 内置书韧性（真机消失回归）', () => {
     expect(getLibrarySyncDiagnostics().builtinParseFailures.length).toBe(77);
     // 关键断言：绝不用空列表整体替换内置书注册
     expect(libState().builtinCalls).toEqual([]);
+  });
+
+  test('内置资产内容更新（sizeBytes 指纹不一致）：覆盖复制并失效该书解析缓存（文选残本→全本回归）', async () => {
+    seedBuiltinRow();
+    // 预置旧版落盘文件：存在但大小与新资产指纹不一致（模拟升级换全本资产）
+    const lunyuPath = `${UserBookService.getBuiltinDirPath()}/${BUILTIN_ROW_ID}.txt`;
+    __rnfsState.files.add(lunyuPath);
+    __rnfsState.sizes[lunyuPath] = 8023;
+    __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = [];
+
+    const res = await UserBookService.loadAndRegisterAll();
+    expect(res.success).toBe(true);
+
+    // 覆盖复制确实发生
+    expect(__rnfsState.assetsCopied).toContain(`books/${BUILTIN_ROW_ID}.txt`);
+    // 仅该书的解析缓存行被失效（不级联清理背诵/收藏/笔记等其他表）
+    expect(__builtinResilienceState.deletedIds).toEqual([BUILTIN_ROW_ID]);
+  });
+
+  test('sizeBytes 指纹一致：不重复复制、解析缓存行保留（零开销增量装载）', async () => {
+    seedBuiltinRow();
+    const lunyuPath = `${UserBookService.getBuiltinDirPath()}/${BUILTIN_ROW_ID}.txt`;
+    __rnfsState.files.add(lunyuPath);
+    const spec = getBuiltinSpec(BUILTIN_ROW_ID);
+    __rnfsState.sizes[lunyuPath] = spec ? spec.sizeBytes : 0;
+    __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = [];
+
+    const res = await UserBookService.loadAndRegisterAll();
+    expect(res.success).toBe(true);
+
+    // 指纹一致的书不触发复制（其余 76 部缺文件仍正常物化，断言排除）
+    expect(__rnfsState.assetsCopied).not.toContain(`books/${BUILTIN_ROW_ID}.txt`);
+    expect(__rnfsState.assetsCopied).toHaveLength(76);
+    // 缓存行未失效，db 缓存命中注册
+    expect(__builtinResilienceState.deletedIds).toEqual([]);
+    const row = __builtinResilienceState.userBooks.find(
+      (r: Record<string, unknown>) => r.id === BUILTIN_ROW_ID,
+    );
+    expect(row).toBeDefined();
   });
 });

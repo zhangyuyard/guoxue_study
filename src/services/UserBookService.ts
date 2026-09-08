@@ -418,38 +418,84 @@ function applySuppression(): void {
 }
 
 /**
- * 物化内置书：builtin/ 下缺文件的从 APK assets（books/<id>.txt，@@CH@@
- * 标记文本）复制补齐。被抑制（用户已删除）的书不补写——删除永久生效，
- * 除非「恢复内置书籍」；用户经文件管理器误删内置文件时，下次启动自动
- * 自愈补回。单书复制失败只记录该 id（下轮重试），绝不影响其他书。
- * 返回复制失败的书籍 ID 列表（供诊断展示）。
+ * 物化内置书：builtin/ 下缺文件或与目录清单 sizeBytes 指纹不一致的，
+ * 从 APK assets（books/<id>.txt，@@CH@@ 标记文本）复制/覆盖补齐。
+ * 大小比对覆盖两类场景：① App 升级内置书换全本资产（如文选残本→
+ * 六十卷全本）；② 首启复制被中断留下的半截文件。内容变更的书会同时
+ * 失效 db 解析缓存行（仅删缓存，不级联清理背诵/收藏/笔记），下轮装载
+ * 自动重新解析上架。被抑制（用户已删除）的书不补写——删除永久生效，
+ * 除非「恢复内置书籍」；单书复制失败只记录该 id（下轮重试），绝不影响
+ * 其他书。返回复制失败的书籍 ID 列表（供诊断展示）。
  */
 async function materializeBuiltins(): Promise<string[]> {
   const builtinDir = getBuiltinDirPath();
   const failures: string[] = [];
+  const changedIds: string[] = [];
   for (const spec of BUILTIN_CATALOG) {
     if (hiddenBuiltins.has(spec.id)) {
       continue;
     }
     const path = `${builtinDir}/${spec.id}.txt`;
     try {
+      let needCopy = false;
+      let contentChanged = false;
       if (!(await RNFS.exists(path))) {
+        needCopy = true;
+      } else if (typeof spec.sizeBytes === 'number' && spec.sizeBytes > 0) {
+        // 指纹比对：落盘文件与随包资产字节大小不一致即视为内容变更
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const st = await RNFS.stat(path);
+          const destSize = Number((st as { size?: number | string }).size ?? 0);
+          if (destSize !== spec.sizeBytes) {
+            needCopy = true;
+            contentChanged = true;
+          }
+        } catch {
+          // stat 失败按缺失处理（覆盖复制兜底）
+          needCopy = true;
+          contentChanged = true;
+        }
+      }
+      if (needCopy) {
         // eslint-disable-next-line no-await-in-loop
         await RNFS.copyFileAssets(`books/${spec.id}.txt`, path);
+        if (contentChanged) {
+          changedIds.push(spec.id);
+        }
       }
     } catch {
       // copyFileAssets 失败（旧机型/异常路径）回落读资产+写文件
       try {
-        if (!(await RNFS.exists(path))) {
-          // eslint-disable-next-line no-await-in-loop
-          const content = await RNFS.readFileAssets(`books/${spec.id}.txt`, 'utf8');
-          // eslint-disable-next-line no-await-in-loop
-          await RNFS.writeFile(path, content, 'utf8');
+        const existed = await RNFS.exists(path);
+        // eslint-disable-next-line no-await-in-loop
+        const content = await RNFS.readFileAssets(`books/${spec.id}.txt`, 'utf8');
+        // eslint-disable-next-line no-await-in-loop
+        await RNFS.writeFile(path, content, 'utf8');
+        if (existed) {
+          changedIds.push(spec.id);
         }
       } catch {
         // 单书自愈失败：记录诊断，下轮启动重试，不阻断其他书
         failures.push(spec.id);
       }
+    }
+  }
+  // 内容变更的书失效解析缓存（user_books 为纯缓存表；不动其余表，
+  // 背诵/收藏/笔记等用户数据保留，阅读进度按章号截断容错）
+  if (changedIds.length > 0) {
+    const db = getDb();
+    if (db) {
+      for (const id of changedIds) {
+        try {
+          db.execute('DELETE FROM user_books WHERE id = ?', [id]);
+        } catch {
+          // 单行失效失败不影响其他书；旧缓存下轮仍会因标题/指纹机制兜底
+        }
+      }
+      console.warn(
+        `[UserBookService] 内置书资产内容更新 ${changedIds.length} 部，已失效解析缓存：${changedIds.join(',')}`,
+      );
     }
   }
   if (failures.length > 0) {
