@@ -58,25 +58,79 @@ describe('Bug 2：向前拼接的触发与补偿', () => {
     expect(source).toMatch(/const handleScrollEndDrag = useCallback/);
   });
 
-  test('定位落位贴近顶部时主动触发一次向前拼接（受自动拼接门闩 gating）', () => {
-    // 【4】切章防跳动：门闩闭合（用户尚未拖拽）时跳过自动拼接，
-    // 门闩解除后（autoPrependGateRef.current === false）兜底照常生效
+  test('定位落位贴近顶部时主动触发一次向前拼接（统一走 shouldAutoPrepend 判定）', () => {
+    // 【4】切章防跳动：定位落位属程序化滚动（非手势窗口），正常不触发拼接；
+    // 仅当用户恰在此刻手势滚动且朝顶部移动时才拼接
     expect(source).toMatch(
-      /autoPrependGateRef\.current === false &&\s*\n\s*\(viewH\.current <= 0 \|\| targetOffset <= viewH\.current \* CONTIGUOUS_PRELOAD_SCREENS\)\s*\n\s*\) \{\s*\n\s*prependPreviousChapter\(\);/,
+      /if \(shouldAutoPrepend\(targetOffset\)\) \{\s*\n\s*prependPreviousChapter\(\);/,
     );
   });
 
-  test('onContentSizeChange 保留顶部主动拼接兜底（受自动拼接门闩 gating）', () => {
-    // 【4】同上：兜底保留，仅在用户拖拽解除门闩后触发
+  test('onContentSizeChange 保留顶部主动拼接兜底（统一走 shouldAutoPrepend 判定）', () => {
+    // 【4】同上：兜底保留，仅在用户手势窗口内且朝顶部方向时触发
     expect(source).toMatch(
-      /if \(\s*\n\s*h > 0 &&\s*\n\s*scrollOffset\.current <= viewH\.current \* CONTIGUOUS_PRELOAD_SCREENS &&\s*\n\s*!autoPrependGateRef\.current\s*\n\s*\) \{\s*\n\s*prependPreviousChapter\(\);/,
+      /if \(h > 0 && shouldAutoPrepend\(scrollOffset\.current\)\) \{\s*\n\s*prependPreviousChapter\(\);/,
     );
   });
 
-  test('用户首次拖拽解除自动向前拼接门闩（onScrollBeginDrag）', () => {
+  test('自动向前拼接统一判定：手势窗口 + 朝顶部方向（向下阅读永不触发）', () => {
+    // shouldAutoPrepend：滚动模式 + 手势窗口 + 顶部预载窗口内 + 方向朝顶部/压顶
+    expect(source).toMatch(/const shouldAutoPrepend = useCallback/);
+    expect(source).toMatch(/readerMode !== 'scroll' \|\| !userScrollActiveRef\.current/);
+    expect(source).toMatch(
+      /offset > viewH\.current \* CONTIGUOUS_PRELOAD_SCREENS/,
+    );
+    expect(source).toMatch(
+      /return offset <= 0 \|\| offset < lastScrollOffsetRef\.current;/,
+    );
+  });
+
+  test('手势窗口：beginDrag 开窗、momentumScrollEnd 关窗、endDrag 延时兜底关窗', () => {
     expect(source).toMatch(/onScrollBeginDrag=\{handleScrollBeginDrag\}/);
     expect(source).toMatch(/const handleScrollBeginDrag = useCallback/);
-    expect(source).toMatch(/autoPrependGateRef\.current = false;/);
+    expect(source).toMatch(/userScrollActiveRef\.current = true;/);
+    expect(source).toMatch(/onMomentumScrollEnd=\{handleMomentumScrollEnd\}/);
+    expect(source).toMatch(/const handleMomentumScrollEnd = useCallback/);
+    expect(source).toMatch(/SCROLL_WINDOW_CLOSE_MS/);
+  });
+
+  test('连续快速切章防串扰：可见性回调只认当前拼接序列内的章', () => {
+    // 事件异步派发可能携带切章前旧列表的行对象，不设防会把阅读位置写到错误章节
+    expect(source).toMatch(/const continuousChapterIdsRef = useRef<Set<string>>\(new Set\(\)\);/);
+    expect(source).toMatch(
+      /if \(!continuousChapterIdsRef\.current\.has\(row\.chapterId\)\) \{\s*\n\s*return;\s*\n\s*\}/,
+    );
+    // 拼接序列变更处同步维护章 id 集合（种子重置 / 追加 / 前拼 / 丢头共 4 处）
+    expect(source).toMatch(/continuousChapterIdsRef\.current = new Set\(seeded\.map\(\(c\) => c\.id\)\);/);
+    expect(
+      (source.match(/continuousChapterIdsRef\.current = new Set\(merged\.map\(\(c\) => c\.id\)\);/g) ?? [])
+        .length,
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  test('切章残留清零：丢头补偿与视口锚点不跨章消费', () => {
+    expect(source).toMatch(
+      /headDropCompensation\.current = 0;\s*\n\s*layoutAnchor\.current = null;/,
+    );
+  });
+
+  test('目录导航确定性：显式跳章清除残留 segmentId 参数并落章首', () => {
+    // navigate 对既有路由浅合并参数，残留 segmentId 会让定位武装指向错误章的段落
+    expect(source).toMatch(
+      /navigation\?\.navigate\('Reader', \{ bookId, chapterId: cid, segmentId: undefined \}\);/,
+    );
+    expect(source).toMatch(/const explicitChapterJumpRef = useRef\(false\);/);
+    expect(source).toMatch(
+      /if \(!segmentId && !explicitJump && restoreSegmentId\) \{\s*\n\s*armScrollLocate\(restoreSegmentId\);/,
+    );
+  });
+
+  test('顶部章节名/目录高亮跟随实际阅读章（progressChapterId 口径）', () => {
+    expect(source).toMatch(
+      /const headerChapterId = readerMode === 'scroll' \? activeChapterId \?\? chapterId : chapterId;/,
+    );
+    expect(source).toMatch(/item\.id === progressChapterId && \{ backgroundColor: colors\.primarySoft \}/);
+    expect(source).toMatch(/item\.id === progressChapterId \? colors\.primary : colors\.text/);
   });
 });
 
@@ -124,7 +178,8 @@ describe('第四轮：贪心填充拆分 + 黑影自愈 + 预加载与触发可�
 
   test('上下章预加载窗口为 2 屏（CONTIGUOUS_PRELOAD_SCREENS）', () => {
     expect(source).toMatch(/const CONTIGUOUS_PRELOAD_SCREENS = 2;/);
-    expect(source).toMatch(/viewHeight \* CONTIGUOUS_PRELOAD_SCREENS/);
+    // 预载窗口口径统一：滚动判定与自动拼接判定均以 2 屏为阈值
+    expect(source).toMatch(/viewH\.current \* CONTIGUOUS_PRELOAD_SCREENS/);
     expect(source).toMatch(/onStartReachedThreshold=\{CONTIGUOUS_PRELOAD_SCREENS\}/);
     expect(source).toMatch(/onEndReachedThreshold=\{CONTIGUOUS_PRELOAD_SCREENS\}/);
   });

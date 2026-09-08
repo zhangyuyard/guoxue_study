@@ -1174,6 +1174,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const [activeChapterId, setActiveChapterId] = useState<string | null>(null);
   /** continuousChapters 的即时引用：滚动回调需读到最新值，避免闭包陈旧 */
   const continuousRef = useRef<Chapter[]>([]);
+  /** 当前拼接序列的章 id 集合（滚动回调防串扰：只认序列内的章，见 onViewableItemsChanged） */
+  const continuousChapterIdsRef = useRef<Set<string>>(new Set());
   /** activeChapterId 的即时引用（滚动回调内高频读写，避免闭包陈旧） */
   const activeChapterIdRef = useRef<string | null>(null);
   /** 行 id -> 内容内偏移（打开定位 + 章内进度计算共用） */
@@ -1207,17 +1209,23 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   } | null>(null);
   /** 最近一次滚动偏移（向前拼接的补偿起点） */
   const scrollOffset = useRef(0);
+  /** 上一帧滚动偏移（方向判定：仅「朝顶部移动」的滚动才允许触发向前拼接） */
+  const lastScrollOffsetRef = useRef(0);
   /**
-   * 【4】自动向前拼接门闩（顶部章节导航切章防跳动的关键）：
-   * true = 抑制「非用户手势触发」的向前拼接。切章/打开时会 scrollToOffset(0)，
-   * 若此时 onContentSizeChange 兜底自动向前拼接上一章，插入内容位于视口上方，
-   * 视口瞬间被推到上一章内容、再由锚点补偿拉回 —— 一推一拉即「上下跳动」，
-   * 短章书（每章不足一屏）每次切章都复现。门闩在用户首次拖拽（onScrollBeginDrag）
-   * 时解除，此后 onScroll / onScrollEndDrag / 定位落点触发的按需拼接恢复正常；
-   * 向后追加（fillShortContentIfNeeded / onEndReached）不经过门闩——追加内容
-   * 位于视口下方，不产生视口位移。
+   * 用户手势窗口（切章防跳动 / 防跳错章节的关键）。
+   * true = 用户正在拖拽或惯性滚动（onScrollBeginDrag 开窗，onMomentumScrollEnd
+   * 及 onScrollEndDrag 后的短延时关窗）。自动向前拼接只允许发生在该窗口内。
+   * 上一版实现是「首次拖拽后永久打开」的门闩——短章内置书（每章约一屏）在
+   * 目录切章后向下阅读的头两屏内 offset 恒 < 2 屏预载阈值，向下滑动即误触发
+   * 向前拼接：视口上方突然长出一章内容、当帧闪现上一章开头再被锚点补偿拉回，
+   * 表现为「上下滚动仍跳动」乃至「打开的却是别的章节」。改为手势窗口 + 方向
+   * 判定（见 shouldAutoPrepend）后，向下阅读永不触发拼接。
    */
-  const autoPrependGateRef = useRef(true);
+  const userScrollActiveRef = useRef(false);
+  /** 无惯性手势的关窗兜底延时（有惯性时由 onMomentumScrollEnd 先行关窗） */
+  const scrollWindowCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 拖拽结束但无惯性时的关窗延时 */
+  const SCROLL_WINDOW_CLOSE_MS = 500;
   /**
    * 滑动窗口丢头的滚动补偿量（px）：丢头使保留内容整体上移，onContentSizeChange
    * 消费时把滚动偏移回退该值，使视口仍停留在用户正在阅读的内容上。
@@ -1244,6 +1252,37 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    * 用户正在阅读的位置（同段落，允许行高变化导致的轻微位移）。
    */
   const layoutAnchor = useRef<{ rowId: string; delta: number; createdAt: number } | null>(null);
+
+  /**
+   * 目录显式跳章标记：goToChapter（目录/翻页跨章）时置位，由切章 effect 消费。
+   * 显式跳章语义 = 落在目标章【章首】，不得恢复该章上次阅读段落（P1-17 续读
+   * 仅适用于「打开书」场景）；否则「目录重选刚读过的章」会落到章中间，
+   * 被用户感知为「跳错章节」。仅在目标章 ≠ 当前章时置位，防止同章重选
+   * 不触发切章 effect 时标记残留、误吞下一次正常打开的续读。
+   */
+  const explicitChapterJumpRef = useRef(false);
+
+  /**
+   * 自动向前拼接上一章的统一触发判定（单一判定源，全部触发点共用）：
+   * ①滚动模式 ②处于用户手势窗口（拖拽/惯性中，见 userScrollActiveRef）
+   * ③视口在顶部预载窗口内 ④滚动方向朝顶部（offset 较上一帧变小），
+   * 或已压在/越过顶部（offset ≤ 0：iOS 回弹为负、Android 压顶恒 0）。
+   * ④保证「向下阅读」（offset 增大）永不触发拼接——这是上一版「首拖即永开」
+   * 门闩在短章书上把切章后的正常下滑误判为需要拼接、造成跳动/闪现上一章
+   * 的根因；程序化 scrollTo（切章复位、补偿落位）则因非手势窗口被排除。
+   */
+  const shouldAutoPrepend = useCallback(
+    (offset: number): boolean => {
+      if (readerMode !== 'scroll' || !userScrollActiveRef.current) {
+        return false;
+      }
+      if (offset > viewH.current * CONTIGUOUS_PRELOAD_SCREENS) {
+        return false;
+      }
+      return offset <= 0 || offset < lastScrollOffsetRef.current;
+    },
+    [readerMode],
+  );
 
   /**
    * 武装/重新武装「打开时定位」：目标行 onLayout 后由 handleRowLayout 落位。
@@ -1470,10 +1509,19 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     return toDisplayText(book.title);
   }, [book, toDisplayText]);
 
+  /**
+   * 顶部章节名跟随「实际正在阅读的章」：【4】滚动模式连续拼接后路由章停留在
+   * 入口章，若标题仍显示路由章，会与底部进度条/目录高亮互相矛盾——用户以
+   * 顶部标题/目录高亮为心智基准做导航，感知上就是「选了 A 打开的却是别的章节」。
+   * 口径与 progressChapterId 一致（滚动模式取 activeChapterId）。
+   */
+  const headerChapterId = readerMode === 'scroll' ? activeChapterId ?? chapterId : chapterId;
   const displayChapterTitle = useMemo(() => {
-    if (!chapter) return '';
-    return toDisplayText(chapter.title);
-  }, [chapter, toDisplayText]);
+    const headerChapter = headerChapterId
+      ? effectiveChapters.find((c) => c.id === headerChapterId)
+      : undefined;
+    return toDisplayText(headerChapter?.title ?? chapter?.title ?? '');
+  }, [headerChapterId, effectiveChapters, chapter, toDisplayText]);
 
   // 用户数据（划线/笔记/收藏）
   // 滚动模式跨章后路由 chapterId 仍停留在入口章，故按「已拼接章节集合」整体加载，
@@ -1543,15 +1591,24 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     return () => clearInterval(timer);
   }, [readerMode, siblings, toDisplayText]);
 
-  /** 跳转至指定章节（翻页） */
+  /** 跳转至指定章节（目录 / 翻页跨章）：显式导航语义 = 落在目标章章首。
+   *  【4】两处防「跳错章节」：
+   *  ① segmentId 显式置 undefined——navigate 对既有路由做【浅合并】参数，
+   *  早前「模式切换跨章跟随」等携带的 segmentId 会残留到新章，使定位武装
+   *  指向不属于目标章的段落（1.5s 超时前处于未定态，还会把错误段落写进 lastRead）；
+   *  ② 置位 explicitChapterJumpRef（仅目标章 ≠ 当前章时），切章 effect 据此
+   *  跳过 P1-17 续读定位，保证目录选章必落章首。 */
   const goToChapter = useCallback(
     (cid: string) => {
       if (!bookId) {
         return;
       }
-      navigation?.navigate('Reader', { bookId, chapterId: cid });
+      if (cid !== chapterId) {
+        explicitChapterJumpRef.current = true;
+      }
+      navigation?.navigate('Reader', { bookId, chapterId: cid, segmentId: undefined });
     },
-    [navigation, bookId],
+    [navigation, bookId, chapterId],
   );
 
   /** 仿真翻页：翻到章尾继续翻 → 跨到下一章；翻到章首继续翻 → 跨到上一章。
@@ -1596,9 +1653,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     prependAnchor.current = null;
     loadingNext.current = false;
     loadingPrev.current = false;
-    // 【4】模式切换后滚动列表重挂载，与切章同款：重新闭合自动向前拼接门闩，
+    // 【4】模式切换后滚动列表重挂载，与切章同款：重置手势窗口与方向基准，
     // 防止挂载后的 onContentSizeChange 兜底把视口推到上一章再拉回（跳动）
-    autoPrependGateRef.current = true;
+    userScrollActiveRef.current = false;
+    lastScrollOffsetRef.current = 0;
     // 模式切换定位：两种模式都会把当前段上报到 useReaderStore（滚动模式经
     // onViewableItemsChanged、翻页模式经 onActiveSegmentChange），切换后以它
     // 为定位目标，而不是跳回章首。
@@ -1658,11 +1716,18 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   useEffect(() => {
     const seeded: Chapter[] = chapter ? [chapter] : [];
     continuousRef.current = seeded;
+    continuousChapterIdsRef.current = new Set(seeded.map((c) => c.id));
     loadingNext.current = false;
     loadingPrev.current = false;
     prependAnchor.current = null;
     scrollOffset.current = 0;
+    lastScrollOffsetRef.current = 0;
     rowOffsets.current.clear();
+    // 【4】切章残留清零：旧列表的丢头补偿若跨章遗留，会在新章首次
+    // onContentSizeChange 时被消费，把视口拉到错误位置（跳错章节）；
+    // 旧章的注音视口锚点行在新列表中不存在，残留只会等到超时。
+    headDropCompensation.current = 0;
+    layoutAnchor.current = null;
     setContinuousChapters(seeded);
     // 记录种子章（见 continuousSeedChapterId / effectiveChapters 注释）
     setContinuousSeedChapterId(chapter?.id ?? null);
@@ -1734,6 +1799,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     headDropCompensation.current = keptY - droppedY;
     const merged = loaded.filter((c) => !droppedIds.has(c.id));
     continuousRef.current = merged;
+    continuousChapterIdsRef.current = new Set(merged.map((c) => c.id));
     setContinuousChapters(merged);
   }, [readerMode]);
 
@@ -1787,6 +1853,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     }
     const merged = [...continuousRef.current, loadedChapter];
     continuousRef.current = merged;
+    continuousChapterIdsRef.current = new Set(merged.map((c) => c.id));
     setContinuousChapters(merged);
     // 滑动窗口：追加成功后若序列超限，立即丢头腾位（当前章守卫已保证可行）
     maybeDropHeadChapters();
@@ -1877,13 +1944,19 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     };
     const merged = [prevChapter, ...continuousRef.current];
     continuousRef.current = merged;
+    continuousChapterIdsRef.current = new Set(merged.map((c) => c.id));
     setContinuousChapters(merged);
   }, [book, readerMode, pendingScroll, rowOffsets, expireAnchorIfNeeded]);
 
-  /** 滚至接近顶部：向前拼接上一章（FlatList onStartReached 回调） */
+  /** 滚至接近顶部：向前拼接上一章（FlatList onStartReached 回调）。
+   *  RN 0.74 尚未实现 onStartReached（0.75+ 才加入），本回调当前为前向兼容
+   *  空转路径；一旦升级生效也必须走统一判定（手势窗口 + 方向），防止无害化
+   *  失效后回归「非用户意图触发拼接 → 跳动/闪现上一章」。 */
   const handleStartReached = useCallback(() => {
-    prependPreviousChapter();
-  }, [prependPreviousChapter]);
+    if (shouldAutoPrepend(scrollOffset.current)) {
+      prependPreviousChapter();
+    }
+  }, [shouldAutoPrepend, prependPreviousChapter]);
 
   /** 连续滚动行：每章 = 1 个章标题行 + N 个段落行 */
   const continuousRows = useMemo<ReaderRow[]>(() => {
@@ -2100,12 +2173,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         // 定位落点贴近顶部时主动触发一次向前拼接：续读打开在章首附近的场景下，
         // onContentSizeChange 的首次兜底可能被 pendingScroll 未完成的守卫挡掉，
         // 而停在 offset≈0 处不会再产生滚动事件，用户必须「来回滚动」才能触发。
-        // 【4】门闩闭合（尚未发生用户拖拽）时跳过：打开/切章瞬间的自动拼接
-        // 会把视口推到上一章再拉回（上下跳动），等用户拖拽后由滚动按需拼接。
-        if (
-          autoPrependGateRef.current === false &&
-          (viewH.current <= 0 || targetOffset <= viewH.current * CONTIGUOUS_PRELOAD_SCREENS)
-        ) {
+        // 【4】统一走 shouldAutoPrepend：定位落位属程序化滚动（非手势窗口），
+        // 正常情况下不会触发；仅当用户恰在此刻手势滚动且朝顶部时才拼接。
+        if (shouldAutoPrepend(targetOffset)) {
           prependPreviousChapter();
         }
       }
@@ -2129,7 +2199,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         prependAnchor.current = null;
       }
     },
-    [rowOffsets, prependPreviousChapter],
+    [rowOffsets, prependPreviousChapter, shouldAutoPrepend],
   );
 
   /**
@@ -2189,6 +2259,13 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     ({ viewableItems }: { viewableItems: { item: ReaderRow }[] }) => {
       const row = viewableItems.find((v) => v.item.segment !== null)?.item;
       if (!row || !row.segment) {
+        return;
+      }
+      // 【4】防串扰（连续快速切章的跳错章节根因之一）：可见性回调异步派发，
+      // 可能携带切章前旧拼接序列的行对象；不设防会把 store 的阅读位置
+      // （openChapter/recordProgress）与 activeChapterId 写到错误章节。
+      // 只认当前拼接序列内的章（continuousChapterIdsRef 与序列同步更新）。
+      if (!continuousChapterIdsRef.current.has(row.chapterId)) {
         return;
       }
       const rowSegmentId = row.segment.id;
@@ -2258,24 +2335,44 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       }
       // 距顶部不足预载窗口时提前向前拼接上一章（同上）。
       // （顶部无法产生滚动事件，真正的首次触发由 onContentSizeChange 兜底）
-      // 【4】门闩闭合时跳过：程序化 scrollTo（切章复位/补偿落位）也会触发
-      // onScroll，不区分会造成「切章瞬间自动拼接 → 视口被推走再拉回」的跳动。
-      if (offset < viewHeight * CONTIGUOUS_PRELOAD_SCREENS && !autoPrependGateRef.current) {
+      // 【4】统一判定（手势窗口 + 朝顶部方向）：向下阅读/程序化滚动永不触发，
+      // 仅用户主动朝顶部拖拽/惯性时拼接（详见 shouldAutoPrepend）。
+      if (shouldAutoPrepend(offset)) {
         prependPreviousChapter();
       }
+      // 方向基准在本帧判定全部完成后更新（shouldAutoPrepend 需要上一帧值）
+      lastScrollOffsetRef.current = offset;
     },
-    [appendNextChapter, prependPreviousChapter, rowOffsets, expireAnchorIfNeeded],
+    [
+      appendNextChapter,
+      prependPreviousChapter,
+      rowOffsets,
+      expireAnchorIfNeeded,
+      shouldAutoPrepend,
+    ],
   );
 
   /**
-   * 【4】用户开始拖拽：解除自动向前拼接门闩。
-   * 此后滚动触发的向前拼接均为用户意图驱动（视口位移由锚点补偿对冲），
-   * 打开/切章阶段的程序化滚动不再触发拼接（根除切章跳动的另一处来源）。
+   * 【4】用户开始拖拽：打开手势窗口（见 userScrollActiveRef）。
+   * 拼接不再「首拖永开」，而是仅在本窗口内且方向朝顶部时触发。
    */
   const handleScrollBeginDrag = useCallback(() => {
-    autoPrependGateRef.current = false;
+    userScrollActiveRef.current = true;
+    if (scrollWindowCloseTimer.current) {
+      clearTimeout(scrollWindowCloseTimer.current);
+      scrollWindowCloseTimer.current = null;
+    }
     expireAnchorIfNeeded();
   }, [expireAnchorIfNeeded]);
+
+  /** 【4】惯性结束：关闭手势窗口（拖拽结束后的无惯性场景由 endDrag 延时兜底） */
+  const handleMomentumScrollEnd = useCallback(() => {
+    userScrollActiveRef.current = false;
+    if (scrollWindowCloseTimer.current) {
+      clearTimeout(scrollWindowCloseTimer.current);
+      scrollWindowCloseTimer.current = null;
+    }
+  }, []);
 
   /**
    * 拖拽结束时的顶部触发兜底：在 offset≈0 处向上回弹（Android 拉出 overscroll）
@@ -2285,13 +2382,26 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const handleScrollEndDrag = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const offset = e.nativeEvent.contentOffset.y;
+      // 先用「上一帧偏移」做方向判定再写回（顶部压住的回弹拖拽 offset 恒 0
+      // 不产生方向差，靠 offset ≤ 0 分支放行——这是停在章首拉出上一章的入口）
+      const allow = shouldAutoPrepend(offset);
       scrollOffset.current = offset;
       expireAnchorIfNeeded();
-      if (offset <= viewH.current * CONTIGUOUS_PRELOAD_SCREENS) {
+      if (allow) {
         prependPreviousChapter();
       }
+      // 【4】无惯性收尾的手势也要关窗：有惯性时 onMomentumScrollEnd 先到，
+      // 本计时器空转；无惯性（如顶部小幅拖拽）时延时 500ms 关窗，
+      // 保证本次手势内的拼接判定完整走完
+      if (scrollWindowCloseTimer.current) {
+        clearTimeout(scrollWindowCloseTimer.current);
+      }
+      scrollWindowCloseTimer.current = setTimeout(() => {
+        userScrollActiveRef.current = false;
+        scrollWindowCloseTimer.current = null;
+      }, SCROLL_WINDOW_CLOSE_MS);
     },
-    [prependPreviousChapter, expireAnchorIfNeeded],
+    [shouldAutoPrepend, prependPreviousChapter, expireAnchorIfNeeded],
   );
 
   // 切换章节时列表回到顶部（导航跳回 Reader 会复用当前组件实例，offset 需手动复位）
@@ -2299,18 +2409,27 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
     setScrollFrac(0);
     rowOffsets.current.clear();
-    // 【4】重新闭合计时门闩：切章后程序化滚动（复位到 0 / 定位落位）不得触发
-    // 自动向前拼接，等用户首次拖拽（onScrollBeginDrag）再解除
-    autoPrependGateRef.current = true;
+    // 【4】切章后重置手势窗口与方向基准：程序化滚动（复位到 0 / 定位落位）
+    // 不处于手势窗口，不会触发自动向前拼接（跳动的另一处来源）
+    userScrollActiveRef.current = false;
+    lastScrollOffsetRef.current = 0;
+    if (scrollWindowCloseTimer.current) {
+      clearTimeout(scrollWindowCloseTimer.current);
+      scrollWindowCloseTimer.current = null;
+    }
+    // 【4】目录显式跳章：落章首，不恢复该章上次阅读段落（见 explicitChapterJumpRef）
+    const explicitJump = explicitChapterJumpRef.current;
+    explicitChapterJumpRef.current = false;
     // 重新武装「打开时定位」：目标段落变了要重新定位一次
     // （含超时放弃兜底；模式切换跨章跟随也经由本 effect 完成武装）
     armScrollLocate(segmentId ?? '');
-    // P1-17：无路由段落参数时恢复该章上次阅读段落（旧数据/无记录为 null → 回章首）
-    if (!segmentId && restoreSegmentId) {
+    // P1-17：无路由段落参数时恢复该章上次阅读段落（旧数据/无记录为 null → 回章首）；
+    // 目录显式跳章除外（显式导航语义 = 章首）
+    if (!segmentId && !explicitJump && restoreSegmentId) {
       armScrollLocate(restoreSegmentId);
     }
     // 翻页模式定位目标同步（无参数则从章首开始，保持既有行为）
-    setLocateTarget(segmentId ?? restoreSegmentId ?? null);
+    setLocateTarget(segmentId ?? (explicitJump ? null : restoreSegmentId) ?? null);
     activeChapterIdRef.current = chapterId;
     setActiveChapterId(chapterId);
     // 依赖不含 restoreSegmentId：它仅随 chapterId / segmentId 变化（二者已在依赖中），
@@ -3115,6 +3234,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             onScroll={handleScroll}
             onScrollBeginDrag={handleScrollBeginDrag}
             onScrollEndDrag={handleScrollEndDrag}
+            onMomentumScrollEnd={handleMomentumScrollEnd}
             scrollEventThrottle={16}
             onEndReached={handleEndReached}
             // 预载窗口（屏高倍数）与 handleScroll / onContentSizeChange 的触发条件保持一致
@@ -3175,14 +3295,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
               }
               // 顶部无法产生滚动事件（已到 offset 0，物理上滚不动），
               // 故在内容首次量出高度后主动向前拼接上一章，打通「向上滚动」的入口。
-              // 【4】门闩闭合（打开/切章后用户尚未拖拽）时跳过：此时拼接会把
-              // 视口推到上一章开头再由补偿拉回（切章上下跳动的根因）；
-              // 用户拖拽后由 onScroll / onScrollEndDrag 按需触发拼接。
-              if (
-                h > 0 &&
-                scrollOffset.current <= viewH.current * CONTIGUOUS_PRELOAD_SCREENS &&
-                !autoPrependGateRef.current
-              ) {
+              // 【4】统一判定（手势窗口 + 朝顶部方向）：切章/打开后的程序化布局
+              // 与向下阅读中的追加（fillShort）引发的内容尺寸变化都不满足条件，
+              // 不会把视口推到上一章再拉回（跳错章节/跳动的根因）。
+              if (h > 0 && shouldAutoPrepend(scrollOffset.current)) {
                 prependPreviousChapter();
               }
             }}
@@ -3659,7 +3775,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                 <Pressable
                   style={[
                     styles.tocItem,
-                    item.id === chapterId && { backgroundColor: colors.primarySoft },
+                    // 【4】高亮跟随「实际正在阅读的章」（滚动模式连续拼接后路由章
+                    // 停留在入口章，高亮路由章会误导用户对当前位置的判断）
+                    item.id === progressChapterId && { backgroundColor: colors.primarySoft },
                   ]}
                   onPress={() => {
                     setTocVisible(false);
@@ -3671,7 +3789,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                   <Text
                     style={[
                       styles.tocItemText,
-                      { color: item.id === chapterId ? colors.primary : colors.text },
+                      { color: item.id === progressChapterId ? colors.primary : colors.text },
                     ]}
                     numberOfLines={1}
                   >
