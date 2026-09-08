@@ -1,11 +1,10 @@
 /**
  * 文本库管理服务（TextLibraryService）
  * 负责加载与查询内置经典文本与用户导入书籍。
- * 内置数据源：src/data/texts/ 下各 JSON（16 部）。
- * 2026-09 全本化：周易（64 卦全本）、左传、史记、墨子、庄子（33 篇全本）、
- * 荀子已升级为全本；论语/诗经/楚辞/孟子为选本（全本体量超 4MB 预算，见
- * scripts/build-fulltext-books.mjs 的预算逻辑），资治通鉴/文选为选篇、
- * 唐诗三百首为选集，标题保留「（选）」。
+ * 内置数据源（2026-09 资产化改造）：APK assets/books/<id>.txt（@@CH@@ 标记
+ * 文本，28 部全本，见 scripts/build-builtin-assets.mjs 与 builtinCatalog.ts）。
+ * 首启由 UserBookService 物化到 guoxue-books/builtin/ 并解析，
+ * 经 registerBuiltinBooks 注册进来；bundle 不再携带任何书体 JSON。
  * 用户书籍：由 UserBookService 启动时经 registerUserBooks 注册进来。
  * App 启动时全量加载并缓存，离线可用。
  */
@@ -18,7 +17,8 @@ import type {
   TextSegment,
 } from '@/types';
 
-import { BUILTIN_BOOKS } from '@/data/builtinBooks';
+/** 内置书（UserBookService 启动时经 registerBuiltinBooks 注册，初始为空） */
+let builtinBooks: Book[] = [];
 
 /** 被用户删除（抑制）的内置书 ID 集合（UserBookService 启动时经 setSuppressedBuiltins 注入） */
 let suppressedBuiltins: Set<string> = new Set();
@@ -49,9 +49,7 @@ function buildBooks(): Book[] {
   if (booksCache) {
     return booksCache;
   }
-  const builtins = (BUILTIN_BOOKS as Book[]).filter(
-    (b) => !suppressedBuiltins.has(b.id),
-  );
+  const builtins = builtinBooks.filter((b) => !suppressedBuiltins.has(b.id));
   booksCache = [...builtins, ...userBooks];
   return booksCache;
 }
@@ -92,6 +90,36 @@ function registerUserBooks(books: Book[]): ServiceResult<null> {
       }
     }
     userBooks = books;
+    booksCache = null;
+    chapterIndex = null;
+    segmentIndex = null;
+    buildBooks();
+    buildIndexes();
+    return { success: true, data: null };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+/**
+ * 注册（整体替换）内置书籍列表，重建缓存与全部索引。
+ * 仅供 UserBookService 调用：内置书由 assets/books/<id>.txt 解析而来，
+ * ID 为目录清单（builtinCatalog）中的经典 ID（不带 user- 前缀）。
+ */
+function registerBuiltinBooks(books: Book[]): ServiceResult<null> {
+  try {
+    for (const b of books) {
+      if (isUserBookId(b.id)) {
+        return {
+          success: false,
+          error: `内置书籍 ID 不得使用用户书前缀 ${USER_BOOK_PREFIX}：${b.id}`,
+        };
+      }
+      if (!Array.isArray(b.chapters)) {
+        return { success: false, error: `书籍章节列表无效：${b.id}` };
+      }
+    }
+    builtinBooks = books;
     booksCache = null;
     chapterIndex = null;
     segmentIndex = null;
@@ -235,6 +263,12 @@ export const TextLibraryService = {
    * 仅供 UserBookService 调用；ID 必须以 user- 开头。
    */
   registerUserBooks,
+
+  /**
+   * 注册（整体替换）内置书籍，重建全部索引。
+   * 仅供 UserBookService 调用（builtin/ 资产解析后注入）。
+   */
+  registerBuiltinBooks,
 
   /**
    * 设置被删除（抑制）的内置书集合，重建全部索引。

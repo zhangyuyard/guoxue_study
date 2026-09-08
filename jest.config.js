@@ -24,4 +24,6 @@ module.exports = {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
   setupFiles: ['<rootDir>/jestSetupFile.js'],
+  // __tests__ 目录下的共享 helper（无 test 用例）不作为测试套件收集
+  testPathIgnorePatterns: ['/node_modules/', '\\.helper\\.tsx?$'],
 };

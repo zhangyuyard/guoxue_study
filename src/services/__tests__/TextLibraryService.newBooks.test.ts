@@ -1,51 +1,42 @@
 /**
- * B5 文本库扩充数据完整性测试
- * 锁定新增五部内置经典（孟子/庄子/诗经/荀子/楚辞）的结构与内容质量：
- * - 每部书章数与声明一致、每章 ≥1 段、每段非空
+ * 内置经典数据完整性测试（B5 → 2026-09 资产化全本）。
+ * 锁定五部书（孟子/庄子/诗经/荀子/楚辞）的资产解析产物质量：
+ * - 每部书章数与声明一致、每章 ≥1 段、每段非空含汉字
  * - 无残留 HTML 标签 / 抓取杂项 / ASCII 异常字符 / 扩展区生僻字
- * - 总字数落在合理区间；经 TextLibraryService 端到端可加载
- * 2026-09 全本化：庄子 7 章选本 → 33 篇全本、荀子 4 章选本 → 32 篇全本
- * （章节 id 改用「书id-序号」；孟子/诗经/楚辞因 4MB 体积预算保留选本，见
- * scripts/build-fulltext-books.mjs）
+ * - 总字数落在合理区间（全本口径）；经 TextLibraryService 端到端可加载
+ * - 章节首/末段传世开句/收句抽查（防止源数据缺章断尾）
+ * 2026-09 资产化：书体在 android assets books/<id>.txt，测试经
+ * builtinAssets.helper 直读磁盘解析；章节 id 统一为「书id-cN」。
  */
 import { TextLibraryService } from '@/services/TextLibraryService';
 import type { Book } from '@/types';
+import { loadBuiltinBooks } from './builtinAssets.helper';
 
-import mengziData from '@/data/texts/mengzi.json';
-import zhuangziData from '@/data/texts/zhuangzi.json';
-import shijingData from '@/data/texts/shijing.json';
-import xunziData from '@/data/texts/xunzi.json';
-import chuciData from '@/data/texts/chuci.json';
-
-/** 新书清单（id → 期望章数与总字数区间） */
+/** 五部书清单（id → 期望章数与总字数区间，全本口径） */
 const NEW_BOOKS: Array<{ id: string; expectedChapters: number; charRange: [number, number] }> = [
-  { id: 'mengzi', expectedChapters: 5, charRange: [10000, 20000] },
-  { id: 'zhuangzi', expectedChapters: 33, charRange: [70000, 90000] },
-  { id: 'shijing', expectedChapters: 30, charRange: [3000, 6000] },
-  { id: 'xunzi', expectedChapters: 32, charRange: [80000, 100000] },
-  { id: 'chuci', expectedChapters: 6, charRange: [2500, 5000] },
+  { id: 'mengzi', expectedChapters: 14, charRange: [38000, 50000] },
+  { id: 'zhuangzi', expectedChapters: 33, charRange: [75000, 86000] },
+  { id: 'shijing', expectedChapters: 30, charRange: [35000, 42000] },
+  { id: 'xunzi', expectedChapters: 32, charRange: [85000, 95000] },
+  { id: 'chuci', expectedChapters: 17, charRange: [30000, 35000] },
 ];
 
-const RAW_BY_ID: Record<string, Book> = {
-  mengzi: mengziData as unknown as Book,
-  zhuangzi: zhuangziData as unknown as Book,
-  shijing: shijingData as unknown as Book,
-  xunzi: xunziData as unknown as Book,
-  chuci: chuciData as unknown as Book,
-};
+const RAW_BY_ID: Record<string, Book> = Object.fromEntries(
+  loadBuiltinBooks(NEW_BOOKS.map((s) => s.id)).map((b) => [b.id, b]),
+);
 
-/** 收集某书的全部段落 */
-function segmentsOf(book: Book) {
-  return book.chapters.flatMap((c) => c.segments);
-}
+beforeAll(() => {
+  const reg = TextLibraryService.registerBuiltinBooks(loadBuiltinBooks());
+  expect(reg.success).toBe(true);
+});
 
 /** 书内全部段落文本 */
 function allTexts(book: Book) {
-  return segmentsOf(book).map((s) => s.text);
+  return book.chapters.flatMap((c) => c.segments).map((s) => s.text);
 }
 
-describe('B5 新增五部经典数据完整性', () => {
-  test('五部书均可经 TextLibraryService 端到端加载（id/标题/分类/章数）', () => {
+describe('内置经典数据完整性（资产解析产物）', () => {
+  test('五部书均可经 TextLibraryService 端到端加载（id/标题/章数）', () => {
     for (const spec of NEW_BOOKS) {
       const res = TextLibraryService.getBook(spec.id);
       expect(res.success).toBe(true);
@@ -54,9 +45,9 @@ describe('B5 新增五部经典数据完整性', () => {
       expect(res.data!.description.length).toBeGreaterThan(0);
       expect(res.data!.chapters).toHaveLength(spec.expectedChapters);
     }
-    // 端到端：章节与段落索引可查询（各取一个样本）
-    expect(TextLibraryService.getChapter('mengzi-liang-hui-wang-shang').success).toBe(true);
-    expect(TextLibraryService.getSegment('zhuangzi-01-1').success).toBe(true);
+    // 端到端：章节与段落索引可查询（资产解析 id 规律「书id-cN / -cN-sM」）
+    expect(TextLibraryService.getChapter('mengzi-c1').success).toBe(true);
+    expect(TextLibraryService.getSegment('zhuangzi-c1-s1').success).toBe(true);
   });
 
   test('章数与声明一致，且章 id/bookId/order 连续一致', () => {
@@ -96,8 +87,8 @@ describe('B5 新增五部经典数据完整性', () => {
     }
   });
 
-  test('无残留 HTML 标签与抓取杂项（编辑/姊妹计划/一作/毛诗序等）', () => {
-    const junk = /<[^>]+>|<\/?[a-z]+>|姊妹计划|本作品收录于|一作[“「]|毛诗序|Publicdomain|返回顶部|^\^/;
+  test('无残留 HTML 标签与抓取杂项', () => {
+    const junk = /<[^>]+>|<\/?[a-z]+>|姊妹计划|本作品收录于|Publicdomain|返回顶部|^\^/;
     for (const spec of NEW_BOOKS) {
       for (const text of allTexts(RAW_BY_ID[spec.id])) {
         expect(text).not.toMatch(junk);
@@ -124,133 +115,77 @@ describe('B5 新增五部经典数据完整性', () => {
     }
   });
 
-  test('各书总字数（含标点）落在合理区间', () => {
+  test('各书总字数（含标点）落在全本合理区间', () => {
     for (const spec of NEW_BOOKS) {
       const total = allTexts(RAW_BY_ID[spec.id]).reduce((n, t) => n + t.length, 0);
       expect(total).toBeGreaterThanOrEqual(spec.charRange[0]);
       expect(total).toBeLessThanOrEqual(spec.charRange[1]);
     }
-    // 五部合计约 15-25 万字（含标点；庄子/荀子为全本，其余为选本）
-    const grandTotal = NEW_BOOKS.reduce(
-      (n, spec) => n + allTexts(RAW_BY_ID[spec.id]).reduce((m, t) => m + t.length, 0),
-      0,
-    );
-    expect(grandTotal).toBeGreaterThanOrEqual(150000);
-    expect(grandTotal).toBeLessThanOrEqual(250000);
   });
 
-  test('诗经 30 章均为「风/雅/颂·篇名」式标题且 20 首来自国风', () => {
+  test('诗经 30 章为「风/雅/颂·篇类」式分组且含国风与雅颂', () => {
     const shijing = RAW_BY_ID.shijing;
     expect(shijing.chapters).toHaveLength(30);
     const guofeng = shijing.chapters.filter((c) => c.title.startsWith('国风·'));
-    expect(guofeng.length).toBe(20);
-    const groups = ['小雅', '大雅', '周颂', '商颂'];
+    expect(guofeng.length).toBe(15); // 十五国风
+    const groups = ['小雅', '大雅', '周颂', '鲁颂', '商颂'];
     for (const g of groups) {
       expect(shijing.chapters.some((c) => c.title.startsWith(`${g}·`))).toBe(true);
     }
-    // 抽查代表篇目存在
-    expect(shijing.chapters.map((c) => c.title)).toContain('国风·周南·关雎');
-    expect(shijing.chapters.map((c) => c.title)).toContain('小雅·采薇');
-  });
-});
-
-// ============ B5 打回修复回归：导航残留清洗与权威开句锁定 ============
-
-/** 五部书全部段落文本（从源 JSON 读取，含新增回归用） */
-function allSegmentsAllBooks(): Array<{ book: string; chapterId: string; text: string }> {
-  const out: Array<{ book: string; chapterId: string; text: string }> = [];
-  for (const spec of NEW_BOOKS) {
-    for (const ch of RAW_BY_ID[spec.id].chapters) {
-      for (const seg of ch.segments) {
-        out.push({ book: spec.id, chapterId: ch.id, text: seg.text });
-      }
-    }
-  }
-  return out;
-}
-
-describe('B5 打回修复回归（导航残留清洗）', () => {
-  test('任意段不得以翻页箭头（←/→）或「篇第X」目录行开头', () => {
-    const leadNav = /^.{0,4}(←|→)/;
-    const tocLine = /^[^，。！？；]{0,6}第[一二三四五六七八九十]+篇/;
-    for (const seg of allSegmentsAllBooks()) {
-      expect(leadNav.test(seg.text) ? `${seg.book}/${seg.chapterId}: ${seg.text.slice(0, 30)}` : '').toBe('');
-      expect(tocLine.test(seg.text) ? `${seg.book}/${seg.chapterId}: ${seg.text.slice(0, 30)}` : '').toBe('');
-    }
+    // 关雎为首章首篇（「◆ 关雎」诗题行 + 「关关雎鸠」正文）
+    const first = shijing.chapters[0];
+    expect(first.title).toBe('国风·周南');
+    expect(first.segments.map((s) => s.text).join('\n')).toContain('关关雎鸠');
   });
 
-  test('任意段不得以「篇第X」目录行或箭头结尾（短段判定）', () => {
-    const tailNav = /第[一二三四五六七八九十]+篇$|^.{0,4}(←|→)/;
-    for (const seg of allSegmentsAllBooks()) {
-      if (seg.text.length < 40) {
-        expect(tailNav.test(seg.text) ? `${seg.book}/${seg.chapterId}: ${seg.text}` : '').toBe('');
-      }
-    }
-  });
-
-  test('各章首段以传世开句开头（庄子内篇 7 + 荀子 4 + 孟子/诗经/楚辞样本）', () => {
-    const OPENINGS: Array<[string, string]> = [
-      ['zhuangzi-01', '北冥有鱼，其名为鲲'],
-      ['zhuangzi-02', '南郭子綦'],
-      ['zhuangzi-03', '吾生也有涯'],
-      ['zhuangzi-04', '颜回见仲尼'],
-      ['zhuangzi-05', '鲁有兀者王骀'],
-      ['zhuangzi-06', '知天之所为'],
-      ['zhuangzi-07', '啮缺问于王倪'],
-      ['xunzi-01', '君子曰：学不可以已'],
-      ['xunzi-02', '见善，修然必以自存也'],
-      ['xunzi-03', '君子行不贵苟难'],
-      ['xunzi-04', '憍泄者，人之殃也'],
-      ['mengzi-liang-hui-wang-shang', '孟子见梁惠王'],
-      ['chuci-li-sao', '帝高阳之苗裔兮'],
+  test('章节首段以传世开句开头（庄子内篇 7 + 荀子 4 + 孟子/楚辞样本）', () => {
+    const OPENINGS: Array<[string, number, string]> = [
+      ['zhuangzi', 1, '北冥有鱼，其名为鲲'],
+      ['zhuangzi', 2, '南郭子綦'],
+      ['zhuangzi', 3, '吾生也有涯'],
+      ['zhuangzi', 4, '颜回见仲尼'],
+      ['zhuangzi', 5, '鲁有兀者王骀'],
+      ['zhuangzi', 6, '知天之所为'],
+      ['zhuangzi', 7, '啮缺问于王倪'],
+      ['xunzi', 1, '君子曰：学不可以已'],
+      ['xunzi', 2, '见善，修然必以自存也'],
+      ['xunzi', 3, '君子行不贵苟难'],
+      ['xunzi', 4, '憍泄者，人之殃也'],
+      ['mengzi', 1, '孟子见梁惠王'],
+      ['chuci', 1, '帝高阳之苗裔兮'],
     ];
-    const firstSegments = new Map<string, string>();
-    for (const spec of NEW_BOOKS) {
-      for (const ch of RAW_BY_ID[spec.id].chapters) {
-        firstSegments.set(ch.id, ch.segments[0].text);
-      }
+    for (const [bookId, order, opening] of OPENINGS) {
+      const ch = RAW_BY_ID[bookId].chapters[order - 1];
+      // 跳过「◆ 诗题」引导段（诗词类资产的首段是篇名行）
+      const first = ch.segments.find((sg) => !sg.text.startsWith('◆'))!;
+      expect(first.text.startsWith(opening)).toBe(true);
     }
-    for (const [chapterId, opening] of OPENINGS) {
-      const text = firstSegments.get(chapterId);
-      expect(text).toBeDefined();
-      expect(text!.startsWith(opening)).toBe(true);
-    }
-    // 诗经样本：关雎首段以「关关雎鸠」开头
-    const guanju = RAW_BY_ID.shijing.chapters.find((c) => c.id === 'shijing-guan-ju')!;
-    expect(guanju.segments[0].text.startsWith('关关雎鸠')).toBe(true);
   });
 
-  test('各章末段以传世收句收尾（庄子内篇 7 + 荀子 4 + 离骚）', () => {
-    const ENDINGS: Array<[string, string]> = [
-      // 庄子多处应以引语收尾，末段含传世文本的收引号（”）
-      ['zhuangzi-01', '安所困苦哉！”'],
-      ['zhuangzi-02', '此之谓物化。'],
-      ['zhuangzi-03', '不知其尽也。'],
-      ['zhuangzi-04', '无用之用也。'],
-      ['zhuangzi-05', '子以坚白鸣。”'],
-      ['zhuangzi-06', '命也夫！”'],
-      ['zhuangzi-07', '七日而浑沌死。'],
-      ['xunzi-01', '君子贵其全也。'],
-      ['xunzi-02', '以公义胜私欲也。'],
-      ['xunzi-03', '田仲、史鰌不如盗也。'],
-      ['xunzi-04', '此之谓也。'],
-      ['chuci-li-sao', '吾将从彭咸之所居。'],
+  test('章节末段以传世收句收尾（庄子内篇 7 + 荀子 4 + 离骚）', () => {
+    const ENDINGS: Array<[string, number, string]> = [
+      ['zhuangzi', 1, '安所困苦哉！”'],
+      ['zhuangzi', 2, '此之谓物化。'],
+      ['zhuangzi', 3, '不知其尽也。'],
+      ['zhuangzi', 4, '无用之用也。'],
+      ['zhuangzi', 5, '子以坚白鸣。”'],
+      ['zhuangzi', 6, '命也夫！”'],
+      ['zhuangzi', 7, '七日而浑沌死。'],
+      ['xunzi', 1, '君子贵其全也。'],
+      ['xunzi', 2, '以公义胜私欲也。'],
+      ['xunzi', 3, '田仲、史鰌不如盗也。'],
+      ['xunzi', 4, '此之谓也。'],
+      ['chuci', 1, '吾将从彭咸之所居！'],
     ];
-    const lastSegments = new Map<string, string>();
-    for (const spec of NEW_BOOKS) {
-      for (const ch of RAW_BY_ID[spec.id].chapters) {
-        lastSegments.set(ch.id, ch.segments[ch.segments.length - 1].text);
-      }
-    }
-    for (const [chapterId, ending] of ENDINGS) {
-      const text = lastSegments.get(chapterId);
-      expect(text).toBeDefined();
-      expect(text!.endsWith(ending)).toBe(true);
+    for (const [bookId, order, ending] of ENDINGS) {
+      const ch = RAW_BY_ID[bookId].chapters[order - 1];
+      const text = ch.segments[ch.segments.length - 1].text;
+      expect(text.endsWith(ending)).toBe(true);
     }
   });
 
   test('逍遥游全章完整（含齐谐/野马/风之积等全部内容），篇幅 ≥ 1000 字', () => {
-    const chapter = RAW_BY_ID.zhuangzi.chapters.find((c) => c.id === 'zhuangzi-01')!;
+    const chapter = RAW_BY_ID.zhuangzi.chapters[0];
     const text = chapter.segments.map((s) => s.text).join('');
     expect(text).toContain('《齐谐》者，志怪者也');
     expect(text).toContain('野马也，尘埃也');

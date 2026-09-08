@@ -51,6 +51,16 @@ export function PageFlipPager({
 }: PageFlipPagerProps): React.JSX.Element {
   const scrollRef = useRef<ScrollView>(null);
   const scrollX = useRef(new Animated.Value(index * pageWidth)).current;
+  /**
+   * 【7】翻页阴影基准（动画值）：落位页的起始 x。
+   * 旧实现把受控 index 派生的 settled*pageWidth（普通数值）直接编进插值表达式，
+   * 表达式里记录的是「创建那一刻的 settled」，落位时仅 setValue scrollX——
+   * 新 scrollX × 旧 settled 会在 React 提交新表达式前的若干帧内被求值为 ±1，
+   * clamp 后阴影满档 → 左/右半屏黑影闪现（JS 繁忙时持续多帧，即真机黑影根因）。
+   * 改为 Animated 值后，落位时与 scrollX 在同一 JS tick 内先后 setValue，
+   * 插值图当帧即收敛回 0，不依赖重渲染时机。
+   */
+  const baseX = useRef(new Animated.Value(index * pageWidth)).current;
   const lastIndex = useRef(index);
   /**
    * 已「落位」的页 = 横向 ScrollView 物理上正停在的那一页。
@@ -65,10 +75,11 @@ export function PageFlipPager({
     if (index !== lastIndex.current) {
       lastIndex.current = index;
       setSettled(index);
-      scrollRef.current?.scrollTo({ x: index * pageWidth, animated: false });
+      baseX.setValue(index * pageWidth);
       scrollX.setValue(index * pageWidth);
+      scrollRef.current?.scrollTo({ x: index * pageWidth, animated: false });
     }
-  }, [index, pageWidth, scrollX]);
+  }, [index, pageWidth, scrollX, baseX]);
 
   // 页数变化（重分页 / 超高段拆分块落地 / 切章）后统一重对齐物理落位：
   // contentContainerStyle 宽度随之变化，此前设置的 scrollTo 可能因内容尺寸
@@ -82,23 +93,27 @@ export function PageFlipPager({
     const x = clamped * pageWidth;
     lastIndex.current = clamped;
     setSettled((prev) => (prev === clamped ? prev : clamped));
+    baseX.setValue(x);
     scrollX.setValue(x);
     scrollRef.current?.scrollTo({ x, animated: false });
-  }, [pageCount, pageWidth, scrollX]);
+  }, [pageCount, pageWidth, scrollX, baseX]);
 
   /** 落位到指定页：同时同步「物理滚动位置 + 落位页 + 阴影基准」三者。
    *  点击翻页采用无动画直接落位——程序化动画滚动的结束时机在 iOS/Android 上并不可靠，
-   *  若延后同步 settled 就会残留半屏阴影；手势滑动的阴影仍由 onScroll 实时驱动。 */
+   *  若延后同步 settled 就会残留半屏阴影；手势滑动的阴影仍由 onScroll 实时驱动。
+   *  【7】baseX 与 scrollX 必须在同一 JS tick 内先后 setValue（阴影基准先行），
+   *  插值图最终 norm=0，不再等待 settled 重渲染提交（黑影闪烁根因，见 baseX 注释）。 */
   const goTo = useCallback(
     (i: number) => {
       const target = Math.max(0, Math.min(pageCount - 1, i));
       setSettled(target);
       onIndexChange(target);
       lastIndex.current = target;
+      baseX.setValue(target * pageWidth);
       scrollX.setValue(target * pageWidth);
       scrollRef.current?.scrollTo({ x: target * pageWidth, animated: false });
     },
-    [pageCount, onIndexChange, pageWidth, scrollX],
+    [pageCount, onIndexChange, pageWidth, scrollX, baseX],
   );
 
   const handleMomentumScrollEnd = useCallback(
@@ -133,8 +148,9 @@ export function PageFlipPager({
     }
   }, [settled, pageCount, goTo, onEdgeReached]);
 
-  // 翻页进度：以「落位页」为基准的当前相对偏移 / 页宽，约 [-1, 1]
-  const norm = Animated.divide(Animated.subtract(scrollX, settled * pageWidth), pageWidth);
+  // 翻页进度：相对「阴影基准页起始 x」的偏移 / 页宽，约 [-1, 1]
+  // 【7】基准为动画值 baseX（落位时同步 setValue），不再依赖 settled 重渲染
+  const norm = Animated.divide(Animated.subtract(scrollX, baseX), pageWidth);
   // 向右翻（next）：norm ∈ [0,1]；向左翻（prev）：norm ∈ [-1,0]。
   // 用「直接 clamp 插值」而非 diffClamp：diffClamp 跟踪的是增量，scrollX 一旦
   // 与 settled 瞬时失步（如重分页时 scrollTo 因内容尺寸未提交而失效），norm 会

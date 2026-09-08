@@ -58,16 +58,25 @@ describe('Bug 2：向前拼接的触发与补偿', () => {
     expect(source).toMatch(/const handleScrollEndDrag = useCallback/);
   });
 
-  test('定位落位贴近顶部时主动触发一次向前拼接', () => {
+  test('定位落位贴近顶部时主动触发一次向前拼接（受自动拼接门闩 gating）', () => {
+    // 【4】切章防跳动：门闩闭合（用户尚未拖拽）时跳过自动拼接，
+    // 门闩解除后（autoPrependGateRef.current === false）兜底照常生效
     expect(source).toMatch(
-      /if \(viewH\.current <= 0 \|\| targetOffset <= viewH\.current \* CONTIGUOUS_PRELOAD_SCREENS\) \{\s*\n\s*prependPreviousChapter\(\);/,
+      /autoPrependGateRef\.current === false &&\s*\n\s*\(viewH\.current <= 0 \|\| targetOffset <= viewH\.current \* CONTIGUOUS_PRELOAD_SCREENS\)\s*\n\s*\) \{\s*\n\s*prependPreviousChapter\(\);/,
     );
   });
 
-  test('onContentSizeChange 保留顶部主动拼接兜底', () => {
+  test('onContentSizeChange 保留顶部主动拼接兜底（受自动拼接门闩 gating）', () => {
+    // 【4】同上：兜底保留，仅在用户拖拽解除门闩后触发
     expect(source).toMatch(
-      /if \(h > 0 && scrollOffset\.current <= viewH\.current \* CONTIGUOUS_PRELOAD_SCREENS\) \{\s*\n\s*prependPreviousChapter\(\);/,
+      /if \(\s*\n\s*h > 0 &&\s*\n\s*scrollOffset\.current <= viewH\.current \* CONTIGUOUS_PRELOAD_SCREENS &&\s*\n\s*!autoPrependGateRef\.current\s*\n\s*\) \{\s*\n\s*prependPreviousChapter\(\);/,
     );
+  });
+
+  test('用户首次拖拽解除自动向前拼接门闩（onScrollBeginDrag）', () => {
+    expect(source).toMatch(/onScrollBeginDrag=\{handleScrollBeginDrag\}/);
+    expect(source).toMatch(/const handleScrollBeginDrag = useCallback/);
+    expect(source).toMatch(/autoPrependGateRef\.current = false;/);
   });
 });
 

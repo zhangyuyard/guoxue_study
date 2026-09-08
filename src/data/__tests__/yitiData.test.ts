@@ -9,17 +9,19 @@
  */
 import yitiData from '@/data/yiti-zi.json';
 import seedData from '../../../scripts/yiti-seed.json';
-import lunyu from '@/data/texts/lunyu.json';
-import daodejing from '@/data/texts/daodejing.json';
-import daxue from '@/data/texts/daxue.json';
-import zhongyong from '@/data/texts/zhongyong.json';
-import tangshi from '@/data/texts/tangshi.json';
-import mengzi from '@/data/texts/mengzi.json';
-import zhuangzi from '@/data/texts/zhuangzi.json';
-import shijing from '@/data/texts/shijing.json';
-import xunzi from '@/data/texts/xunzi.json';
-import chuci from '@/data/texts/chuci.json';
-import type { Chapter } from '@/types';
+import fs from 'node:fs';
+import path from 'node:path';
+
+/** 2026-09 书体资产化：书正文改为从 assets/books/<id>.txt 读取（剔除章节标记行） */
+const ASSETS_DIR = path.resolve(__dirname, '../../../android/app/src/main/assets/books');
+function loadBookTexts(): string[] {
+  return fs
+    .readdirSync(ASSETS_DIR)
+    .filter((f) => f.endsWith('.txt'))
+    .map((f) =>
+      fs.readFileSync(path.join(ASSETS_DIR, f), 'utf8').replace(/^@@CH@@.*$/gm, ''),
+    );
+}
 
 interface YitiGroup {
   standard: string;
@@ -31,15 +33,9 @@ const groups = yitiData.groups as unknown as YitiGroup[];
 
 /** 10 部书全部正文字符集（含章节标题） */
 function collectTextChars(): Set<string> {
-  const books = [lunyu, daodejing, daxue, zhongyong, tangshi, mengzi, zhuangzi, shijing, xunzi, chuci];
   const chars = new Set<string>();
-  for (const book of books) {
-    for (const chapter of (book as { chapters: Chapter[] }).chapters) {
-      for (const c of chapter.title ?? '') chars.add(c);
-      for (const seg of chapter.segments ?? []) {
-        for (const c of seg.text) chars.add(c);
-      }
-    }
+  for (const text of loadBookTexts()) {
+    for (const c of text) chars.add(c);
   }
   return chars;
 }

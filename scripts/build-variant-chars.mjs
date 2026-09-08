@@ -32,7 +32,7 @@ import { execSync } from 'node:child_process';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUTPUT = resolve(ROOT, 'src/data/yiti-zi.json');
 const SEED = resolve(ROOT, 'scripts/yiti-seed.json');
-const TEXTS_DIR = resolve(ROOT, 'src/data/texts');
+const TEXTS_DIR = resolve(ROOT, 'android/app/src/main/assets/books');
 
 /** 目标组数（种子 47 组 + Unihan 生成组，合计 ≥ 150；留余量取 180） */
 const TARGET_GROUPS = 180;
@@ -132,33 +132,22 @@ const CORPUS_FILES = [
   'chuci.json',
 ];
 
-/** 扫描语料正文（含章节标题），返回 { set:Set(出现过的字), freq:Map(字→频次) } */
+/** 扫描语料正文（assets/books/<id>.txt 标记文本，剔除章节标记行），返回 { set,freq } */
 function scanBookChars() {
   const set = new Set();
   const freq = new Map();
-  for (const f of CORPUS_FILES) {
-    let data;
+  for (const f of readdirSync(TEXTS_DIR)) {
+    if (!f.endsWith('.txt')) continue;
+    let raw;
     try {
-      data = JSON.parse(readFileSync(resolve(TEXTS_DIR, f), 'utf8'));
+      raw = readFileSync(resolve(TEXTS_DIR, f), 'utf8').replace(/^@@CH@@.*$/gm, '');
     } catch {
       continue;
     }
-    for (const chapter of data?.chapters ?? []) {
-      const title = typeof chapter?.title === 'string' ? chapter.title : '';
-      for (const c of title) {
-        if (isCJKChar(c)) {
-          set.add(c);
-          freq.set(c, (freq.get(c) ?? 0) + 1);
-        }
-      }
-      for (const seg of chapter?.segments ?? []) {
-        const t = typeof seg?.text === 'string' ? seg.text : '';
-        for (const c of t) {
-          if (isCJKChar(c)) {
-            set.add(c);
-            freq.set(c, (freq.get(c) ?? 0) + 1);
-          }
-        }
+    for (const c of raw) {
+      if (isCJKChar(c)) {
+        set.add(c);
+        freq.set(c, (freq.get(c) ?? 0) + 1);
       }
     }
   }

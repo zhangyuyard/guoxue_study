@@ -742,30 +742,24 @@ function isCJKChar(c) {
  * 用于古今字种子的「宁缺毋滥」过滤：仅当借字在该书正文中实际出现时才写入该书。
  */
 function scanBookTexts() {
-  const dir = resolve(ROOT, 'src/data/texts');
+  // 2026-09 书体资产化：书正文在 android assets books/<id>.txt（@@CH@@ 标记文本）
+  const dir = resolve(ROOT, 'android/app/src/main/assets/books');
   const books = [];
   for (const f of readdirSync(dir)) {
-    if (!f.endsWith('.json')) continue;
-    let data;
+    if (!f.endsWith('.txt')) continue;
+    let raw;
     try {
-      data = JSON.parse(readFileSync(resolve(dir, f), 'utf8'));
+      raw = readFileSync(resolve(dir, f), 'utf8');
     } catch {
       continue;
     }
-    if (!data?.id || !Array.isArray(data.chapters)) continue;
     const chars = new Map();
-    for (const chapter of data.chapters) {
-      const segs = Array.isArray(chapter?.segments) ? chapter.segments : [];
-      for (const seg of segs) {
-        const t = typeof seg?.text === 'string' ? seg.text : '';
-        for (const c of t) {
-          if (isCJKChar(c)) {
-            chars.set(c, (chars.get(c) ?? 0) + 1);
-          }
-        }
+    for (const c of raw.replace(/^@@CH@@.*$/gm, '')) {
+      if (isCJKChar(c)) {
+        chars.set(c, (chars.get(c) ?? 0) + 1);
       }
     }
-    books.push({ bookId: String(data.id), chars });
+    books.push({ bookId: f.replace(/\.txt$/, ''), chars });
   }
   return books;
 }

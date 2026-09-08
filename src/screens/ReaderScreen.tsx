@@ -56,9 +56,9 @@ import {
   nowISO,
 } from '@/services/StorageService';
 import { TextLibraryService } from '@/services/TextLibraryService';
-import { ConversionService } from '@/services/ConversionService';
 import { TtsService } from '@/services/tts/TtsService';
 import { stepSpeechRate } from '@/utils/speech';
+import { memoToSimplified, memoToTraditional } from '@/utils/conversionMemo';
 import { useReaderBookSettings, useSettingsStore } from '@/store/useSettingsStore';
 import { useReaderStore } from '@/store/useReaderStore';
 import {
@@ -181,6 +181,14 @@ const LOCATE_TIMEOUT_MS = 1500;
  * 微小超高被反复拆分，产生只有一行的碎页。
  */
 const CHUNK_RESPLIT_TOLERANCE = 12;
+
+/**
+ * 【9】隐藏 sizer 分批量高的批大小与间隔：
+ * 每批挂载 6 段、间隔 16ms（约每帧一批），单帧字格挂载量有界，
+ * 大书量高期间 JS 线程保持可响应（loading 不再阻塞全部交互）。
+ */
+const SIZER_BATCH_SEGMENTS = 6;
+const SIZER_BATCH_INTERVAL = 16;
 
 /**
  * 滚动模式上下章「预加载窗口」（屏高倍数）：距顶/距底不足该倍数屏高时
@@ -476,6 +484,13 @@ interface SegmentBlockItemProps {
   fontSize: number;
   lineHeight: number;
   pinyinMode: PinyinMode;
+  /**
+   * 繁简显示模式：【5】必须与 sizer 量高时一致下发（SegmentItem → PinyinText
+   * 的 conversionMode 覆盖）。缺省时 PinyinText 回落全局设置，若本书存在
+   * 书籍级繁简覆盖且与全局不同，量高分页与实际渲染文本就会不一致，
+   * 表现为页面内容与可视区域错位（填不满/溢出）。
+   */
+  conversionMode?: 'simplified' | 'traditional';
   highlightsBySegment: Map<string, Highlight[]>;
   /** 活动选区快照（菜单打开期间非空），用于选区视觉反馈 */
   activeSelection?: { segmentId: string; start: number; end: number } | null;
@@ -494,6 +509,7 @@ const SegmentBlockItem = React.memo(function SegmentBlockItem({
   fontSize,
   lineHeight,
   pinyinMode,
+  conversionMode,
   highlightsBySegment,
   activeSelection,
   onHighlightPress,
@@ -520,6 +536,7 @@ const SegmentBlockItem = React.memo(function SegmentBlockItem({
       fontSize={fontSize}
       lineHeight={lineHeight}
       pinyinMode={pinyinMode}
+      conversionMode={conversionMode}
       segmentHighlights={highlightsBySegment.get(segId) ?? EMPTY_HIGHLIGHTS}
       selectionRange={selectionRange}
       onHighlightPress={onHighlightPress}
@@ -594,6 +611,14 @@ function PageModeView({
   const [titleHeight, setTitleHeight] = useState(0);
   const [titleMeasured, setTitleMeasured] = useState(false);
   const [pageReady, setPageReady] = useState(false);
+  /**
+   * 【9】隐藏 sizer 的分批挂载进度（已放入 sizer 的段落数）。
+   * 旧实现一次性挂载整章全部段落量高：大书单段 2500 字 × 逐字注音，首帧
+   * 数万字格同步挂载把 JS 线程压死 —— 表现为跨章/切换排版时 loading 期间
+   * 整页功能全部不可用。改为每帧批量挂载一小段段落（SIZER_BATCH_SEGMENTS），
+   * 单帧工作量有界，loading 期间 UI 保持可响应；分页仍等全部段量完收敛后才出页。
+   */
+  const [sizerLimit, setSizerLimit] = useState(0);
   const locatedRef = useRef(false);
   /**
    * 超高段落的拆分方案：segId -> 码点边界数组（含 0 与码点总数）。
@@ -617,6 +642,14 @@ function PageModeView({
    * 重定位成功后清空，避免影响后续定位。
    */
   const relocateSegIdRef = useRef<string | null>(null);
+  /**
+   * 【6】重量测等待门闩：measureKey 重置 effect 与定位 effect 在同一次提交内
+   * 依次执行，此刻 pageReady 仍是上一轮的 stale-true —— 若不在重置时立起门闩，
+   * 定位 effect 会用旧 pages「提前消费」重定位目标并把 locatedRef 置 true，
+   * 量测收敛后的真正重定位被吞掉 → 繁简/注音/字号切换后停在错误页甚至跳页。
+   * 门闩在 pageReady 重新计算为 true 时（见 pageReady effect）解除。
+   */
+  const remeasureGateRef = useRef(false);
   /** 已用 locateSegmentId 完成过定位的目标（防止 measureKey 重置后 stale 目标反复重定位） */
   const locatedSegIdRef = useRef<string | null>(null);
 
@@ -641,7 +674,27 @@ function PageModeView({
     setSplitPlan({});
     setChunkHeights({});
     locatedRef.current = false;
+    // 【6】立起重量测门闩：定位 effect 在本提交内因 stale pageReady 会被跳过，
+    // 重定位目标留待量测收敛后（新 pages）消费
+    remeasureGateRef.current = true;
+    // 【9】sizer 分批挂载进度同步归零（新排版从第一批重新量起）
+    setSizerLimit(0);
   }, [measureKey]);
+
+  /**
+   * 【9】sizer 分批推进：每 16ms 挂载下一批段落（setTimeout 让出主线程，
+   * onLayout 高度在批次间异步回填），直到全部段落进入 sizer。
+   * 分页出页仍由 pageReady 门控（全部段量完 + 拆分收敛），批进不影响正确性。
+   */
+  useEffect(() => {
+    if (pageReady || sizerLimit >= segments.length) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setSizerLimit((prev) => Math.min(segments.length, prev + SIZER_BATCH_SEGMENTS));
+    }, SIZER_BATCH_INTERVAL);
+    return () => clearTimeout(timer);
+  }, [pageReady, sizerLimit, segments.length]);
 
   const recordHeight = useCallback((id: string, h: number) => {
     setSegHeights((prev) => (prev[id] === h ? prev : { ...prev, [id]: h }));
@@ -825,6 +878,11 @@ function PageModeView({
       titleMeasured &&
       splitSettled &&
       blocks.length === expectedBlockCount;
+    // 【6】量测收敛：解除重量测门闩（定位 effect 在 pageReady 状态真正翻转后的
+    // 下一轮提交内消费重定位目标，见 remeasureGateRef 注释）
+    if (ready) {
+      remeasureGateRef.current = false;
+    }
     setPageReady(ready);
   }, [pageWidth, pageHeight, titleMeasured, splitSettled, blocks.length, expectedBlockCount]);
 
@@ -847,7 +905,8 @@ function PageModeView({
   // 已定位过的显式目标不得因 measureKey 重置而反复生效——否则注音切换会被
   // 打开时的陈旧目标拽回（注音切换跳章 Bug 的翻页模式根因）。
   useEffect(() => {
-    if (!pageReady || locatedRef.current) {
+    // 【6】重量测等待期跳过定位（含 pageReady stale-true 的当帧，见 remeasureGateRef）
+    if (!pageReady || locatedRef.current || remeasureGateRef.current) {
       return;
     }
     const freshExplicit = !!locateSegmentId && locateSegmentId !== locatedSegIdRef.current;
@@ -882,7 +941,22 @@ function PageModeView({
     (pageIndex: number) => {
       const page = pages[pageIndex];
       if (!page) {
-        return null;
+        // 【9】缺页兜底（概率纯空白页的根因）：重分页使 pages 收缩的过渡帧，
+        // PageFlipPager 仍按旧 pageCount 渲染越界页，旧实现返回 null →
+        // 渲染出一张纯空白纸页。回退为章节标题占位页，保证任何页非空。
+        return (
+          <ScrollView
+            style={[styles.pageScroll, { height: pageHeight }]}
+            scrollEnabled={false}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={[styles.pageInner, { width: pageWidth }]}>
+              <Text style={[styles.chapterTitle, { color: colors.text }]}>
+                {chapterTitle}
+              </Text>
+            </View>
+          </ScrollView>
+        );
       }
       // 页内纵向滚动始终开启：正常分页因字号 / 行距 / 测量误差导致本页内容
       // 略超页高时，仍可在页内纵向滚动阅读（超高段已按码点区间拆块，不再依赖此兜底）。
@@ -909,6 +983,7 @@ function PageModeView({
                   fontSize={fontSize}
                   lineHeight={lineHeight}
                   pinyinMode={pinyinMode}
+                  conversionMode={displayMode}
                   highlightsBySegment={highlightsBySegment}
                   activeSelection={activeSelection}
                   onHighlightPress={onHighlightPress}
@@ -932,6 +1007,7 @@ function PageModeView({
       fontSize,
       lineHeight,
       pinyinMode,
+      displayMode,
       highlightsBySegment,
       activeSelection,
       onHighlightPress,
@@ -952,7 +1028,10 @@ function PageModeView({
     <View style={styles.pageModeRoot}>
       {!pageReady && (
         <View style={styles.sizer} pointerEvents="none">
-          <View style={styles.pageInner}>
+          {/* 【5】量测宽度与渲染宽度显式对齐：渲染层 pageInner 宽度为 pageWidth，
+              sizer 必须在同一宽度下量高，否则量得高度与实际排版不一致，
+              分页结果与可视区域错位（页面内容填不满/溢出的根因之一） */}
+          <View style={[styles.pageInner, { width: pageWidth }]}>
             <Text
               onLayout={(e) => {
                 setTitleHeight(e.nativeEvent.layout.height);
@@ -962,7 +1041,8 @@ function PageModeView({
             >
               {chapterTitle}
             </Text>
-            {segments.map((seg) => {
+            {/* 【9】分批挂载：仅渲染前 sizerLimit 段参与量高（见 sizerLimit 注释） */}
+            {segments.slice(0, sizerLimit).map((seg) => {
               const plan = splitPlan[seg.id];
               const total = segCharCounts.get(seg.id) ?? 0;
               // 已拆分的段：渲染各码点区间块（供 recordChunkHeight 量高），
@@ -1037,6 +1117,9 @@ function PageModeView({
         />
       ) : (
         <View style={styles.pageLoading}>
+          {/* 【9】loading 局部化：显示章节名 + 轻量 spinner（不再是一整张无信息的
+              空白 loading 页）；量高已分批执行不阻塞 JS，期间顶部/底部功能区可用 */}
+          <Text style={[styles.chapterTitle, { color: colors.text }]}>{chapterTitle}</Text>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
       )}
@@ -1124,6 +1207,17 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   } | null>(null);
   /** 最近一次滚动偏移（向前拼接的补偿起点） */
   const scrollOffset = useRef(0);
+  /**
+   * 【4】自动向前拼接门闩（顶部章节导航切章防跳动的关键）：
+   * true = 抑制「非用户手势触发」的向前拼接。切章/打开时会 scrollToOffset(0)，
+   * 若此时 onContentSizeChange 兜底自动向前拼接上一章，插入内容位于视口上方，
+   * 视口瞬间被推到上一章内容、再由锚点补偿拉回 —— 一推一拉即「上下跳动」，
+   * 短章书（每章不足一屏）每次切章都复现。门闩在用户首次拖拽（onScrollBeginDrag）
+   * 时解除，此后 onScroll / onScrollEndDrag / 定位落点触发的按需拼接恢复正常；
+   * 向后追加（fillShortContentIfNeeded / onEndReached）不经过门闩——追加内容
+   * 位于视口下方，不产生视口位移。
+   */
+  const autoPrependGateRef = useRef(true);
   /**
    * 滑动窗口丢头的滚动补偿量（px）：丢头使保留内容整体上移，onContentSizeChange
    * 消费时把滚动偏移回退该值，使视口仍停留在用户正在阅读的内容上。
@@ -1338,16 +1432,19 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    * 探测源文语种——结果与原文一致为简体源，不同为繁体源。简体显示时
    * 仅繁体源转简（简体源直通，避免 opencc 归一化改动原文）；繁体显示
    * 时仅简体源转繁（繁体源直通，切换即直通更快）。
+   * 【6】转换走带缓存入口（utils/conversionMemo）：繁简切换需对当前章全部段落
+   * 重转一遍（单段可达 2500 字），opencc 直接调用耗时显著；同文本同会话结果
+   * 恒定，进程内 LRU 缓存让重复切换/重渲染/邻章预热全部命中，切换耗时大幅下降。
    */
   const toDisplayText = useCallback(
     (text: string): string => {
-      const asSimplified = ConversionService.toSimplified(text).data ?? text;
+      const asSimplified = memoToSimplified(text);
       if (asSimplified === text) {
         // 简体源
         if (conversionMode === 'simplified') {
           return text;
         }
-        return ConversionService.toTraditional(text).data ?? text;
+        return memoToTraditional(text);
       }
       // 繁体源
       if (conversionMode === 'simplified') {
@@ -1421,6 +1518,31 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     return res.success && res.data ? res.data : {};
   }, [chapterId]);
 
+  /**
+   * 【9】邻章转换预热（仅翻页模式）：跨章翻页会挂载新章并做全量繁简转换 +
+   * 量高分页，opencc 转换是 loading 时长的主要构成之一。这里在当前章阅读
+   * 期间分批把下一章文本过一遍 toDisplayText（命中 conversionMemo 缓存），
+   * 把转换开销从跨章瞬间挪到闲时分批执行，不阻塞当前帧；
+   * 缓存按原文键控，预热与实际打开时的转换结果一致。
+   */
+  useEffect(() => {
+    if (readerMode !== 'page' || !siblings.next || siblings.next.segments.length === 0) {
+      return;
+    }
+    const nextSegments = siblings.next.segments;
+    let cursor = 0;
+    const timer = setInterval(() => {
+      for (const seg of nextSegments.slice(cursor, cursor + SIZER_BATCH_SEGMENTS)) {
+        toDisplayText(seg.text);
+      }
+      cursor += SIZER_BATCH_SEGMENTS;
+      if (cursor >= nextSegments.length) {
+        clearInterval(timer);
+      }
+    }, SIZER_BATCH_INTERVAL * 2);
+    return () => clearInterval(timer);
+  }, [readerMode, siblings, toDisplayText]);
+
   /** 跳转至指定章节（翻页） */
   const goToChapter = useCallback(
     (cid: string) => {
@@ -1446,10 +1568,15 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [siblings, goToChapter],
   );
 
-  /** 仿真翻页：当前页首个真实段落写回阅读位置，便于续读 */
+  /** 仿真翻页：当前页首个真实段落写回阅读位置，便于续读。
+   *  【2A】翻页模式换页进度落库：setSegment 只更新内存 segmentId，不写 lastRead，
+   *  翻了几页后退出阅读进度仍停在打开时的段落；recordProgress 同步
+   *  lastRead.segmentId（store 侧幂等，同段重复上报不产生写入）。
+   *  滚动模式的对应写入见 onViewableItemsChanged 的防抖 recordProgress。 */
   const handlePageActiveSegment = useCallback((segId: string | null) => {
     if (segId) {
       useReaderStore.getState().setSegment(segId);
+      useReaderStore.getState().recordProgress(segId);
     }
   }, []);
 
@@ -1469,6 +1596,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     prependAnchor.current = null;
     loadingNext.current = false;
     loadingPrev.current = false;
+    // 【4】模式切换后滚动列表重挂载，与切章同款：重新闭合自动向前拼接门闩，
+    // 防止挂载后的 onContentSizeChange 兜底把视口推到上一章再拉回（跳动）
+    autoPrependGateRef.current = true;
     // 模式切换定位：两种模式都会把当前段上报到 useReaderStore（滚动模式经
     // onViewableItemsChanged、翻页模式经 onActiveSegmentChange），切换后以它
     // 为定位目标，而不是跳回章首。
@@ -1970,7 +2100,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         // 定位落点贴近顶部时主动触发一次向前拼接：续读打开在章首附近的场景下，
         // onContentSizeChange 的首次兜底可能被 pendingScroll 未完成的守卫挡掉，
         // 而停在 offset≈0 处不会再产生滚动事件，用户必须「来回滚动」才能触发。
-        if (viewH.current <= 0 || targetOffset <= viewH.current * CONTIGUOUS_PRELOAD_SCREENS) {
+        // 【4】门闩闭合（尚未发生用户拖拽）时跳过：打开/切章瞬间的自动拼接
+        // 会把视口推到上一章再拉回（上下跳动），等用户拖拽后由滚动按需拼接。
+        if (
+          autoPrependGateRef.current === false &&
+          (viewH.current <= 0 || targetOffset <= viewH.current * CONTIGUOUS_PRELOAD_SCREENS)
+        ) {
           prependPreviousChapter();
         }
       }
@@ -2123,12 +2258,24 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       }
       // 距顶部不足预载窗口时提前向前拼接上一章（同上）。
       // （顶部无法产生滚动事件，真正的首次触发由 onContentSizeChange 兜底）
-      if (offset < viewHeight * CONTIGUOUS_PRELOAD_SCREENS) {
+      // 【4】门闩闭合时跳过：程序化 scrollTo（切章复位/补偿落位）也会触发
+      // onScroll，不区分会造成「切章瞬间自动拼接 → 视口被推走再拉回」的跳动。
+      if (offset < viewHeight * CONTIGUOUS_PRELOAD_SCREENS && !autoPrependGateRef.current) {
         prependPreviousChapter();
       }
     },
     [appendNextChapter, prependPreviousChapter, rowOffsets, expireAnchorIfNeeded],
   );
+
+  /**
+   * 【4】用户开始拖拽：解除自动向前拼接门闩。
+   * 此后滚动触发的向前拼接均为用户意图驱动（视口位移由锚点补偿对冲），
+   * 打开/切章阶段的程序化滚动不再触发拼接（根除切章跳动的另一处来源）。
+   */
+  const handleScrollBeginDrag = useCallback(() => {
+    autoPrependGateRef.current = false;
+    expireAnchorIfNeeded();
+  }, [expireAnchorIfNeeded]);
 
   /**
    * 拖拽结束时的顶部触发兜底：在 offset≈0 处向上回弹（Android 拉出 overscroll）
@@ -2152,6 +2299,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
     setScrollFrac(0);
     rowOffsets.current.clear();
+    // 【4】重新闭合计时门闩：切章后程序化滚动（复位到 0 / 定位落位）不得触发
+    // 自动向前拼接，等用户首次拖拽（onScrollBeginDrag）再解除
+    autoPrependGateRef.current = true;
     // 重新武装「打开时定位」：目标段落变了要重新定位一次
     // （含超时放弃兜底；模式切换跨章跟随也经由本 effect 完成武装）
     armScrollLocate(segmentId ?? '');
@@ -2788,9 +2938,18 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* 顶部标题栏 */}
+      {/* 顶部标题栏：【8】右侧功能按钮统一用固定最小热区（headerAction，34×32 +
+          hitSlop 4~6），替换旧「纯 Text + hitSlop 8」的小热区——旧热区单字宽约 16px，
+          相邻按钮 12px 间距叠加双向 hitSlop 后热区互相重叠（误触根因），
+          且小热区在真机上难以点中（触发位置不精确） */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Pressable onPress={goBack} hitSlop={8} accessibilityRole="button" accessibilityLabel="返回">
+        <Pressable
+          onPress={goBack}
+          hitSlop={{ top: 8, bottom: 8, left: 16, right: 4 }}
+          style={({ pressed }) => [styles.headerActionWide, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="返回"
+        >
           <Text style={[styles.backButton, { color: colors.primary }]}>{'‹ 返回'}</Text>
         </Pressable>
         <Pressable
@@ -2811,8 +2970,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           </View>
         </Pressable>
         <Pressable
+          style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}
           onPress={() => setSettingsVisible(true)}
-          hitSlop={8}
+          hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
           accessibilityRole="button"
           accessibilityLabel="阅读设置"
         >
@@ -2820,8 +2980,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         </Pressable>
         {/* 一键繁简切换：点击在当前书籍简/繁显示间切换 */}
         <Pressable
+          style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}
           onPress={handleToggleConversionMode}
-          hitSlop={8}
+          hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
           accessibilityRole="button"
           accessibilityLabel={`切换繁简显示（当前：${conversionMode === 'traditional' ? '繁體' : '简体'}）`}
         >
@@ -2831,8 +2992,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         </Pressable>
         {/* 整篇收藏（原长按菜单「收藏全文」迁移）：已收藏主色高亮，再点两步确认取消 */}
         <Pressable
+          style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}
           onPress={handleToggleArticleBookmark}
-          hitSlop={8}
+          hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
           accessibilityRole="button"
           accessibilityLabel={articleBookmark ? '取消收藏本章' : '收藏本章'}
         >
@@ -2848,8 +3010,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         {/* 正文朗读开关（右上角「听」）：未朗读 → 先弹语速设置弹窗（确认后播放）；
             朗读中 → 直接停止。朗读中主色高亮 + 图标变停止符，a11y 标签区分两种意图 */}
         <Pressable
+          style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}
           onPress={handleListenPress}
-          hitSlop={8}
+          hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
           accessibilityRole="button"
           accessibilityLabel={ttsSpeaking ? '停止朗读' : '设置语速并朗读'}
         >
@@ -2865,8 +3028,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         {/* 注音模式切换（原底部注音条迁移）：循环 全文注音 → 仅生僻字 → 关闭。
             视觉指示：全文注音=主色 / 仅生僻字=正文色 / 关闭=弱化灰，a11y 标签说明当前模式 */}
         <Pressable
+          style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}
           onPress={handleCyclePinyinMode}
-          hitSlop={8}
+          hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
           accessibilityRole="button"
           accessibilityLabel={`注音模式：${PINYIN_MODE_LABELS[pinyinMode]}，点击切换为${
             PINYIN_MODE_LABELS[
@@ -2949,6 +3113,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             onViewableItemsChanged={onViewableItemsChanged}
             viewabilityConfig={viewabilityConfig}
             onScroll={handleScroll}
+            onScrollBeginDrag={handleScrollBeginDrag}
             onScrollEndDrag={handleScrollEndDrag}
             scrollEventThrottle={16}
             onEndReached={handleEndReached}
@@ -3010,7 +3175,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
               }
               // 顶部无法产生滚动事件（已到 offset 0，物理上滚不动），
               // 故在内容首次量出高度后主动向前拼接上一章，打通「向上滚动」的入口。
-              if (h > 0 && scrollOffset.current <= viewH.current * CONTIGUOUS_PRELOAD_SCREENS) {
+              // 【4】门闩闭合（打开/切章后用户尚未拖拽）时跳过：此时拼接会把
+              // 视口推到上一章开头再由补偿拉回（切章上下跳动的根因）；
+              // 用户拖拽后由 onScroll / onScrollEndDrag 按需触发拼接。
+              if (
+                h > 0 &&
+                scrollOffset.current <= viewH.current * CONTIGUOUS_PRELOAD_SCREENS &&
+                !autoPrependGateRef.current
+              ) {
                 prependPreviousChapter();
               }
             }}
@@ -3538,13 +3710,33 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backButton: {
     fontSize: 16,
-    marginRight: 8,
+    // 【8】水平间距由热区容器（headerActionWide）承担，文本自身不再加 margin
+  },
+  /**
+   * 【8】右上角功能按钮统一热区容器：最小 34×32、内容居中。
+   * 相邻热区 pitch = 34px + 各 2px hitSlop = 38px，刚好相切不重叠；
+   * 旧实现纯 Text 热区单字约 16px 宽，叠加 12px 间距 + 双向 hitSlop 8 后
+   * 相邻热区互相覆盖（误触/点不中根因）。
+   */
+  headerAction: {
+    minWidth: 34,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** 返回按钮热区：更宽的左右命中（左侧贴屏，向左扩大 slop） */
+  headerActionWide: {
+    minWidth: 48,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 4,
   },
   headerTitles: {
     flex: 1,
@@ -3568,12 +3760,10 @@ const styles = StyleSheet.create({
   settingsButton: {
     fontSize: 16,
     fontWeight: '600',
-    marginLeft: 12,
   },
   convButton: {
     fontSize: 16,
     fontWeight: '600',
-    marginLeft: 12,
     minWidth: 20,
     textAlign: 'center',
   },

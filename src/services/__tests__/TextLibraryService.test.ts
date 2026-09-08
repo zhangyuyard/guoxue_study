@@ -10,6 +10,14 @@ import {
   USER_BOOK_PREFIX,
 } from '@/services/TextLibraryService';
 import type { Book } from '@/types';
+import { BUILTIN_CATALOG } from '@/data/builtinCatalog';
+import { loadBuiltinBooks } from './builtinAssets.helper';
+
+beforeAll(() => {
+  // 2026-09 资产化：内置书由 assets/books 解析注册（测试直读磁盘）
+  const reg = TextLibraryService.registerBuiltinBooks(loadBuiltinBooks());
+  expect(reg.success).toBe(true);
+});
 
 /** 构造最小用户书（供注册用例） */
 function makeUserBook(id: string): Book {
@@ -35,16 +43,16 @@ function makeUserBook(id: string): Book {
 
 describe('TextLibraryService.getSiblingChapters（章节翻页数据路径）', () => {
   test('第一章：无上一章，下一章为第二章', () => {
-    const res = TextLibraryService.getSiblingChapters('daodejing-1');
+    const res = TextLibraryService.getSiblingChapters('daodejing-c1');
     expect(res.success).toBe(true);
     expect(res.data?.prev).toBeUndefined();
-    expect(res.data?.next?.id).toBe('daodejing-2');
+    expect(res.data?.next?.id).toBe('daodejing-c2');
   });
 
   test('中间章：上一章与下一章均存在', () => {
-    const res = TextLibraryService.getSiblingChapters('daodejing-2');
-    expect(res.data?.prev?.id).toBe('daodejing-1');
-    expect(res.data?.next?.id).toBe('daodejing-3');
+    const res = TextLibraryService.getSiblingChapters('daodejing-c2');
+    expect(res.data?.prev?.id).toBe('daodejing-c1');
+    expect(res.data?.next?.id).toBe('daodejing-c3');
   });
 
   test('末章：无下一章，上一章为倒数第二章', () => {
@@ -70,29 +78,22 @@ describe('TextLibraryService 初始内置书目', () => {
    * + 2026-09 扩充六部（周易/左传/史记/资治通鉴/墨子/文选），共 16 部全量注册。
    */
   const BUILTIN_IDS = [
-    'daodejing',
-    'lunyu',
-    'daxue',
-    'zhongyong',
-    'mengzi',
-    'zhuangzi',
-    'shijing',
-    'xunzi',
-    'chuci',
-    'tangshi',
-    'zhouyi',
-    'zuozhuan',
-    'shiji',
-    'tongjian',
-    'mozi',
-    'wenxuan',
+    'daodejing', 'lunyu', 'daxue', 'zhongyong', 'mengzi', 'zhuangzi',
+    'shijing', 'xunzi', 'chuci', 'tangshi', 'zhouyi', 'zuozhuan',
+    'shiji', 'tongjian', 'mozi', 'wenxuan', 'songci', 'yuanqu',
+    'guwenguanzhi', 'sanzijing', 'baijiaxing', 'qianziwen', 'dizigui',
+    'zhuzijiaxun', 'zengguangxianwen', 'shenglvqimeng', 'liwengduiyun',
+    'youxueqionglin',
   ];
 
-  test('内置书目为 16 部（原 10 部 + 周易/左传/史记/资治通鉴/墨子/文选）', () => {
+
+  test('内置书目为 28 部全本（原 16 部 + 宋词/元曲/古文观止 + 九部蒙学）', () => {
     const res = TextLibraryService.getBooks();
     expect(res.success).toBe(true);
     expect(res.data!.map((b) => b.id)).toEqual(BUILTIN_IDS);
-    expect(res.data![0].chapters).toHaveLength(81);
+    expect(res.data![0].chapters).toHaveLength(81); // 道德经 81 章
+    const tongjian = res.data!.find((b) => b.id === 'tongjian');
+    expect(tongjian?.chapters).toHaveLength(294); // 资治通鉴 294 卷全本
   });
 });
 
@@ -128,25 +129,15 @@ describe('TextLibraryService.registerUserBooks（用户上传书籍注册）', (
     expect(reg.success).toBe(true);
     expect(TextLibraryService.getBook(`${USER_BOOK_PREFIX}t1`).success).toBe(false);
     expect(TextLibraryService.getBook(`${USER_BOOK_PREFIX}t2`).success).toBe(true);
+    // 书架清单中用户书整体替换为 t2（内置书不受影响）
+    const userIds = (TextLibraryService.getBooks().data ?? [])
+      .map((b) => b.id)
+      .filter((id) => id.startsWith(USER_BOOK_PREFIX));
+    expect(userIds).toEqual([`${USER_BOOK_PREFIX}t2`]);
     // 还原为空列表，避免影响其他用例
     TextLibraryService.registerUserBooks([]);
-    expect(TextLibraryService.getBooks().data!.map((b) => b.id)).toEqual([
-      'daodejing',
-      'lunyu',
-      'daxue',
-      'zhongyong',
-      'mengzi',
-      'zhuangzi',
-      'shijing',
-      'xunzi',
-      'chuci',
-      'tangshi',
-      'zhouyi',
-      'zuozhuan',
-      'shiji',
-      'tongjian',
-      'mozi',
-      'wenxuan',
-    ]);
+    expect(TextLibraryService.getBooks().data!.map((b) => b.id)).toEqual(
+      BUILTIN_CATALOG.map((b) => b.id),
+    );
   });
 });
