@@ -251,22 +251,23 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
               const diag = UserBookService.getLibrarySyncDiagnostics();
               if (diag.scanInterrupted) {
                 return (
-                  <Text style={[styles.footerText, { color: colors.accent }]}>
+                  <Text style={[styles.footerText, { color: colors.accent }]} numberOfLines={3}>
                     诊断：书籍扫描异常中断，本轮内置书注册已保留上次结果
+                    {diag.scanInterruptedReason ? `（${diag.scanInterruptedReason}）` : ''}
+                  </Text>
+                );
+              }
+              if (diag.builtinParseFailures.length > 0) {
+                return (
+                  <Text style={[styles.footerText, { color: colors.accent }]} numberOfLines={3}>
+                    诊断：内置书装载失败 {diag.builtinParseFailures.length} 部（{diag.builtinParseFailures.join('、')}）
                   </Text>
                 );
               }
               if (diag.assetCopyFailures.length > 0) {
                 return (
                   <Text style={[styles.footerText, { color: colors.accent }]}>
-                    诊断：内置书资产复制失败 {diag.assetCopyFailures.length} 部（重启自动重试）
-                  </Text>
-                );
-              }
-              if (diag.builtinParseFailures.length > 0) {
-                return (
-                  <Text style={[styles.footerText, { color: colors.accent }]}>
-                    诊断：内置书解析失败 {diag.builtinParseFailures.length} 部
+                    诊断：内置书资产复制失败 {diag.assetCopyFailures.length} 部（已走资产直读兜底，重启自动重试复制）
                   </Text>
                 );
               }

@@ -1,11 +1,11 @@
 /**
  * UserBookService 内置书韧性回归测试（2026-09-08 真机「内置书全部消失」修复）
- * 锁定三条防线：
+ * 锁定防线：
  * 1. 内置书 db 行绝不参与下架清扫（文件暂缺/目录读取失败时背诵/笔记不丢）
- * 2. 根目录扫描失败（scanOk=false）→ 内置书注册保留上一轮结果，
- *    绝不用空列表整体替换（防「一次瞬时 IO 异常清空书架」）
- * 3. 首轮资产复制整体失败 → 内置目录为空时自愈重物化，同轮找回全部内置书，
- *    且 assetCopyFailures 诊断随之收敛
+ * 2. 根目录扫描失败（scanOk=false）→ 内置书装载不受影响（清单驱动），
+ *    但三路来源失败时注册保留上一轮结果，绝不用空列表整体替换
+ * 3. 首启资产复制整体失败 → 逐书「文件/资产直读」兜底仍完整装载并注册
+ * 4. 三路来源（db 缓存/文件/assets）全失败 → 注册保留上一轮 + 诊断如实记录
  */
 jest.mock('react-native-quick-sqlite', () => {
   const mockState = {
@@ -221,27 +221,28 @@ describe('UserBookService 内置书韧性（真机消失回归）', () => {
     expect(row).toBeDefined();
   });
 
-  test('根目录扫描失败（scanOk=false）：本轮不更新内置书注册，db 行保留', async () => {
+  test('根目录扫描失败（scanOk=false）：装载不中断；装载失败时注册保留上一轮，db 行保留', async () => {
     seedBuiltinRow();
     __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = new Error('EIO');
-    __rnfsState.readDirResults[UserBookService.getBuiltinDirPath()] = [];
 
     const res = await UserBookService.loadAndRegisterAll();
     expect(res.success).toBe(true);
 
-    // scanOk=false：本轮不整体替换内置书注册（无新调用），db 行保留
+    // lunyu 走 db 缓存成功；其余 27 部无缓存且内容不可解析 → 三路失败
+    // → 本轮不整体替换内置书注册（无注册调用），db 行保留
     expect(libState().builtinCalls).toEqual([]);
     const row = __builtinResilienceState.userBooks.find(
       (r: Record<string, unknown>) => r.id === BUILTIN_ROW_ID,
     );
     expect(row).toBeDefined();
     expect(getLibrarySyncDiagnostics().scanInterrupted).toBe(false);
+    expect(getLibrarySyncDiagnostics().builtinParseFailures.length).toBe(27);
   });
 
-  test('首轮资产复制整体失败：同轮自愈重物化找回全部内置书，诊断收敛', async () => {
-    // 不显式注入 readDir：由 files 集合动态派生（复制成功即出现在目录里）
+  test('首启资产复制整体失败：逐书「文件/资产直读」兜底仍完整装载 28 部并注册', async () => {
     // 前 28 次 copyFileAssets 全部失败（首轮物化整体失败，
-    // readFileAssets 回落同样不可用），自愈轮成功
+    // readFileAssets 写文件回落同样不可用）→ builtin/ 目录保持为空，
+    // 但内置书装载由目录清单驱动、不经目录扫描：逐书直接解析文件内容兜底
     __rnfsState.assetCopyFailLeft = 28;
     // 提供可解析的资产内容（@@CH@@ 标记文本 → base64），让 28 部全部解析成功
     __rnfsState.readReply = Buffer.from('@@CH@@第一篇\n\n正文内容。', 'utf8').toString('base64');
@@ -249,11 +250,25 @@ describe('UserBookService 内置书韧性（真机消失回归）', () => {
     const res = await UserBookService.loadAndRegisterAll();
     expect(res.success).toBe(true);
 
-    // 自愈把 28 部全部复制成功
-    expect(__rnfsState.assetsCopied).toHaveLength(28);
-    // 诊断随自愈收敛（不再残留失败名单）
-    expect(getLibrarySyncDiagnostics().assetCopyFailures).toEqual([]);
+    // 复制确实全部失败（诊断如实记录，下轮启动重试物化）
+    expect(__rnfsState.assetsCopied).toHaveLength(0);
+    expect(getLibrarySyncDiagnostics().assetCopyFailures).toHaveLength(28);
+    // 但内置书装载零失败：三路来源（db 缓存/文件/assets）兜底成功
+    expect(getLibrarySyncDiagnostics().builtinParseFailures).toEqual([]);
     // 内置书注册以完整清单发生（28 部）
     expect(libState().builtinCalls).toEqual([28]);
+  });
+
+  test('三路来源全失败：注册保留上一轮结果（绝不用空列表清空书架）', async () => {
+    // 文件内容为空（解析 0 章 → 失败）+ assets 直读不可用 → 所有书三路全失败
+    __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = [];
+
+    const res = await UserBookService.loadAndRegisterAll();
+    expect(res.success).toBe(true);
+
+    // 装载失败如实计入诊断
+    expect(getLibrarySyncDiagnostics().builtinParseFailures.length).toBe(28);
+    // 关键断言：绝不用空列表整体替换内置书注册
+    expect(libState().builtinCalls).toEqual([]);
   });
 });
