@@ -228,7 +228,7 @@ describe('UserBookService 内置书韧性（真机消失回归）', () => {
     const res = await UserBookService.loadAndRegisterAll();
     expect(res.success).toBe(true);
 
-    // lunyu 走 db 缓存成功；其余 27 部无缓存且内容不可解析 → 三路失败
+    // lunyu 走 db 缓存成功；其余 76 部无缓存且内容不可解析 → 三路失败
     // → 本轮不整体替换内置书注册（无注册调用），db 行保留
     expect(libState().builtinCalls).toEqual([]);
     const row = __builtinResilienceState.userBooks.find(
@@ -236,15 +236,15 @@ describe('UserBookService 内置书韧性（真机消失回归）', () => {
     );
     expect(row).toBeDefined();
     expect(getLibrarySyncDiagnostics().scanInterrupted).toBe(false);
-    expect(getLibrarySyncDiagnostics().builtinParseFailures.length).toBe(27);
+    expect(getLibrarySyncDiagnostics().builtinParseFailures.length).toBe(76);
   });
 
-  test('首启资产复制整体失败：逐书「文件/资产直读」兜底仍完整装载 28 部并注册', async () => {
-    // 前 28 次 copyFileAssets 全部失败（首轮物化整体失败，
+  test('首启资产复制整体失败：逐书「文件/资产直读」兜底仍完整装载 77 部并注册', async () => {
+    // 前 77 次 copyFileAssets 全部失败（首轮物化整体失败，
     // readFileAssets 写文件回落同样不可用）→ builtin/ 目录保持为空，
     // 但内置书装载由目录清单驱动、不经目录扫描：逐书直接解析文件内容兜底
-    __rnfsState.assetCopyFailLeft = 28;
-    // 提供可解析的资产内容（@@CH@@ 标记文本 → base64），让 28 部全部解析成功
+    __rnfsState.assetCopyFailLeft = 77;
+    // 提供可解析的资产内容（@@CH@@ 标记文本 → base64），让 77 部全部解析成功
     __rnfsState.readReply = Buffer.from('@@CH@@第一篇\n\n正文内容。', 'utf8').toString('base64');
 
     const res = await UserBookService.loadAndRegisterAll();
@@ -252,11 +252,11 @@ describe('UserBookService 内置书韧性（真机消失回归）', () => {
 
     // 复制确实全部失败（诊断如实记录，下轮启动重试物化）
     expect(__rnfsState.assetsCopied).toHaveLength(0);
-    expect(getLibrarySyncDiagnostics().assetCopyFailures).toHaveLength(28);
+    expect(getLibrarySyncDiagnostics().assetCopyFailures).toHaveLength(77);
     // 但内置书装载零失败：三路来源（db 缓存/文件/assets）兜底成功
     expect(getLibrarySyncDiagnostics().builtinParseFailures).toEqual([]);
-    // 内置书注册以完整清单发生（28 部）
-    expect(libState().builtinCalls).toEqual([28]);
+    // 内置书注册以完整清单发生（77 部）
+    expect(libState().builtinCalls).toEqual([77]);
   });
 
   test('三路来源全失败：注册保留上一轮结果（绝不用空列表清空书架）', async () => {
@@ -267,7 +267,7 @@ describe('UserBookService 内置书韧性（真机消失回归）', () => {
     expect(res.success).toBe(true);
 
     // 装载失败如实计入诊断
-    expect(getLibrarySyncDiagnostics().builtinParseFailures.length).toBe(28);
+    expect(getLibrarySyncDiagnostics().builtinParseFailures.length).toBe(77);
     // 关键断言：绝不用空列表整体替换内置书注册
     expect(libState().builtinCalls).toEqual([]);
   });

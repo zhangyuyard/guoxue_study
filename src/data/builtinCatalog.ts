@@ -140,14 +140,6 @@ export const BUILTIN_CATALOG: BuiltinBookSpec[] = [
     "dynasty": "战国"
   },
   {
-    "id": "wenxuan",
-    "title": "文选",
-    "author": "萧统编",
-    "category": "ji",
-    "description": "南朝梁昭明太子萧统编纂的诗文总集，世称《昭明文选》，为现存最早的诗文选集。本选本收《过秦论》《陈情表》《兰亭集序》《归去来兮辞》四篇历代传诵名作，以通行整理本为底。",
-    "dynasty": "南朝梁"
-  },
-  {
     "id": "songci",
     "title": "宋词三百首",
     "author": "朱祖谋 编",
@@ -242,6 +234,406 @@ export const BUILTIN_CATALOG: BuiltinBookSpec[] = [
     "category": "jing",
     "description": "明·程登吉撰百科常识蒙书（原本《幼学须知》）。本版为全本。",
     "dynasty": "明"
+  },
+  {
+    "id": "xinjing",
+    "title": "心经",
+    "author": "唐·玄奘 译",
+    "category": "zi",
+    "description": "《般若波罗蜜多心经》，大乘般若类经典纲要，二百六十字摄空义总纲。全本。",
+    "dynasty": "唐"
+  },
+  {
+    "id": "jingangjing",
+    "title": "金刚经",
+    "author": "后秦·鸠摩罗什 译",
+    "category": "zi",
+    "description": "《金刚般若波罗蜜经》，般若类核心经典，言无住生心、无相布施之旨。全本。",
+    "dynasty": "后秦"
+  },
+  {
+    "id": "emituofojing",
+    "title": "阿弥陀经",
+    "author": "后秦·鸠摩罗什 译",
+    "category": "zi",
+    "description": "《佛说阿弥陀经》，净土宗核心经典，述西方极乐世界依正庄严。全本。",
+    "dynasty": "后秦"
+  },
+  {
+    "id": "wuliangshoujing",
+    "title": "无量寿经",
+    "author": "曹魏·康僧铠 译",
+    "category": "zi",
+    "description": "《佛说无量寿经》，净土三经之一，述阿弥陀佛四十八愿与净土行果。全本。",
+    "dynasty": "曹魏"
+  },
+  {
+    "id": "guanwuliangshoujing",
+    "title": "观无量寿经",
+    "author": "刘宋·畺良耶舍 译",
+    "category": "zi",
+    "description": "《佛说观无量寿佛经》，净土三经之一，明十六观法与三辈往生。全本。",
+    "dynasty": "刘宋"
+  },
+  {
+    "id": "yaoshijing",
+    "title": "药师经",
+    "author": "隋·达摩笈多 译",
+    "category": "zi",
+    "description": "《佛说药师如来本愿经》，述药师琉璃光如来十二大愿，济世度厄。全本。",
+    "dynasty": "隋"
+  },
+  {
+    "id": "fajujing",
+    "title": "法句经",
+    "author": "三国吴·维祚难 等译",
+    "category": "zi",
+    "description": "上座部法句偈颂集汉译本，三十九品七百余偈，言身心谛修之要。全本。",
+    "dynasty": "三国"
+  },
+  {
+    "id": "baiyujing",
+    "title": "百喻经",
+    "author": "萧齐·求那毗地 译",
+    "category": "zi",
+    "description": "印度僧伽斯那集九十八喻，以寓言譬喻显佛法义理。全本。",
+    "dynasty": "南朝齐"
+  },
+  {
+    "id": "sishierzhangjing",
+    "title": "四十二章经",
+    "author": "东汉·迦叶摩腾、竺法兰 译",
+    "category": "zi",
+    "description": "相传为汉地最早译出的佛经，四十二章摄出家修行纲要。全本。",
+    "dynasty": "东汉"
+  },
+  {
+    "id": "yuanjuejing",
+    "title": "圆觉经",
+    "author": "唐·佛陀多罗 译",
+    "category": "zi",
+    "description": "《大方广圆觉修多罗了义经》，述十二菩萨问圆觉法门。全本。",
+    "dynasty": "唐"
+  },
+  {
+    "id": "yijiaojing",
+    "title": "佛遗教经",
+    "author": "后秦·鸠摩罗什 译",
+    "category": "zi",
+    "description": "释迦牟尼临涅槃所述遗诫，又称《佛垂般涅槃略说教诫经》。全本。",
+    "dynasty": "后秦"
+  },
+  {
+    "id": "badarenjuejing",
+    "title": "八大人觉经",
+    "author": "东汉·安世高 译",
+    "category": "zi",
+    "description": "述诸佛菩萨大人所觉悟之八法，明出世解脱路径。全本。",
+    "dynasty": "东汉"
+  },
+  {
+    "id": "weimojing",
+    "title": "维摩诘经",
+    "author": "后秦·鸠摩罗什 译",
+    "category": "zi",
+    "description": "《维摩诘所说经》十四品，示在家菩萨不可思议解脱法门。全本。",
+    "dynasty": "后秦"
+  },
+  {
+    "id": "fahuajing",
+    "title": "妙法莲华经",
+    "author": "后秦·鸠摩罗什 译",
+    "category": "zi",
+    "description": "《妙法莲华经》二十八品，开权显实、会三归一之大乘要典。全本。",
+    "dynasty": "后秦"
+  },
+  {
+    "id": "lengyanjing",
+    "title": "楞严经",
+    "author": "唐·般剌蜜帝 译",
+    "category": "zi",
+    "description": "《大佛顶首楞严经》十卷，明心见性、五十阴魔之照胆镜。全本。",
+    "dynasty": "唐"
+  },
+  {
+    "id": "dizangjing",
+    "title": "地藏经",
+    "author": "唐·实叉难陀 译",
+    "category": "zi",
+    "description": "《地藏菩萨本愿经》十三品，明孝道与地狱救度之愿力。全本。",
+    "dynasty": "唐"
+  },
+  {
+    "id": "liuzutanjing",
+    "title": "六祖坛经",
+    "author": "唐·法海 集记",
+    "category": "zi",
+    "description": "禅宗六祖惠能于韶州大梵寺说法集录，唯一被尊称为「经」的中国僧人著述。全本。",
+    "dynasty": "唐"
+  },
+  {
+    "id": "qingjingjing",
+    "title": "清静经",
+    "author": "唐·佚名（旧题太上老君说）",
+    "category": "zi",
+    "description": "《太上老君说常清静经》，澄心遣欲、内修心神之道家要典。全本。",
+    "dynasty": "唐"
+  },
+  {
+    "id": "yinfujing",
+    "title": "阴符经",
+    "author": "旧题黄帝撰（唐·李筌得于嵩山）",
+    "category": "zi",
+    "description": "《黄帝阴符经》三百余字，言观天之道、执天之行。全本。",
+    "dynasty": "唐"
+  },
+  {
+    "id": "guanyinzi",
+    "title": "关尹子",
+    "author": "周·关令尹喜 著",
+    "category": "zi",
+    "description": "又称《文始真经》九篇，以宇柱极符鉴匕釜筹药名篇。全本。",
+    "dynasty": "先秦"
+  },
+  {
+    "id": "guiguzi",
+    "title": "鬼谷子",
+    "author": "旧题战国·鬼谷子 著",
+    "category": "zi",
+    "description": "纵横家鼻祖之书，捭阖、反应、揣摩、权谋十二篇。全本。",
+    "dynasty": "战国"
+  },
+  {
+    "id": "liezi",
+    "title": "列子",
+    "author": "战国·列御寇 著",
+    "category": "zi",
+    "description": "又称《冲虚至德真经》八篇，寓道于寓言，天瑞说符俱载。全本。",
+    "dynasty": "战国"
+  },
+  {
+    "id": "heguanzi",
+    "title": "鹖冠子",
+    "author": "战国·鹖冠子 著（宋·陆佃解）",
+    "category": "zi",
+    "description": "道家与纵横家言杂糅之子书十九篇。全本。",
+    "dynasty": "战国"
+  },
+  {
+    "id": "huainanzi",
+    "title": "淮南子",
+    "author": "西汉·刘安 撰（许慎 注）",
+    "category": "zi",
+    "description": "《淮南鸿烈解》二十八卷，集道家思想大成的鸿篇。全本。",
+    "dynasty": "西汉"
+  },
+  {
+    "id": "baopuzi",
+    "title": "抱朴子内篇",
+    "author": "东晋·葛洪 著",
+    "category": "zi",
+    "description": "金丹道教理论奠基之作二十卷，言神仙方药、养生延年。全本。",
+    "dynasty": "东晋"
+  },
+  {
+    "id": "huashu",
+    "title": "化书",
+    "author": "五代·谭峭 著",
+    "category": "zi",
+    "description": "道化、术化、德化、仁化、食化、俭化六卷，观物化之理。全本。",
+    "dynasty": "五代"
+  },
+  {
+    "id": "wuzhenpian",
+    "title": "悟真篇",
+    "author": "北宋·张伯端 著",
+    "category": "zi",
+    "description": "内丹南宗祖经，据《修真十书》本，与《参同契》并尊。全本。",
+    "dynasty": "北宋"
+  },
+  {
+    "id": "zuowanglun",
+    "title": "坐忘论",
+    "author": "唐·司马承祯 著",
+    "category": "zi",
+    "description": "道教修真理论名篇，敬信至得道七阶及枢翼。全本。",
+    "dynasty": "唐"
+  },
+  {
+    "id": "ganyingpian",
+    "title": "太上感应篇",
+    "author": "宋·李昌龄 传、郑清之 赞",
+    "category": "zi",
+    "description": "以太上本文冠首，附李昌龄传、郑清之赞三十卷，劝善书之首。全本。",
+    "dynasty": "宋"
+  },
+  {
+    "id": "xiaojing",
+    "title": "孝经",
+    "author": "先秦·孔门后学（旧题曾子问、孔子说）",
+    "category": "jing",
+    "description": "儒家孝道经典，十八章，以孝为德之本、教之源。全本。",
+    "dynasty": "先秦"
+  },
+  {
+    "id": "erya",
+    "title": "尔雅",
+    "author": "先秦～西汉·学者缀辑",
+    "category": "jing",
+    "description": "中国第一部训诂词典，十九篇释诂释言至释兽释畜，读经之津梁。全本。",
+    "dynasty": "先秦"
+  },
+  {
+    "id": "liji",
+    "title": "礼记",
+    "author": "西汉·戴圣 编（旧题郑玄 注）",
+    "category": "jing",
+    "description": "儒家礼学论文与礼制文献汇编四十九篇，与《周礼》《仪礼》并称三礼。全本。",
+    "dynasty": "西汉"
+  },
+  {
+    "id": "guoyu",
+    "title": "国语",
+    "author": "旧题左丘明 撰",
+    "category": "shi",
+    "description": "国别体史书之祖，二十一卷记周鲁齐晋郑楚吴越八国卿大夫言论。全本。",
+    "dynasty": "先秦"
+  },
+  {
+    "id": "zhanguoce",
+    "title": "战国策",
+    "author": "西汉·刘向 编订",
+    "category": "shi",
+    "description": "战国纵横家说辞汇编三十三卷，记十二国策士权谋与游说。全本。",
+    "dynasty": "西汉"
+  },
+  {
+    "id": "hanshu",
+    "title": "汉书",
+    "author": "东汉·班固 撰",
+    "category": "shi",
+    "description": "中国第一部纪传体断代史，一百篇记西汉二百三十年史事。全本。",
+    "dynasty": "东汉"
+  },
+  {
+    "id": "houhanshu",
+    "title": "后汉书",
+    "author": "南朝宋·范晔 撰（梁·刘昭 补志）",
+    "category": "shi",
+    "description": "纪传体东汉史一百二十卷，与《史记》《汉书》《三国志》并称前四史。全本。",
+    "dynasty": "南朝宋"
+  },
+  {
+    "id": "sanguozhi",
+    "title": "三国志",
+    "author": "西晋·陈寿 撰（宋·裴松之 注）",
+    "category": "shi",
+    "description": "纪传体三国史六十五卷，魏蜀吴三志分国纪传。全本。",
+    "dynasty": "西晋"
+  },
+  {
+    "id": "sunzibingfa",
+    "title": "孙子兵法",
+    "author": "春秋·孙武 撰",
+    "category": "zi",
+    "description": "中国现存最早兵书十三篇，计战谋攻军形兵势虚实军争九变皆备。全本。",
+    "dynasty": "春秋"
+  },
+  {
+    "id": "guanzi",
+    "title": "管子",
+    "author": "旧题管仲 撰（战国齐稷下学者辑）",
+    "category": "zi",
+    "description": "齐国管仲学派著作总集八十六篇，兼含法家经言与轻重富国之术。全本。",
+    "dynasty": "战国"
+  },
+  {
+    "id": "hanfeizi",
+    "title": "韩非子",
+    "author": "战国·韩非 撰",
+    "category": "zi",
+    "description": "法家集大成之作五十五篇，法术势兼备，刑名参验之学。全本。",
+    "dynasty": "战国"
+  },
+  {
+    "id": "lvshichunqiu",
+    "title": "吕氏春秋",
+    "author": "战国末·吕不韦 门客辑",
+    "category": "zi",
+    "description": "杂家代表作二十六卷十二纪八览六论，汇九流之说备天地万物古今之事。全本。",
+    "dynasty": "战国"
+  },
+  {
+    "id": "yanzichunqiu",
+    "title": "晏子春秋",
+    "author": "战国·齐人辑晏婴言行",
+    "category": "zi",
+    "description": "记齐国名相晏婴谏诤行事八篇二百一十五章，先秦叙事散文代表。全本。",
+    "dynasty": "战国"
+  },
+  {
+    "id": "shishuoxinyu",
+    "title": "世说新语",
+    "author": "南朝宋·刘义庆 撰（梁·刘孝标 注）",
+    "category": "zi",
+    "description": "魏晋名士言行轶事笔记小说之祖，分德行言语等三十六门。全本。",
+    "dynasty": "南朝宋"
+  },
+  {
+    "id": "yanshijiaxun",
+    "title": "颜氏家训",
+    "author": "南北朝·颜之推 撰",
+    "category": "zi",
+    "description": "中国第一部系统家训二十篇，兼论字书音训与南北风俗。全本。",
+    "dynasty": "南北朝"
+  },
+  {
+    "id": "wenxuan",
+    "title": "文选",
+    "author": "南朝梁·昭明太子萧统 编（唐·李善 注本白文）",
+    "category": "ji",
+    "description": "中国现存最早诗文总集六十卷，选周代至梁代诗文七百余篇。全本。",
+    "dynasty": "南朝梁"
+  },
+  {
+    "id": "yutaixinyong",
+    "title": "玉台新咏",
+    "author": "南朝梁·徐陵 编",
+    "category": "ji",
+    "description": "继《诗经》《楚辞》后汉魏六朝诗歌总集十卷，《孔雀东南飞》始见于此。全本。",
+    "dynasty": "南朝梁"
+  },
+  {
+    "id": "huajianji",
+    "title": "花间集",
+    "author": "五代后蜀·赵崇祚 编",
+    "category": "ji",
+    "description": "中国第一部文人词总集十卷五百首，温韦以降十八家倚声填词之祖。全本。",
+    "dynasty": "五代"
+  },
+  {
+    "id": "yuefushiji",
+    "title": "乐府诗集",
+    "author": "北宋·郭茂倩 编",
+    "category": "ji",
+    "description": "乐府诗总集一百卷，郊庙至杂歌十二类，上古至五代乐府渊薮。全本。",
+    "dynasty": "北宋"
+  },
+  {
+    "id": "wenxindiaolong",
+    "title": "文心雕龙",
+    "author": "南朝梁·刘勰 撰",
+    "category": "ji",
+    "description": "中国第一部体系完备的文学理论巨著五十篇，体大思精笼罩群言。全本。",
+    "dynasty": "南朝梁"
+  },
+  {
+    "id": "caozijian",
+    "title": "曹子建集",
+    "author": "曹魏·曹植 撰",
+    "category": "ji",
+    "description": "建安之雄才陈思王诗文赋十卷，白马篇洛神赋七哀诗俱在其中。全本。",
+    "dynasty": "曹魏"
   }
 ];
 

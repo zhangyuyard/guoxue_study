@@ -2,7 +2,7 @@
  * 文本库管理服务（TextLibraryService）
  * 负责加载与查询内置经典文本与用户导入书籍。
  * 内置数据源（2026-09 资产化改造）：APK assets/books/<id>.txt（@@CH@@ 标记
- * 文本，28 部全本，见 scripts/build-builtin-assets.mjs 与 builtinCatalog.ts）。
+ * 文本，77 部全本，见 scripts/build-builtin-assets.mjs 与 builtinCatalog.ts）。
  * 首启由 UserBookService 物化到 guoxue-books/builtin/ 并解析，
  * 经 registerBuiltinBooks 注册进来；bundle 不再携带任何书体 JSON。
  * 用户书籍：由 UserBookService 启动时经 registerUserBooks 注册进来。

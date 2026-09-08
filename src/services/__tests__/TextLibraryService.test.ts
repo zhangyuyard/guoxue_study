@@ -80,14 +80,26 @@ describe('TextLibraryService 初始内置书目', () => {
   const BUILTIN_IDS = [
     'daodejing', 'lunyu', 'daxue', 'zhongyong', 'mengzi', 'zhuangzi',
     'shijing', 'xunzi', 'chuci', 'tangshi', 'zhouyi', 'zuozhuan',
-    'shiji', 'tongjian', 'mozi', 'wenxuan', 'songci', 'yuanqu',
+    'shiji', 'tongjian', 'mozi', 'songci', 'yuanqu',
     'guwenguanzhi', 'sanzijing', 'baijiaxing', 'qianziwen', 'dizigui',
     'zhuzijiaxun', 'zengguangxianwen', 'shenglvqimeng', 'liwengduiyun',
     'youxueqionglin',
+    // 2026-09 道家 / 佛家扩充 29 部
+    'xinjing', 'jingangjing', 'emituofojing', 'wuliangshoujing',
+    'guanwuliangshoujing', 'yaoshijing', 'fajujing', 'baiyujing',
+    'sishierzhangjing', 'yuanjuejing', 'yijiaojing', 'badarenjuejing',
+    'weimojing', 'fahuajing', 'lengyanjing', 'dizangjing', 'liuzutanjing',
+    'qingjingjing', 'yinfujing', 'guanyinzi', 'guiguzi', 'liezi', 'heguanzi',
+    'huainanzi', 'baopuzi', 'huashu', 'wuzhenpian', 'zuowanglun', 'ganyingpian',
+    // 2026-09 经史子集 + 诗词歌赋扩充 21 部
+    'xiaojing', 'erya', 'liji', 'guoyu', 'zhanguoce', 'hanshu', 'houhanshu',
+    'sanguozhi', 'sunzibingfa', 'guanzi', 'hanfeizi', 'lvshichunqiu',
+    'yanzichunqiu', 'shishuoxinyu', 'yanshijiaxun', 'wenxuan', 'yutaixinyong',
+    'huajianji', 'yuefushiji', 'wenxindiaolong', 'caozijian',
   ];
 
 
-  test('内置书目为 28 部全本（原 16 部 + 宋词/元曲/古文观止 + 九部蒙学）', () => {
+  test('内置书目为 77 部全本（原 16 部 + 诗词曲蒙学 12 部 + 道佛 29 部 + 经史子集扩充 20 部，文选补齐全本替换旧残本）', () => {
     const res = TextLibraryService.getBooks();
     expect(res.success).toBe(true);
     expect(res.data!.map((b) => b.id)).toEqual(BUILTIN_IDS);

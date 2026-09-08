@@ -1,9 +1,9 @@
 /**
  * 书籍元数据完整性测试（P2-10 bookMeta）
  * 锁定：
- * - 28 部内置经典元数据全覆盖（id 集合精确匹配）
- * - genre 仅取固定六类、dynasty 非空且属于聚合维度列表
- * - 聚合维度：朝代去重排序、体裁固定六类
+ * - 77 部内置经典元数据全覆盖（id 集合精确匹配）
+ * - genre 仅取固定七类、dynasty 非空且属于聚合维度列表
+ * - 聚合维度：朝代去重排序、体裁固定七类
  * - 元数据登记的书籍均真实存在于 TextLibraryService（与注册表一致）
  */
 import { TextLibraryService } from '@/services/TextLibraryService';
@@ -22,7 +22,7 @@ beforeAll(() => {
   TextLibraryService.registerBuiltinBooks(loadBuiltinBooks());
 });
 
-/** 书库 28 部（与 TextLibraryService 内置书注册口径一致，即 BUILTIN_CATALOG） */
+/** 书库 77 部（与 TextLibraryService 内置书注册口径一致，即 BUILTIN_CATALOG） */
 const LIBRARY_IDS = [
   'daodejing',
   'lunyu',
@@ -39,7 +39,6 @@ const LIBRARY_IDS = [
   'shiji',
   'tongjian',
   'mozi',
-  'wenxuan',
   'songci',
   'yuanqu',
   'guwenguanzhi',
@@ -52,11 +51,63 @@ const LIBRARY_IDS = [
   'shenglvqimeng',
   'liwengduiyun',
   'youxueqionglin',
+  // 2026-09 道家 / 佛家扩充
+  'xinjing',
+  'jingangjing',
+  'emituofojing',
+  'wuliangshoujing',
+  'guanwuliangshoujing',
+  'yaoshijing',
+  'fajujing',
+  'baiyujing',
+  'sishierzhangjing',
+  'yuanjuejing',
+  'yijiaojing',
+  'badarenjuejing',
+  'weimojing',
+  'fahuajing',
+  'lengyanjing',
+  'dizangjing',
+  'liuzutanjing',
+  'qingjingjing',
+  'yinfujing',
+  'guanyinzi',
+  'guiguzi',
+  'liezi',
+  'heguanzi',
+  'huainanzi',
+  'baopuzi',
+  'huashu',
+  'wuzhenpian',
+  'zuowanglun',
+  'ganyingpian',
+  // 2026-09 经史子集 + 诗词歌赋扩充
+  'xiaojing',
+  'erya',
+  'liji',
+  'guoyu',
+  'zhanguoce',
+  'hanshu',
+  'houhanshu',
+  'sanguozhi',
+  'sunzibingfa',
+  'guanzi',
+  'hanfeizi',
+  'lvshichunqiu',
+  'yanzichunqiu',
+  'shishuoxinyu',
+  'yanshijiaxun',
+  'wenxuan',
+  'yutaixinyong',
+  'huajianji',
+  'yuefushiji',
+  'wenxindiaolong',
+  'caozijian',
 ];
 
 describe('bookMeta 元数据完整性', () => {
-  test('28 部书全覆盖：注册表键集合与书库完全一致', () => {
-    expect(BOOK_META_IDS).toHaveLength(28);
+  test('77 部书全覆盖：注册表键集合与书库完全一致', () => {
+    expect(BOOK_META_IDS).toHaveLength(77);
     expect([...BOOK_META_IDS].sort()).toEqual([...LIBRARY_IDS].sort());
   });
 
@@ -68,14 +119,14 @@ describe('bookMeta 元数据完整性', () => {
     }
   });
 
-  test('每部书 genre 合法（仅固定六类）', () => {
+  test('每部书 genre 合法（仅固定七类）', () => {
     for (const id of BOOK_META_IDS) {
       expect(BOOK_GENRES).toContain(BOOK_META[id].genre);
     }
   });
 
-  test('体裁固定六类：经部 / 史部 / 子部 / 集部 / 诗文选 / 蒙学', () => {
-    expect(BOOK_GENRES).toEqual(['经部', '史部', '子部', '集部', '诗文选', '蒙学']);
+  test('体裁固定七类：经部 / 史部 / 子部 / 集部 / 佛家 / 诗文选 / 蒙学', () => {
+    expect(BOOK_GENRES).toEqual(['经部', '史部', '子部', '集部', '佛家', '诗文选', '蒙学']);
   });
 
   test('朝代维度去重且与各书取值一一对应（无冗余、无缺失）', () => {
