@@ -281,6 +281,11 @@ export function ensureFtsIndex(): ServiceResult<boolean> {
       if (indexed.has(book.id)) {
         continue;
       }
+      // 超大书跳过索引（字数超限，索引代价灾难级；章节内阅读不受影响）
+      if (bookTextChars(book) > FTS_MAX_BOOK_CHARS) {
+        console.warn(`[StorageService] 超大书跳过 FTS 索引：${book.title}`);
+        continue;
+      }
       insertFtsRows(instance, buildFtsRows(book));
     }
     // 死索引自愈：再次查询现有 book_id，不在当前文本库中的行一律清除
@@ -300,6 +305,24 @@ export function ensureFtsIndex(): ServiceResult<boolean> {
 }
 
 /**
+ * 单书 FTS 索引字数上限：超大书（如数百 MB epub）不进全文索引——
+ * 真机教训：重建库后 3 本超大书全量重索引把 JS 线程占死数十秒。
+ * 超限书不参与全文搜索（章节内阅读不受影响），避免灾难级索引代价。
+ */
+const FTS_MAX_BOOK_CHARS = 4_000_000;
+
+/** 统计单本书全文字数（章/段遍历） */
+function bookTextChars(book: Book): number {
+  let n = 0;
+  for (const ch of book.chapters) {
+    for (const sg of ch.segments) {
+      n += sg.text.length;
+    }
+  }
+  return n;
+}
+
+/**
  * 将单本书（用户导入书）的章/段同步写入 FTS 索引（幂等 upsert）。
  * 供 UserBookService.importBook 在导入成功后调用，使该书
  * 无需等待冷启动重建、同会话内即可被搜索路径命中。
@@ -310,6 +333,11 @@ export function upsertFtsForBook(book: Book): ServiceResult<boolean> {
   const instance = getDb();
   if (!instance) {
     return { success: false, error: 'SQLite 不可用' };
+  }
+  if (bookTextChars(book) > FTS_MAX_BOOK_CHARS) {
+    // 超大书跳过索引（不阻断导入，仅不可被全文搜索命中）
+    console.warn(`[StorageService] 超大书跳过 FTS 索引：${book.title}`);
+    return { success: true, data: true };
   }
   try {
     const initRes = initDatabase();

@@ -69,6 +69,26 @@ const MAX_CHAPTERS = 5000;
  * 重新解析（正源仍是书籍文件夹文件，功能不受影响，仅启动稍慢）。
  */
 const MAX_CACHE_JSON_CHARS = 32 * 1024 * 1024;
+/**
+ * 超大文件阈值：超过此原始大小的书籍文件不阻塞启动装载。
+ * 真机教训：161MB epub 每次启动全量重解析（db 缓存超上限不落库），
+ * JS 线程被占用 40s+（重度 GC），打开其他书籍全部假死。
+ */
+const OVERSIZED_RAW_BYTES = 24 * 1024 * 1024;
+/** 超大书解析结果磁盘缓存后缀（与源文件同目录；删除书时一并清理） */
+const OVERSIZED_CACHE_SUFFIX = '.gxcache';
+/** 超大书后台队列运行中标记（防并发装载重复排队解析同一批文件） */
+let oversizedQueueRunning = false;
+/** 超大书 id → 源文件/缓存文件位置（超大书不落 db，删除时按此清理文件） */
+const oversizedBookFiles = new Map<string, { path: string; cachePath: string }>();
+
+/** 单个超大书后台装载任务 */
+interface OversizedTask {
+  path: string;
+  name: string;
+  sig: string;
+  cachePath: string;
+}
 
 type DB = ReturnType<typeof open>;
 
@@ -905,6 +925,8 @@ export interface LibrarySyncDiagnostics {
   builtinFilesSeen: number;
   /** 装载失败的内置书 ID（db 缓存 / 文件 / 资产三路全失败时才计入） */
   builtinParseFailures: string[];
+  /** 已转入后台队列解析的超大书数量（完成一本注册一本） */
+  oversizedPending: number;
 }
 
 function emptySyncDiagnostics(): LibrarySyncDiagnostics {
@@ -914,6 +936,7 @@ function emptySyncDiagnostics(): LibrarySyncDiagnostics {
     assetCopyFailures: [],
     builtinFilesSeen: 0,
     builtinParseFailures: [],
+    oversizedPending: 0,
   };
 }
 
@@ -925,10 +948,72 @@ export function getLibrarySyncDiagnostics(): LibrarySyncDiagnostics {
 }
 
 /**
+ * 逐个处理超大书（串行 + 每项处理前让出 JS 线程）：优先读磁盘缓存
+ * （<源文件>.gxcache），无缓存则完整解析并写缓存供下次直接读。
+ * 每完成一本立即重注册进文本库——书架下次刷新即可见可读。
+ */
+async function processOversizedBooks(
+  tasks: OversizedTask[],
+  baseBooks: () => Book[],
+): Promise<Book[]> {
+  const loaded: Book[] = [];
+  for (const t of tasks) {
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    try {
+      let book: Book | null = null;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        if (await RNFS.exists(t.cachePath)) {
+          // eslint-disable-next-line no-await-in-loop
+          const raw = await RNFS.readFile(t.cachePath, 'utf8');
+          const cached = JSON.parse(raw) as Book;
+          if (cached && cached.id && Array.isArray(cached.chapters) && cached.chapters.length > 0) {
+            book = cached;
+          }
+        }
+      } catch {
+        // 缓存缺失/损坏则走完整解析
+      }
+      if (!book) {
+        const id = stableBookIdFromPath(t.name);
+        const parsed = await parseBookFile(t.path, t.name, id);
+        if (parsed) {
+          book = parsed.book;
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            await RNFS.writeFile(t.cachePath, JSON.stringify(parsed.book), 'utf8');
+          } catch {
+            // 缓存写失败不影响本会话（下次启动重解析）
+          }
+        }
+      }
+      if (book) {
+        loaded.push(book);
+        oversizedBookFiles.set(book.id, { path: t.path, cachePath: t.cachePath });
+        console.warn(
+          `[UserBookService] 超大书后台装载完成 ${loaded.length}/${tasks.length}：${book.title}`,
+        );
+        try {
+          TextLibraryService.registerUserBooks([...baseBooks(), ...loaded]);
+        } catch {
+          // 注册失败不阻断队列
+        }
+      } else {
+        console.warn(`[UserBookService] 超大书解析失败：${t.name}`);
+      }
+    } catch (e) {
+      console.warn(`[UserBookService] 超大书装载异常 ${t.name}:`, (e as Error)?.message ?? e);
+    }
+  }
+  return loaded;
+}
+
+/**
  * 装载全部书籍并注册进 TextLibraryService（App 启动/书架刷新时调用）。
  * 流程：确保文件夹 → 物化内置书 → 扫描顶层文件增量同步 → 遗留书装载 →
  * 整体注册。任一文件系统步骤失败均降级为「仅装载 db 内已有书籍」，
- * 不阻断书架可用性。
+ * 不阻断书架可用性。超大文件转入后台队列解析（不阻塞启动）。
  */
 export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSummary>> {
   // let：db 损坏自愈重建后需替换为新鲜连接（旧连接所有查询报 disk I/O error）
@@ -949,6 +1034,7 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
   const legacyBooks: Book[] = [];
   const builtinLoaded: Book[] = [];
   const builtinParseFailures: string[] = [];
+  const oversizedTasks: OversizedTask[] = [];
   let scanOk = false;
   // 扫描链路中途异常（跳进外层兜底 catch）时经诊断暴露（scanInterrupted），
   // 内置书注册由 builtinLoopCompleted 门控，绝不用残缺结果整体替换
@@ -1064,6 +1150,17 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
           const size = Number(stat.size);
           const mtimeMs = stat.mtime ? new Date(stat.mtime).getTime() : 0;
           const sig = `${Number.isFinite(mtimeMs) ? mtimeMs : 0}:${Number.isFinite(size) ? size : 0}`;
+          // 超大文件（如数百 MB epub）：绝不阻塞启动装载——转后台队列
+          // 解析（完成后自动重注册上架）；磁盘缓存命中则队列直接读缓存
+          if (size > OVERSIZED_RAW_BYTES) {
+            oversizedTasks.push({
+              path: f.path,
+              name: f.name,
+              sig,
+              cachePath: `${f.path}${OVERSIZED_CACHE_SUFFIX}`,
+            });
+            continue;
+          }
           if (row && row.file_sig === sig) {
             // 指纹未变：复用 db 解析结果，零解析开销
             try {
@@ -1313,6 +1410,28 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
   }
   // loadedBooks 仅含用户书（备份快照口径；内置书在目录清单/资产，不入备份）
   loadedBooks = [...folderBooks, ...legacyBooks];
+
+  // 超大书后台队列：本次装载立即返回（书架立即可用），队列逐本解析、
+  // 完成一本注册一本（书架下次刷新即可见）。运行中的队列不重复排队
+  //（防书架刷新并发触发多队列重复解析同一批文件）。
+  if (oversizedTasks.length > 0 && !oversizedQueueRunning) {
+    oversizedQueueRunning = true;
+    console.warn(
+      `[UserBookService] 超大书 ${oversizedTasks.length} 本转入后台装载（不阻塞书架）`,
+    );
+    void processOversizedBooks(oversizedTasks, () => [...folderBooks, ...legacyBooks])
+      .then((deferred) => {
+        if (deferred.length > 0) {
+          // 合入备份快照/管理页口径
+          loadedBooks = [...loadedBooks, ...deferred];
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        oversizedQueueRunning = false;
+      });
+    lastSyncDiagnostics.oversizedPending = oversizedTasks.length;
+  }
   return { success: true, data: summary };
 }
 
@@ -1729,10 +1848,27 @@ export async function deleteBook(id: string): Promise<ServiceResult<null>> {
     return { success: false, error: `删除失败：${(e as Error).message}` };
   }
   // 文件夹书：源文件一并删除（「所有书籍均可供用户自由删除」的文件级语义）
-  if (sourcePath) {
+  const oversizedFiles = oversizedBookFiles.get(id);
+  if (sourcePath || oversizedFiles) {
     try {
-      if (await RNFS.exists(sourcePath)) {
+      if (sourcePath && (await RNFS.exists(sourcePath))) {
         await RNFS.unlink(sourcePath);
+      }
+      if (oversizedFiles) {
+        // 超大书：源文件 + 磁盘解析缓存一并清理（不落 db，位置在内存登记）
+        if (await RNFS.exists(oversizedFiles.path)) {
+          await RNFS.unlink(oversizedFiles.path);
+        }
+        if (await RNFS.exists(oversizedFiles.cachePath)) {
+          await RNFS.unlink(oversizedFiles.cachePath);
+        }
+        oversizedBookFiles.delete(id);
+      } else {
+        // 常规书的磁盘解析缓存（如有）一并清理
+        const cachePath = `${sourcePath}${OVERSIZED_CACHE_SUFFIX}`;
+        if (await RNFS.exists(cachePath)) {
+          await RNFS.unlink(cachePath);
+        }
       }
     } catch {
       // 文件删除失败不阻断书架移除；残留文件下次启动会重新上架
