@@ -68,10 +68,13 @@ jest.mock('@/services/TextLibraryService', () => {
   const mockLibState = {
     builtinCalls: [] as number[],
     userBooks: [] as unknown[],
+    /** 最近一次 registerBuiltinBooks 注册的书数组（渐进装载断言用） */
+    builtinLast: [] as Array<{ id: string; chapters: unknown[] }>,
   };
   const mockLib = {
     __libState: mockLibState,
     registerBuiltinBooks: (books: unknown[]) => {
+      mockLibState.builtinLast = books as Array<{ id: string; chapters: unknown[] }>;
       mockLibState.builtinCalls.push(books.length);
       return { success: true, data: null };
     },
@@ -97,6 +100,8 @@ jest.mock('react-native-fs', () => {
     assetCopyFailLeft: 0,
     /** RNFS.read 的 base64 返回（内置资产分块读取内容） */
     readReply: '',
+    /** path -> RNFS.read 覆盖返回（模拟单书内容损坏/空内容） */
+    readReplies: {} as Record<string, string>,
     /** path -> stat.size 覆盖值（默认 128，模拟落盘文件大小指纹） */
     sizes: {} as Record<string, number>,
   };
@@ -105,7 +110,7 @@ jest.mock('react-native-fs', () => {
     CachesDirectoryPath: '/data/user/0/com.guoxue.app/cache',
     exists: jest.fn(async (path: string) => state.files.has(path)),
     mkdir: jest.fn(async () => undefined),
-    read: jest.fn(async () => state.readReply),
+    read: jest.fn(async (path: string) => state.readReplies[path] ?? state.readReply),
     readFile: jest.fn(async () => ''),
     readFileAssets: jest.fn(async () => {
       throw new Error('readFileAssets unavailable');
@@ -159,6 +164,7 @@ const { __rnfsState } = require('react-native-fs');
 import {
   UserBookService,
   getLibrarySyncDiagnostics,
+  __resetBuiltinProgressForTests,
 } from '@/services/UserBookService';
 import { TextLibraryService } from '@/services/TextLibraryService';
 import { getBuiltinSpec } from '@/data/builtinCatalog';
@@ -167,6 +173,7 @@ import { getBuiltinSpec } from '@/data/builtinCatalog';
 interface MockLibState {
   builtinCalls: number[];
   userBooks: unknown[];
+  builtinLast: Array<{ id: string; chapters: unknown[] }>;
 }
 function libState(): MockLibState {
   return (TextLibraryService as unknown as { __libState: MockLibState }).__libState;
@@ -204,8 +211,11 @@ describe('UserBookService 内置书韧性（真机消失回归）', () => {
     __rnfsState.readDirResults = {};
     __rnfsState.assetCopyFailLeft = 0;
     __rnfsState.readReply = '';
+    __rnfsState.readReplies = {};
     __rnfsState.sizes = {};
+    __resetBuiltinProgressForTests();
     libState().builtinCalls = [];
+    libState().builtinLast = [];
   });
 
   test('内置书 db 行不参与下架：builtin 目录读不到文件时行保留、学习数据不级联清理', async () => {
@@ -313,5 +323,45 @@ describe('UserBookService 内置书韧性（真机消失回归）', () => {
       (r: Record<string, unknown>) => r.id === BUILTIN_ROW_ID,
     );
     expect(row).toBeDefined();
+  });
+
+  test('渐进装载：冷启动先注册目录占位书，终批全部替换为真实书体', async () => {
+    __rnfsState.readReply = Buffer.from('@@CH@@第一篇\n\n正文内容。', 'utf8').toString('base64');
+    const onProgress = jest.fn();
+
+    const res = await UserBookService.loadAndRegisterAll({ onProgress });
+    expect(res.success).toBe(true);
+
+    // 占位注册先行（onProgress 至少触发一次）
+    expect(onProgress).toHaveBeenCalled();
+    expect(libState().builtinCalls.length).toBeGreaterThanOrEqual(2);
+    // 终批：77 部全部为真实书体（chapters 非空，占位书被整体替换）
+    expect(libState().builtinLast).toHaveLength(77);
+    expect(libState().builtinLast.every((b) => b.chapters.length > 0)).toBe(true);
+  });
+
+  test('渐进装载合并快照：单书装载失败沿用上一轮书体，书架不丢书', async () => {
+    __rnfsState.readReply = Buffer.from('@@CH@@第一篇\n\n正文内容。', 'utf8').toString('base64');
+    // 第一轮：全部成功 → 快照 = 77 部真实书体
+    const res1 = await UserBookService.loadAndRegisterAll({
+      onProgress: () => undefined,
+      chunkMs: 0,
+    });
+    expect(res1.success).toBe(true);
+    expect(libState().builtinLast).toHaveLength(77);
+
+    // 第二轮：道德经内容读取失败（空内容 → 0 章 → 三路来源全失败）
+    const djPath = `${UserBookService.getBuiltinDirPath()}/daodejing.txt`;
+    __rnfsState.readReplies[djPath] = '';
+    const res2 = await UserBookService.loadAndRegisterAll({
+      onProgress: () => undefined,
+      chunkMs: 0,
+    });
+    expect(res2.success).toBe(true);
+    // 失败书沿用上一轮快照书体（书架不丢书），其余 76 部本轮重装载
+    expect(libState().builtinLast).toHaveLength(77);
+    const dj = libState().builtinLast.find((b) => b.id === 'daodejing');
+    expect(dj).toBeDefined();
+    expect((dj as { chapters: unknown[] }).chapters.length).toBeGreaterThan(0);
   });
 });

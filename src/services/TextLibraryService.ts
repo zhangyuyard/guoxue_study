@@ -105,8 +105,16 @@ function registerUserBooks(books: Book[]): ServiceResult<null> {
  * 注册（整体替换）内置书籍列表，重建缓存与全部索引。
  * 仅供 UserBookService 调用：内置书由 assets/books/<id>.txt 解析而来，
  * ID 为目录清单（builtinCatalog）中的经典 ID（不带 user- 前缀）。
+ *
+ * opts.eagerIndexes=false 用于启动渐进装载的分批注册：索引置空后惰性
+ * 重建（首次 getChapter/getSegment 访问时才构建），避免每批注册都全量
+ * 重建章节/段落索引（O(总段数) × 批次数 的重复开销）；终批注册缺省
+ * eagerIndexes=true，装载完成后立即建好索引。
  */
-function registerBuiltinBooks(books: Book[]): ServiceResult<null> {
+function registerBuiltinBooks(
+  books: Book[],
+  opts?: { eagerIndexes?: boolean },
+): ServiceResult<null> {
   try {
     for (const b of books) {
       if (isUserBookId(b.id)) {
@@ -124,7 +132,9 @@ function registerBuiltinBooks(books: Book[]): ServiceResult<null> {
     chapterIndex = null;
     segmentIndex = null;
     buildBooks();
-    buildIndexes();
+    if (opts?.eagerIndexes !== false) {
+      buildIndexes();
+    }
     return { success: true, data: null };
   } catch (e) {
     return { success: false, error: (e as Error).message };

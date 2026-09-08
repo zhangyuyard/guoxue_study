@@ -208,6 +208,14 @@ const CONTIGUOUS_PRELOAD_SCREENS = 2;
 const CHAPTER_HEAD_DWELL_SCREENS = 0.5;
 
 /**
+ * 滚动模式邻章预取的延时（ms）：跳章落位 / 切章完成后仍处于切章过渡态
+ * （列表重挂载、定位落位、contentSize 估算修正），立即预取会与这些工作
+ * 争抢 JS 线程。延时一拍（宏任务 + 该间隔）让出线程；间隔远小于用户从
+ * 落位滚动到章边界的时间，不构成可感知的等待。
+ */
+const NEIGHBOR_PREFETCH_DELAY_MS = 400;
+
+/**
  * 阅读行（滚动模式 FlatList 的数据单元）
  * 连续滚动时正文跨章拼接：每章先渲染一个「标题行」，再渲染该章的若干「段落行」。
  */
@@ -2061,6 +2069,62 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       requestAutoPrepend(scrollOffset.current);
     }
   }, [shouldAutoPrepend, requestAutoPrepend]);
+
+  /** 已完成邻章预取的「模式:章 id」键：跳章 / 切章后只触发一轮预取（防抖），同键重复触发跳过 */
+  const prefetchedKeyRef = useRef<string | null>(null);
+  /** 邻章预取的挂起计时器（切章 / 卸载时清理，防止旧章的预取落到新章序列上） */
+  const prefetchNeighborsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * 【问题4】滚动模式邻章预取：跳章落位 / 切章稳定后，主动把后一章与前一章
+   * 拼进 continuousChapters，使用户随后立即向下 / 向上滚动时无需等待拼接。
+   * 复用既有追加函数（防重入口不另起炉灶）：loadingNext / loadingPrev 并发守卫、
+   * 二次去重、滑动窗口上限、锚点互斥全部在同一入口内生效。
+   * 顺序约束：先 append 后 prepend——prepend 会登记 prependAnchor，锚点存活期
+   * 内 append 被互斥守卫阻塞，顺序颠倒会导致本轮只预取到上一章。
+   * 静默性：两个追加函数本身不展示 loading；NEIGHBOR_PREFETCH_DELAY_MS 宏任务
+   * 延时让出线程，不与切章过渡渲染争抢 JS。
+   * 一轮语义（防抖）：按「模式:章 id」记账，每章只预取一轮；若计时器触发时
+   * 用户已开始手势滚动（绝不与原生拖拽 / 惯性争夺视口，跳章根因之一），或
+   * prepend 因 pendingScroll（打开时定位未完成）被守卫拒绝，则放弃本轮、
+   * 交由既有滚动触发路径（requestAutoPrepend / handleEndReached）按需兜底，
+   * 不做重试。
+   */
+  const prefetchNeighborChapters = useCallback(() => {
+    if (readerMode !== 'scroll' || !book || !chapterId) {
+      return;
+    }
+    const prefetchKey = `scroll:${chapterId}`;
+    if (prefetchedKeyRef.current === prefetchKey) {
+      return;
+    }
+    prefetchedKeyRef.current = prefetchKey;
+    if (prefetchNeighborsTimer.current) {
+      clearTimeout(prefetchNeighborsTimer.current);
+    }
+    prefetchNeighborsTimer.current = setTimeout(() => {
+      prefetchNeighborsTimer.current = null;
+      // 计时器触发时用户可能已开始滚动：插入 + 补偿 scrollTo 不得与进行中的
+      // 原生拖拽 / 惯性争夺视口（跳章根因，见 requestAutoPrepend 注释），放弃本轮
+      if (dragActiveRef.current || userScrollActiveRef.current) {
+        return;
+      }
+      appendNextChapter();
+      prependPreviousChapter();
+    }, NEIGHBOR_PREFETCH_DELAY_MS);
+  }, [readerMode, book, chapterId, appendNextChapter, prependPreviousChapter]);
+
+  // 章稳定（打开 / 跳章落位 / 切章重置完成）后触发一轮邻章预取；
+  // 依赖变化（切章 / 换模式）时先清掉上一章挂起的计时器再重新调度
+  useEffect(() => {
+    prefetchNeighborChapters();
+    return () => {
+      if (prefetchNeighborsTimer.current) {
+        clearTimeout(prefetchNeighborsTimer.current);
+        prefetchNeighborsTimer.current = null;
+      }
+    };
+  }, [prefetchNeighborChapters]);
 
   /** 连续滚动行：每章 = 1 个章标题行 + N 个段落行 */
   const continuousRows = useMemo<ReaderRow[]>(() => {

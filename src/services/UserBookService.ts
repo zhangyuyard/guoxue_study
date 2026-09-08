@@ -52,6 +52,9 @@ const BOOKS_DIR_NAME = 'guoxue-books';
 /** 内置书资源子目录名（根文件夹内的独立文件夹，App 托管） */
 const BUILTIN_DIR_NAME = 'builtin';
 
+/** 渐进装载单批时间预算（ms）：内置书装载循环每超过该值就让出线程并注册一批 */
+const BUILTIN_PROGRESS_CHUNK_MS = 24;
+
 /** 支持的扩展名（选择器过滤用，见 bookFormat.SUPPORTED_BOOK_EXTENSIONS） */
 const BOOK_EXTENSIONS: readonly string[] = SUPPORTED_BOOK_EXTENSIONS;
 /** 单次 read 上限（RNFS.read 建议值 4MB） */
@@ -415,6 +418,62 @@ function applySuppression(): void {
   if (typeof fn === 'function') {
     fn.call(TextLibraryService, Array.from(hiddenBuiltins));
   }
+}
+
+/** 上一轮成功注册的内置书快照（渐进装载合并用，见 registerBuiltinsBatch）。
+ * 只在本服务内维护：每次成功注册（分批/终批）后刷新为本批合并结果。 */
+let registeredBuiltinsSnapshot: Book[] = [];
+
+/**
+ * 注册一批内置书（渐进装载用）：当前轮已装载书 + 上一轮快照中本轮尚未
+ * 装载的书（含装载失败书——沿用上一轮的可用书体，书架绝不因本轮部分书
+ * 三路来源失败而丢书，下轮启动重试）合并注册。eagerIndexes 透传
+ * TextLibraryService.registerBuiltinBooks（分批 false 避免重复建索引，
+ * 终批 true）。mock 环境无该方法时跳过。
+ */
+function registerBuiltinsBatch(
+  loaded: Book[],
+  eagerIndexes: boolean,
+): { success: boolean; error?: string } | null {
+  const regB = (
+    TextLibraryService as unknown as {
+      registerBuiltinBooks?: (
+        books: Book[],
+        opts?: { eagerIndexes?: boolean },
+      ) => { success: boolean; error?: string };
+    }
+  ).registerBuiltinBooks;
+  if (typeof regB !== 'function') {
+    return null;
+  }
+  const loadedIds = new Set(loaded.map((b) => b.id));
+  const stale = registeredBuiltinsSnapshot.filter((b) => !loadedIds.has(b.id));
+  const merged = [...stale, ...loaded];
+  const res = regB.call(TextLibraryService, merged, { eagerIndexes });
+  if (res.success) {
+    registeredBuiltinsSnapshot = merged;
+  }
+  return res;
+}
+
+/** 目录清单占位书（仅元数据，chapters 为空）：冷启动先上屏书架，
+ * 真实书体由装载循环分批替换。openBook 对空章节书直接忽略点击。 */
+function buildPlaceholderBooks(): Book[] {
+  return BUILTIN_CATALOG.filter((spec) => !hiddenBuiltins.has(spec.id)).map(
+    (spec) => ({
+      id: spec.id,
+      title: spec.title,
+      author: spec.author,
+      category: spec.category,
+      description: spec.description,
+      chapters: [],
+    }),
+  );
+}
+
+/** 仅测试用：清空渐进装载快照（模块级状态跨用例残留会破坏冷启动场景） */
+export function __resetBuiltinProgressForTests(): void {
+  registeredBuiltinsSnapshot = [];
 }
 
 /**
@@ -1060,8 +1119,19 @@ async function processOversizedBooks(
  * 流程：确保文件夹 → 物化内置书 → 扫描顶层文件增量同步 → 遗留书装载 →
  * 整体注册。任一文件系统步骤失败均降级为「仅装载 db 内已有书籍」，
  * 不阻断书架可用性。超大文件转入后台队列解析（不阻塞启动）。
+ *
+ * 渐进装载（性能）：77 部内置书的解析/反解总量达数十 MB，一次性完成后
+ * 才注册会让书架空白数秒至十几秒（真机「打开 app 等很久才有书」根因）。
+ * 冷启动时先注册目录清单占位书（仅元数据、chapters 为空，卡片即刻可见
+ * 但不可打开），随后内置书装载循环按时间预算分批注册真实书体，书架
+ * 渐进点亮。分批注册传 eagerIndexes:false 避免重复全量建索引。
  */
-export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSummary>> {
+export async function loadAndRegisterAll(options?: {
+  /** 每批内置书注册完成后回调（书架借此渐进刷新；不传则行为与旧版一致） */
+  onProgress?: () => void;
+  /** 单批时间预算（ms），缺省 24ms（约一帧）；测试可传 0 使每书一批 */
+  chunkMs?: number;
+}): Promise<ServiceResult<LibrarySyncSummary>> {
   // let：db 损坏自愈重建后需替换为新鲜连接（旧连接所有查询报 disk I/O error）
   let instance = getDb();
   if (!instance) {
@@ -1094,6 +1164,18 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
   try {
     loadHiddenBuiltins();
     applySuppression();
+    // 冷启动占位注册（渐进装载第一步）：书架即刻可见目录清单全部卡片，
+    // 真实书体由装载循环分批替换。仅在本进程从未注册过内置书时执行
+    // （registeredBuiltinsSnapshot 为空；书架刷新/导入后的重入调用绝不
+    // 能把已装载书重置回空章节占位）。
+    if (typeof options?.onProgress === 'function' && registeredBuiltinsSnapshot.length === 0) {
+      try {
+        registerBuiltinsBatch(buildPlaceholderBooks(), false);
+        options.onProgress();
+      } catch {
+        // 占位注册失败不影响正式装载（书架回到「等装载完成」的旧行为）
+      }
+    }
     await ensureDirs();
     lastSyncDiagnostics.assetCopyFailures = await materializeBuiltins();
   } catch {
@@ -1294,6 +1376,10 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
     // 逐书三级来源：db 解析缓存 → builtin/ 文件解析 → APK assets 直读；
     // 单书全失败计入诊断并跳过，绝不中断其余书的装载（真机「内置书
     // 全部消失」终极防线：assets 随包分发，release 环境必然可读）。
+    const progressEnabled = typeof options?.onProgress === 'function';
+    const chunkBudget =
+      typeof options?.chunkMs === 'number' ? options.chunkMs : BUILTIN_PROGRESS_CHUNK_MS;
+    let chunkStart = Date.now();
     for (const spec of BUILTIN_CATALOG) {
       if (hiddenBuiltins.has(spec.id)) {
         continue;
@@ -1363,6 +1449,17 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
         }
         builtinLoaded.push(loaded);
         lastSyncDiagnostics.builtinFilesSeen += 1;
+        // 渐进装载（性能）：按时间预算分批让出 JS 线程并注册已装载书，
+        // 书架渐进点亮（每批一个 macrotask，期间用户交互不被阻塞）。
+        // 单书 JSON 反解最大可达数十 ms（文选/通鉴级别），无法再细粒度拆分，
+        // 属可接受的单次停顿；批次预算取 24ms（约一帧）。
+        if (progressEnabled && Date.now() - chunkStart >= chunkBudget) {
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          registerBuiltinsBatch([...builtinLoaded], false);
+          chunkStart = Date.now();
+          options.onProgress?.();
+        }
       } catch (e) {
         builtinParseFailures.push(spec.id);
         console.warn(`[UserBookService] 内置书装载异常 ${spec.id}:`, (e as Error)?.message ?? e);
@@ -1434,20 +1531,14 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
 
   lastSyncDiagnostics.builtinParseFailures = builtinParseFailures;
 
-  // 内置书注册：仅当清单装载完整走完且零失败时整体替换（扫描失败/中途
-  // 异常/部分书三路来源全失败时保留先前的注册结果，避免把「本轮读不到」
-  // 误当「无内置书」清空书架）。测试 mock 无该方法时跳过。
+  // 内置书终批注册：仅当清单装载完整走完且零失败时整体替换（扫描失败/
+  // 中途异常/部分书三路来源全失败时，分批注册已把上一轮快照合并进来，
+  // 失败书沿用旧书体，无需也不应再替换）。终批 eagerIndexes=true 立即
+  // 建好章节/段落索引。测试 mock 无该方法时跳过。
   if (builtinLoopCompleted && builtinParseFailures.length === 0) {
-    const regB = (
-      TextLibraryService as unknown as {
-        registerBuiltinBooks?: (books: Book[]) => { success: boolean; error?: string };
-      }
-    ).registerBuiltinBooks;
-    if (typeof regB === 'function') {
-      const regBRes = regB.call(TextLibraryService, builtinLoaded);
-      if (!regBRes.success) {
-        return { success: false, error: regBRes.error ?? '注册内置书籍失败' };
-      }
+    const regBRes = registerBuiltinsBatch([...builtinLoaded], true);
+    if (regBRes && !regBRes.success) {
+      return { success: false, error: regBRes.error ?? '注册内置书籍失败' };
     }
   }
   const reg = TextLibraryService.registerUserBooks([...folderBooks, ...legacyBooks]);

@@ -51,24 +51,30 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
       setTimeout(resolve, 0);
     });
     // 阶段二：装载用户上传书籍后整体刷新。
+    // 渐进装载：onProgress 在内置书分批注册后触发，书架按批点亮
+    // （冷启动先有目录占位卡片，随后逐批替换为真实书体），不再等
+    // 全量装载完成才显示书（真机「打开 app 等很久才有书」修复）。
     // 最终状态与旧实现一致：内置 + 用户书全量、loading 收敛为 false。
-    const loadRes = await UserBookService.loadAndRegisterAll();
-    const booksRes = TextLibraryService.getBooks();
-    const catRes = TextLibraryService.getCategories();
-    if (booksRes.success && booksRes.data) {
-      set({
-        books: booksRes.data,
-        categories: catRes.success && catRes.data ? catRes.data : [],
-        loading: false,
-        // 装载失败不再静默（如 db 不可用）：书架显示错误而不是无声空白
-        error: loadRes.success ? undefined : loadRes.error ?? '加载书籍失败',
-      });
-    } else {
-      set({
-        loading: false,
-        error: booksRes.error ?? loadRes.error ?? '加载文本库失败',
-      });
-    }
+    const refresh = (): void => {
+      const booksRes = TextLibraryService.getBooks();
+      const catRes = TextLibraryService.getCategories();
+      if (booksRes.success && booksRes.data) {
+        set({
+          books: booksRes.data,
+          categories: catRes.success && catRes.data ? catRes.data : [],
+          error: undefined,
+        });
+      }
+    };
+    const loadRes = await UserBookService.loadAndRegisterAll({
+      onProgress: refresh,
+    });
+    refresh();
+    set({
+      loading: false,
+      // 装载失败不再静默（如 db 不可用）：书架显示错误而不是无声空白
+      error: loadRes.success ? undefined : loadRes.error ?? '加载书籍失败',
+    });
   },
 
   selectBook: (id) => {

@@ -5,8 +5,10 @@
  *   向左翻→左缘变暗），营造「纸张翻起」的仿真观感（纯 JS，无额外原生依赖）。
  * - 左右边缘点击热区翻页（中部保留给长按选词 / 划线交互）。
  * - 受控组件：index 由父级维护，onIndexChange 回传，跨章边沿通过 onEdgeReached 上报。
+ * - 窗口化渲染：只全量渲染当前页附近窗口内的页（问题 3 修复），窗口外页为
+ *   同尺寸空占位——整章一次性渲染数百页 PinyinText 会压死 JS 线程（loading 极久）。
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Pressable,
@@ -19,6 +21,7 @@ import {
 import Svg, { LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import type { ThemeColors } from '@/theme';
+import { computePageRenderWindow, PAGE_RENDER_WINDOW_MARGIN } from '@/utils/readerPageWindow';
 
 export interface PageFlipPagerProps {
   /** 当前页索引（受控） */
@@ -169,6 +172,18 @@ export function PageFlipPager({
 
   const shadowColor = colors.text;
 
+  // 窗口化渲染区间（问题 3：整章一次性渲染把 JS 线程压死）：只全量渲染落在
+  // 「受控 index ∪ 落位 settled」前后各 PAGE_RENDER_WINDOW_MARGIN 页窗口内的页，
+  // 窗口外页渲染同尺寸空占位。窗口随 settled / index 翻页滑动——翻一页至多新增
+  // 1~2 页挂载（PinyinText 全量注音成本高），滑出窗口的页卸载、滑入的页挂载，
+  // 横向 ScrollView 的内容宽度与分页完全不变（占位 View 同宽同高）。
+  // 取 index 与 settled 并集：点击翻页后 index 立即变目标页、settled 落位才更新，
+  // 并集保证「滚向的目标页」与「离开的原页」滑动过程中都不空白。
+  const renderWindow = useMemo(
+    () => computePageRenderWindow(index, settled, pageCount, PAGE_RENDER_WINDOW_MARGIN),
+    [index, settled, pageCount],
+  );
+
   return (
     <View style={styles.container} pointerEvents="box-none">
       <Animated.ScrollView
@@ -187,7 +202,9 @@ export function PageFlipPager({
       >
         {Array.from({ length: Math.max(1, pageCount) }).map((_, i) => (
           <View key={i} style={{ width: pageWidth, height: pageHeight }}>
-            {renderPage(i)}
+            {/* 窗口内全量渲染；窗口外同尺寸空占位（宽度/分页不变）。
+                renderPage 返回 null / 兜底占位时自然退化为空页，无需特殊处理。 */}
+            {i >= renderWindow.start && i <= renderWindow.end ? renderPage(i) : null}
           </View>
         ))}
       </Animated.ScrollView>
