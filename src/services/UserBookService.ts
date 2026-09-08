@@ -207,10 +207,12 @@ function applySuppression(): void {
  * 物化内置书：builtin/ 下缺文件的从 APK assets（books/<id>.txt，@@CH@@
  * 标记文本）复制补齐。被抑制（用户已删除）的书不补写——删除永久生效，
  * 除非「恢复内置书籍」；用户经文件管理器误删内置文件时，下次启动自动
- * 自愈补回。任一文件复制失败仅吞错（下一轮重试）。
+ * 自愈补回。单书复制失败只记录该 id（下轮重试），绝不影响其他书。
+ * 返回复制失败的书籍 ID 列表（供诊断展示）。
  */
-async function materializeBuiltins(): Promise<void> {
+async function materializeBuiltins(): Promise<string[]> {
   const builtinDir = getBuiltinDirPath();
+  const failures: string[] = [];
   for (const spec of BUILTIN_CATALOG) {
     if (hiddenBuiltins.has(spec.id)) {
       continue;
@@ -231,10 +233,17 @@ async function materializeBuiltins(): Promise<void> {
           await RNFS.writeFile(path, content, 'utf8');
         }
       } catch {
-        // 自愈失败不阻断启动
+        // 单书自愈失败：记录诊断，下轮启动重试，不阻断其他书
+        failures.push(spec.id);
       }
     }
   }
+  if (failures.length > 0) {
+    console.warn(
+      `[UserBookService] 内置书资产复制失败 ${failures.length}/${BUILTIN_CATALOG.length}：${failures.join(',')}`,
+    );
+  }
+  return failures;
 }
 
 // ============ 文件选取与读取 ============
@@ -644,6 +653,34 @@ export interface LibrarySyncSummary {
   legacyBooks: number;
 }
 
+/** 最近一次 loadAndRegisterAll 的诊断信息（书架页脚/调试展示，定位真机问题） */
+export interface LibrarySyncDiagnostics {
+  /** 扫描链路中途异常：本轮降级为 db 装载，内置书注册被跳过（保留上次注册） */
+  scanInterrupted: boolean;
+  /** 资产复制失败的内置书 ID */
+  assetCopyFailures: string[];
+  /** 扫描到的有效（未被抑制）内置资产文件数 */
+  builtinFilesSeen: number;
+  /** 解析失败的内置资产 ID */
+  builtinParseFailures: string[];
+}
+
+function emptySyncDiagnostics(): LibrarySyncDiagnostics {
+  return {
+    scanInterrupted: false,
+    assetCopyFailures: [],
+    builtinFilesSeen: 0,
+    builtinParseFailures: [],
+  };
+}
+
+let lastSyncDiagnostics: LibrarySyncDiagnostics = emptySyncDiagnostics();
+
+/** 读取最近一次装载的诊断信息（未装载过时返回全空诊断） */
+export function getLibrarySyncDiagnostics(): LibrarySyncDiagnostics {
+  return lastSyncDiagnostics;
+}
+
 /**
  * 装载全部书籍并注册进 TextLibraryService（App 启动/书架刷新时调用）。
  * 流程：确保文件夹 → 物化内置书 → 扫描顶层文件增量同步 → 遗留书装载 →
@@ -667,15 +704,23 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
   const folderBooks: Book[] = [];
   const legacyBooks: Book[] = [];
   const builtinLoaded: Book[] = [];
+  const builtinParseFailures: string[] = [];
   let scanOk = false;
+  // 扫描循环中途异常（scanOk 已置 true 后跳进外层 catch）：
+  // 此时 builtinLoaded 可能只有部分甚至为空，绝不能用它整体替换内置书注册
+  //（否则一次瞬时 IO 异常就把书架内置书清空——真机「内置书全部消失」根因之一）。
+  let scanInterrupted = false;
+
+  lastSyncDiagnostics = emptySyncDiagnostics();
 
   try {
     loadHiddenBuiltins();
     applySuppression();
     await ensureDirs();
-    await materializeBuiltins();
+    lastSyncDiagnostics.assetCopyFailures = await materializeBuiltins();
   } catch {
     // 文件夹不可用（极端机型）：降级为仅装载 db，书架仍可用
+    console.warn('[UserBookService] 书籍文件夹初始化失败，降级为 db 装载');
   }
 
   try {
@@ -716,17 +761,35 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
           files.push(e as { name: string; path: string; isFile: () => boolean });
         }
       }
+      let builtinEntries: Array<{
+        name: string;
+        path: string;
+        isFile?: () => boolean;
+        isDirectory?: () => boolean;
+      }> = [];
       try {
-        const builtinEntries = await RNFS.readDir(getBuiltinDirPath());
-        for (const e of builtinEntries) {
-          const isFile = typeof e.isFile === 'function' ? e.isFile() : !e.isDirectory?.();
-          const specId = e.name.replace(/\.txt$/i, '');
-          if (isFile && getBuiltinSpec(specId)) {
-            builtinFiles.push({ name: e.name, path: e.path });
-          }
-        }
+        builtinEntries = await RNFS.readDir(getBuiltinDirPath());
       } catch {
         // builtin/ 读失败不阻断用户书扫描
+      }
+      // 自愈：内置目录一个有效文件都没有、且并非全部被用户抑制 →
+      // 首启资产复制可能整体失败（机型/瞬时 IO），立即重物化一轮再重读，
+      // 避免用户必须手点「恢复内置书籍」才能找回。
+      if (builtinEntries.length === 0 && hiddenBuiltins.size < BUILTIN_CATALOG.length) {
+        try {
+          await ensureDirs();
+          lastSyncDiagnostics.assetCopyFailures = await materializeBuiltins();
+          builtinEntries = await RNFS.readDir(getBuiltinDirPath());
+        } catch {
+          // 自愈失败下轮启动再试
+        }
+      }
+      for (const e of builtinEntries) {
+        const isFile = typeof e.isFile === 'function' ? e.isFile() : !e.isDirectory?.();
+        const specId = e.name.replace(/\.txt$/i, '');
+        if (isFile && getBuiltinSpec(specId)) {
+          builtinFiles.push({ name: e.name, path: e.path });
+        }
       }
       scanOk = true;
     } catch {
@@ -735,53 +798,60 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
 
     if (scanOk) {
       const seenPaths = new Set<string>();
-    for (const f of files) {
-      seenPaths.add(f.path);
-      const row = folderRowsByPath.get(f.path);
-      const stat = await RNFS.stat(f.path);
-      const size = Number(stat.size);
-      const mtimeMs = stat.mtime ? new Date(stat.mtime).getTime() : 0;
-      const sig = `${Number.isFinite(mtimeMs) ? mtimeMs : 0}:${Number.isFinite(size) ? size : 0}`;
-      if (row && row.file_sig === sig) {
-        // 指纹未变：复用 db 解析结果，零解析开销
+      for (const f of files) {
+        seenPaths.add(f.path);
         try {
-          const cached = JSON.parse(row.data) as Book;
-          if (cached && cached.id && Array.isArray(cached.chapters)) {
-            folderBooks.push(cached);
+          const row = folderRowsByPath.get(f.path);
+          const stat = await RNFS.stat(f.path);
+          const size = Number(stat.size);
+          const mtimeMs = stat.mtime ? new Date(stat.mtime).getTime() : 0;
+          const sig = `${Number.isFinite(mtimeMs) ? mtimeMs : 0}:${Number.isFinite(size) ? size : 0}`;
+          if (row && row.file_sig === sig) {
+            // 指纹未变：复用 db 解析结果，零解析开销
+            try {
+              const cached = JSON.parse(row.data) as Book;
+              if (cached && cached.id && Array.isArray(cached.chapters)) {
+                folderBooks.push(cached);
+                continue;
+              }
+            } catch {
+              // 缓存损坏则走重新解析
+            }
+          }
+          const id = row && row.id.startsWith('user-') ? row.id : stableBookIdFromPath(f.name);
+          const parsed = await parseBookFile(f.path, f.name, id);
+          if (!parsed) {
             continue;
           }
-        } catch {
-          // 缓存损坏则走重新解析
+          if (row) {
+            summary.updated += 1;
+          } else {
+            summary.imported += 1;
+          }
+          try {
+            instance.execute(
+              'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at, source_path, file_sig) VALUES (?, ?, ?, ?, ?, ?, ?)',
+              [
+                parsed.book.id,
+                parsed.book.title,
+                parsed.book.author,
+                JSON.stringify(parsed.book),
+                row ? row.created_at : Date.now(),
+                parsed.sourcePath,
+                parsed.fileSig,
+              ],
+            );
+          } catch {
+            // 持久化失败仍注册进内存（本会话可读，下次启动重解析）
+          }
+          folderBooks.push(parsed.book);
+        } catch (e) {
+          // 单文件 stat/IO 异常只跳过该文件：绝不中断整轮扫描
+          //（否则异常上抛会跳进外层降级分支，殃及内置书注册）。
+          console.warn(`[UserBookService] 用户书扫描失败 ${f.name}:`, (e as Error)?.message ?? e);
+          continue;
         }
       }
-      const id = row && row.id.startsWith('user-') ? row.id : stableBookIdFromPath(f.name);
-      const parsed = await parseBookFile(f.path, f.name, id);
-      if (!parsed) {
-        continue;
-      }
-      if (row) {
-        summary.updated += 1;
-      } else {
-        summary.imported += 1;
-      }
-      try {
-        instance.execute(
-          'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at, source_path, file_sig) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [
-            parsed.book.id,
-            parsed.book.title,
-            parsed.book.author,
-            JSON.stringify(parsed.book),
-            row ? row.created_at : Date.now(),
-            parsed.sourcePath,
-            parsed.fileSig,
-          ],
-        );
-      } catch {
-        // 持久化失败仍注册进内存（本会话可读，下次启动重解析）
-      }
-      folderBooks.push(parsed.book);
-    }
 
       // 1b) 内置书资产扫描：ID = 目录清单 id，元数据按清单覆写；
       // 同样走 db file_sig 缓存（大书解析仅首次发生）
@@ -792,52 +862,71 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
           continue;
         }
         seenPaths.add(f.path);
-        const row = folderRowsByPath.get(f.path);
-        const stat = await RNFS.stat(f.path);
-        const size = Number(stat.size);
-        const mtimeMs = stat.mtime ? new Date(stat.mtime).getTime() : 0;
-        const sig = `${Number.isFinite(mtimeMs) ? mtimeMs : 0}:${Number.isFinite(size) ? size : 0}`;
-        if (row && row.file_sig === sig) {
-          try {
-            const cached = JSON.parse(row.data) as Book;
-            // 标题比对：App 升级换目录元数据时触发重解析
-            if (cached && cached.id === spec.id && cached.title === spec.title && Array.isArray(cached.chapters)) {
-              builtinLoaded.push(cached);
-              continue;
-            }
-          } catch {
-            // 缓存损坏则走重新解析
-          }
-        }
-        const parsed = await parseBookFile(f.path, f.name, spec.id, spec);
-        if (!parsed) {
-          continue;
-        }
+        lastSyncDiagnostics.builtinFilesSeen += 1;
         try {
-          instance.execute(
-            'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at, source_path, file_sig) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [
-              parsed.book.id,
-              parsed.book.title,
-              parsed.book.author,
-              JSON.stringify(parsed.book),
-              row ? row.created_at : Date.now(),
-              parsed.sourcePath,
-              parsed.fileSig,
-            ],
-          );
-        } catch {
-          // 持久化失败仍注册进内存（本会话可读，下次启动重解析）
+          const row = folderRowsByPath.get(f.path);
+          const stat = await RNFS.stat(f.path);
+          const size = Number(stat.size);
+          const mtimeMs = stat.mtime ? new Date(stat.mtime).getTime() : 0;
+          const sig = `${Number.isFinite(mtimeMs) ? mtimeMs : 0}:${Number.isFinite(size) ? size : 0}`;
+          if (row && row.file_sig === sig) {
+            try {
+              const cached = JSON.parse(row.data) as Book;
+              // 标题比对：App 升级换目录元数据时触发重解析
+              if (cached && cached.id === spec.id && cached.title === spec.title && Array.isArray(cached.chapters)) {
+                builtinLoaded.push(cached);
+                continue;
+              }
+            } catch {
+              // 缓存损坏则走重新解析
+            }
+          }
+          const parsed = await parseBookFile(f.path, f.name, spec.id, spec);
+          if (!parsed) {
+            builtinParseFailures.push(specId);
+            continue;
+          }
+          try {
+            instance.execute(
+              'INSERT OR REPLACE INTO user_books (id, title, author, data, created_at, source_path, file_sig) VALUES (?, ?, ?, ?, ?, ?, ?)',
+              [
+                parsed.book.id,
+                parsed.book.title,
+                parsed.book.author,
+                JSON.stringify(parsed.book),
+                row ? row.created_at : Date.now(),
+                parsed.sourcePath,
+                parsed.fileSig,
+              ],
+            );
+          } catch {
+            // 持久化失败仍注册进内存（本会话可读，下次启动重解析）
+          }
+          builtinLoaded.push(parsed.book);
+        } catch (e) {
+          // 单文件 stat/IO 异常只跳过该文件并记诊断：绝不中断整轮内置扫描
+          builtinParseFailures.push(specId);
+          console.warn(`[UserBookService] 内置书解析失败 ${f.name}:`, (e as Error)?.message ?? e);
         }
-        builtinLoaded.push(parsed.book);
       }
       summary.builtinBooks = builtinLoaded.length;
+      if (builtinParseFailures.length > 0) {
+        console.warn(
+          `[UserBookService] 内置书解析失败 ${builtinParseFailures.length} 部：${builtinParseFailures.join(',')}`,
+        );
+      }
 
-      // 2) 下架：db 中有 source_path 但扫描未见的书（文件被用户移走/删除，
-      // 含被禁用/失效的内置资产行）。仅在扫描成功时执行（scanOk=false 时
-      // 保留全部书籍，下轮再比对）。
+      // 2) 下架：db 中有 source_path 但扫描未见的书（文件被用户移走/删除）。
+      // 仅在扫描成功时执行（scanOk=false 时保留全部书籍，下轮再比对）。
+      // 内置书（目录清单 id）绝不参与下架：其生命周期由物化补写/抑制表管理，
+      // 文件暂缺（builtin 目录读取失败/复制未完成）时若在此删除 db 行并级联
+      // 清理，用户的背诵/收藏/笔记会永久丢失（真机「内置书全部消失且数据
+      // 无法找回」的第二根因）。
       for (const row of folderRows) {
         if (!seenPaths.has(row.source_path as string)) {
+          if (getBuiltinSpec(row.id)) {
+            continue;
+          }
           summary.removed += 1;
           try {
             instance.execute('DELETE FROM user_books WHERE id = ?', [row.id]);
@@ -867,7 +956,15 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
     summary.folderBooks = folderBooks.length;
     summary.legacyBooks = legacyBooks.length;
   } catch (e) {
-    // 扫描链路失败：降级为旧行为（仅装载 db 全量），保证书架可用
+    // 扫描链路失败：降级为旧行为（仅装载 db 全量），保证书架可用。
+    // 若 scanOk 已置 true（扫描进行到一半才抛错），标记 scanInterrupted：
+    // 内置书注册保持上一轮结果，绝不用残缺的 builtinLoaded 整体替换。
+    scanInterrupted = true;
+    lastSyncDiagnostics.scanInterrupted = true;
+    console.warn(
+      '[UserBookService] 扫描链路异常，降级为 db 装载（本轮不更新内置书注册）:',
+      (e as Error)?.message ?? e,
+    );
     try {
       const fallbackRes = instance.execute(
         'SELECT data FROM user_books ORDER BY created_at DESC',
@@ -894,12 +991,14 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
     } catch (e2) {
       return { success: false, error: `加载用户书籍失败：${(e2 as Error).message}` };
     }
-    void e;
   }
 
-  // 内置书注册：仅扫描成功时整体替换（scanOk=false 保留先前的注册结果，
-  // 避免把「读不到目录」误当「无内置书」清空书架）。测试 mock 无该方法时跳过。
-  if (scanOk) {
+  lastSyncDiagnostics.builtinParseFailures = builtinParseFailures;
+
+  // 内置书注册：仅扫描完整成功时整体替换（scanOk=false 或中途异常均保留
+  // 先前的注册结果，避免把「读不到目录/扫描半途失败」误当「无内置书」清空书架）。
+  // 测试 mock 无该方法时跳过。
+  if (scanOk && !scanInterrupted) {
     const regB = (
       TextLibraryService as unknown as {
         registerBuiltinBooks?: (books: Book[]) => { success: boolean; error?: string };
@@ -1204,9 +1303,21 @@ export async function restoreBuiltinBooks(): Promise<ServiceResult<number>> {
   applySuppression();
   try {
     await ensureDirs();
-    await materializeBuiltins();
+    const failures = await materializeBuiltins();
+    if (failures.length > 0) {
+      // 复制失败的书这次恢复不完整：返回实际落盘数量，让 UI 如实提示
+      const builtinDir = getBuiltinDirPath();
+      let restored = 0;
+      for (const spec of BUILTIN_CATALOG) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await RNFS.exists(`${builtinDir}/${spec.id}.txt`)) {
+          restored += 1;
+        }
+      }
+      return { success: true, data: restored };
+    }
   } catch {
-    // 文件补写失败不阻断（bundle 正源仍可读）
+    // 文件补写失败不阻断（下轮启动自愈重试）
   }
   return { success: true, data: BUILTIN_CATALOG.length };
 }
@@ -1307,10 +1418,11 @@ export const UserBookService = {
   loadAndRegisterAll,
   isUserBook,
   getAllBooks,
+  restoreBuiltinBooks,
   importBook,
   deleteBook,
   restoreUserBooks,
-  restoreBuiltinBooks,
+  getLibrarySyncDiagnostics,
   getBooksRootPath,
   getBuiltinDirPath,
   bookToMarkerText,

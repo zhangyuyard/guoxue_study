@@ -23,6 +23,7 @@ import { getColors, PAGE_TITLE_FONT_SIZE } from '@/theme';
 import { BookCard } from '@/components/common/BookCard';
 import { CategoryTabs, buildCategoryTabs } from '@/components/common/CategoryTabs';
 import { UserBookService } from '@/services/UserBookService';
+import { BUILTIN_CATALOG } from '@/data/builtinCatalog';
 
 type Props = NativeStackScreenProps<T04StackParamList, 'Library'>;
 
@@ -144,6 +145,13 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
     void UserBookService.restoreBuiltinBooks().then((res) => {
       setRestoring(false);
       if (res.success) {
+        const restored = res.data ?? 0;
+        if (restored < BUILTIN_CATALOG.length) {
+          Alert.alert(
+            '部分恢复',
+            `本次仅恢复 ${restored}/${BUILTIN_CATALOG.length} 部内置书籍（资产复制受阻），重启应用后会自动重试。`,
+          );
+        }
         loadBooks();
       } else {
         Alert.alert('恢复失败', res.error);
@@ -237,6 +245,33 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
                 {restoring ? '恢复中…' : '恢复内置书籍'}
               </Text>
             </Pressable>
+            {(() => {
+              // 装载诊断：真机上内置书异常（复制失败/解析失败/扫描中断）时
+              // 直接在页脚可见，替代静默吞错
+              const diag = UserBookService.getLibrarySyncDiagnostics();
+              if (diag.scanInterrupted) {
+                return (
+                  <Text style={[styles.footerText, { color: colors.accent }]}>
+                    诊断：书籍扫描异常中断，本轮内置书注册已保留上次结果
+                  </Text>
+                );
+              }
+              if (diag.assetCopyFailures.length > 0) {
+                return (
+                  <Text style={[styles.footerText, { color: colors.accent }]}>
+                    诊断：内置书资产复制失败 {diag.assetCopyFailures.length} 部（重启自动重试）
+                  </Text>
+                );
+              }
+              if (diag.builtinParseFailures.length > 0) {
+                return (
+                  <Text style={[styles.footerText, { color: colors.accent }]}>
+                    诊断：内置书解析失败 {diag.builtinParseFailures.length} 部
+                  </Text>
+                );
+              }
+              return null;
+            })()}
             <Text style={[styles.footerText, { color: colors.pinyin }]}>
               共 {books.length} 本 · 离线可用 · 长按书籍可删除
             </Text>
