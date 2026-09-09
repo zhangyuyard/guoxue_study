@@ -23,6 +23,12 @@ export interface ReaderRouteParams {
   bookId: string;
   chapterId: string;
   segmentId?: string;
+  /**
+   * 跳转序号（goToChapter 每次跳转刷新）：目录跳转到「当前章」时，路由
+   * 参数与现值完全相同不会触发任何 effect（navigate 浅合并语义），携带
+   * 递增序号让切章重置 effect 重新执行，落回章首（重复跳转生效）。
+   */
+  jumpSeq?: number;
 }
 
 /** 背诵练习路由参数 */

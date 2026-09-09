@@ -100,8 +100,12 @@ describe('修复②：切章不再闪现旧章（同步派生 + 当帧一致视�
       /if \(chapter && continuousSeedChapterId === chapter\.id && continuousChapters\.length > 0\) \{\s*\n\s*return continuousChapters;/,
     );
     expect(source).toMatch(/return chapter \? \[chapter\] : \[\];/);
-    // 重置 effect 必须同步记录种子章
-    expect(source).toMatch(/setContinuousSeedChapterId\(chapter\?\.id \?\? null\);/);
+    // 重置 effect 必须同步记录种子章（经 chapterRef 取当前章对象，避免按引用依赖）
+    expect(source).toMatch(/setContinuousSeedChapterId\(ch\?\.id \?\? null\);/);
+    // 重置 effect 依赖口径：仅「chapterId / 空壳→正文就位 / jumpSeq」触发，
+    // 禁止按 chapter 对象引用依赖（后台填充每批合并替换章对象引用，
+    // 按引用触发会把正在阅读的拼接序列整体重置——滚动清零、拼接章节丢失）
+    expect(source).toMatch(/\}, \[chapterId, chapterReady, jumpSeq, rowOffsets\]\);/);
   });
 
   test('渲染数据源使用 effectiveChapters（连续滚动行不再直接吃 continuousChapters 状态）', () => {

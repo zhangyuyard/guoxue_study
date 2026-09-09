@@ -88,15 +88,9 @@ import {
 } from '@/utils/pagination';
 import type { HighlightedSegment } from '@/utils/highlight';
 import { computeScrollInitialRows, isWithinPreloadWindow, planHeadDrop } from '@/utils/readerScroll';
+import type { ReaderRouteParams } from '@/navigation/types';
 
 // ============ 类型定义 ============
-
-/** 路由参数 */
-export interface ReaderRouteParams {
-  bookId: string;
-  chapterId: string;
-  segmentId?: string;
-}
 
 /** ReaderScreen 所需的最小导航能力（RootStack 注入或阅读 Tab 手动构造均可满足） */
 interface ReaderScreenProps {
@@ -1456,6 +1450,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // 提取为原始值参与依赖比较：route/params 为父组件（ContinueReading）每次渲染
   // 新建的对象，若以对象引用作依赖会引发 setState 无限循环（Maximum update depth）
   const segmentId = params?.segmentId ?? null;
+  /**
+   * 跳转序号：goToChapter 每次跳转都刷新。目录跳到「当前章」时路由参数
+   * 其余字段不变（navigate 浅合并不触发任何 effect），携带递增序号让
+   * 「切章重置 / 复位」两个 effect 重新执行 → 落回章首（重复跳转生效）。
+   */
+  const jumpSeq = params?.jumpSeq;
 
   // 按需水合（性能）：内置书启动只注册目录元数据（书架秒开），进入阅读器
   // 时经 ensureBookReady 首章优先快速水合——只解析当前章（几十 ms）即上屏，
@@ -1502,13 +1502,34 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
   // 章节后台填充进度订阅：每批 30 章合并后触发，当前书命中时重算派生
   //（用户跳进空壳章后，该章正文就位即自动渲染，无需重进）
+  // 同时把拼接序列中被替换的章节对象同步为新引用：填充合并以新对象
+  // 替换原章对象，序列里的旧引用若不同步，effectiveChapters 会渲染陈旧空壳。
   useEffect(() => {
     if (!bookId || TextLibraryService.isUserBook(bookId)) {
       return undefined;
     }
     return UserBookService.onBuiltinFillProgress((filledBookId) => {
-      if (filledBookId === bookId) {
-        setHydrateTick((t) => t + 1);
+      if (filledBookId !== bookId) {
+        return;
+      }
+      setHydrateTick((t) => t + 1);
+      const fresh = TextLibraryService.getBook(filledBookId);
+      if (fresh.success && fresh.data) {
+        const byId = new Map(fresh.data.chapters.map((c) => [c.id, c]));
+        const current = continuousRef.current;
+        let changed = false;
+        const merged = current.map((c) => {
+          const updated = byId.get(c.id);
+          if (updated && updated !== c) {
+            changed = true;
+            return updated;
+          }
+          return c;
+        });
+        if (changed) {
+          continuousRef.current = merged;
+          setContinuousChapters(merged);
+        }
       }
     });
   }, [bookId]);
@@ -1722,12 +1743,18 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       if (!bookId) {
         return;
       }
-      if (cid !== chapterId) {
-        explicitChapterJumpRef.current = true;
-      }
-      navigation?.navigate('Reader', { bookId, chapterId: cid, segmentId: undefined });
+      // 显式跳章一律置位（含跳到当前章）：跳「当前章」语义 = 放弃拼接
+      // 序列现状、落回该章章首。jumpSeq 每次刷新使两个重置 effect 在
+      // 同章重复跳转时也会重新执行（否则 navigate 参数相同不触发任何效果）。
+      explicitChapterJumpRef.current = true;
+      navigation?.navigate('Reader', {
+        bookId,
+        chapterId: cid,
+        segmentId: undefined,
+        jumpSeq: Date.now(),
+      });
     },
-    [navigation, bookId, chapterId],
+    [navigation, bookId],
   );
 
   /** 仿真翻页：翻到章尾继续翻 → 跨到下一章；翻到章首继续翻 → 跨到上一章。
@@ -1833,10 +1860,21 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
   // ---------- 连续滚动：跨章拼接（仅滚动模式使用） ----------
 
-  // 章节（重新）加载时重置拼接序列：以当前章为起点，向后追加、向前拼接。
-  // 仿真翻页模式同样维护该序列（仅含当前章），用于「段落 -> 所属章」反查。
+  /**
+   * 章节（重新）加载时重置拼接序列：以当前章为起点，向后追加、向前拼接。
+   * 仿真翻页模式同样维护该序列（仅含当前章），用于「段落 -> 所属章」反查。
+   * 依赖口径（勿改回 chapter 引用）：仅「章节 id 变化 / 空壳→正文就位过渡 /
+   * 显式跳章（jumpSeq）」才重置序列——后台填充每批合并会替换章对象引用，
+   * 若按引用触发会把用户正在读的列表整体重置（滚动位置清零、拼接章节丢失）。
+   * 「空壳→就位」过渡必须重置：首开（首章优先水合）与跳入未填充章时，
+   * 序列种子是 segments 为空的壳章，正文就位后必须以新章体重种才能渲染。
+   */
+  const chapterReady = !!chapter && chapter.segments.length > 0;
+  const chapterRef = useRef<Chapter | null>(chapter);
+  chapterRef.current = chapter;
   useEffect(() => {
-    const seeded: Chapter[] = chapter ? [chapter] : [];
+    const ch = chapterRef.current;
+    const seeded: Chapter[] = ch ? [ch] : [];
     continuousRef.current = seeded;
     continuousChapterIdsRef.current = new Set(seeded.map((c) => c.id));
     loadingNext.current = false;
@@ -1854,8 +1892,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     layoutAnchor.current = null;
     setContinuousChapters(seeded);
     // 记录种子章（见 continuousSeedChapterId / effectiveChapters 注释）
-    setContinuousSeedChapterId(chapter?.id ?? null);
-  }, [chapter, rowOffsets]);
+    setContinuousSeedChapterId(ch?.id ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chapterId, chapterReady, jumpSeq, rowOffsets]);
 
   /**
    * 锚点超时检查：超过 ANCHOR_TIMEOUT_MS 仍未解析（锚点行未重新布局）则放弃补偿。
@@ -2173,13 +2212,47 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     }
     prefetchNeighborsTimer.current = setTimeout(() => {
       prefetchNeighborsTimer.current = null;
-      // 计时器触发时用户可能已开始滚动：插入 + 补偿 scrollTo 不得与进行中的
-      // 原生拖拽 / 惯性争夺视口（跳章根因，见 requestAutoPrepend 注释），放弃本轮
-      if (dragActiveRef.current || userScrollActiveRef.current) {
-        return;
-      }
-      appendNextChapter();
-      prependPreviousChapter();
+      /** 有上一章可拼但尚未就位时有限次重试（见 attempt 内校验） */
+      const MAX_TRIES = 4;
+      const RETRY_MS = 1500;
+      const attempt = (tries: number): void => {
+        // 用户正在滚动：插入 + 补偿 scrollTo 不得与进行中的原生拖拽 / 惯性
+        // 争夺视口（跳章根因，见 requestAutoPrepend 注释）——稍后重试。
+        // （原实现直接放弃整轮且不再补：用户开局即滚动时预取静默失效，
+        // 之后再拉到顶才现拼——「向上滚动预加载不生效」的根因。）
+        if (dragActiveRef.current || userScrollActiveRef.current) {
+          if (tries < MAX_TRIES) {
+            prefetchNeighborsTimer.current = setTimeout(
+              () => attempt(tries + 1),
+              RETRY_MS,
+            );
+          }
+          return;
+        }
+        appendNextChapter();
+        prependPreviousChapter();
+        // 校验上一章是否真的就位：定位未完成（pendingScroll）/ 锚点占用
+        // 等情况会让 prepend 静默失败——仍有上一章可拼且未就位时重试。
+        // 用户手动拼接成功则自然收敛（去重守卫兜底，绝不重复插入）。
+        if (tries < MAX_TRIES && book) {
+          const loaded = continuousRef.current;
+          const firstIdx =
+            loaded.length > 0
+              ? book.chapters.findIndex((c) => c.id === loaded[0].id)
+              : -1;
+          const hasPrevToLoad = firstIdx > 0;
+          const prevLoaded =
+            hasPrevToLoad &&
+            continuousChapterIdsRef.current.has(book.chapters[firstIdx - 1].id);
+          if (hasPrevToLoad && !prevLoaded) {
+            prefetchNeighborsTimer.current = setTimeout(
+              () => attempt(tries + 1),
+              RETRY_MS,
+            );
+          }
+        }
+      };
+      attempt(0);
     }, NEIGHBOR_PREFETCH_DELAY_MS);
   }, [readerMode, book, chapterId, appendNextChapter, prependPreviousChapter]);
 
@@ -2711,7 +2784,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     setActiveChapterId(chapterId);
     // 依赖不含 restoreSegmentId：它仅随 chapterId / segmentId 变化（二者已在依赖中），
     // 变化触发的新一轮渲染闭包中即取到最新值，无需纳入依赖
-  }, [chapterId, segmentId, listRef, rowOffsets, armScrollLocate]);
+    // jumpSeq：同章重复跳转（goToChapter 当前章）时参数其余字段不变，
+    // 携带递增序号让本 effect 重新执行 → 复位到章首（重复跳转生效）
+  }, [chapterId, segmentId, jumpSeq, listRef, rowOffsets, armScrollLocate]);
 
   // ---------- 选词 ----------
 

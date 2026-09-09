@@ -1,7 +1,9 @@
 /**
  * 书架页（LibraryScreen）
- * 顶部：App 标题 + 搜索入口按钮；中间：分类标签条（全部/经/史/子/集）；
- * 主体：书籍卡片 2 列网格。点击书籍进入阅读器（第一章）。
+ * 顶部：App 标题 + 导入/搜索/展示方式切换入口；中间：分类标签条
+ * （全部/最近/经/史/子/集…，「最近」按最近阅读时间倒序）；
+ * 主体：书籍网格（2 列）或列表（1 列）。点击书籍进入阅读器（续读）。
+ * 排序：用户导入书籍排在内置经典之前（自己的书优先可见）。
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -27,6 +29,21 @@ import { BUILTIN_CATALOG } from '@/data/builtinCatalog';
 
 type Props = NativeStackScreenProps<T04StackParamList, 'Library'>;
 
+/** 「最近」分类 key（伪分类：不对应 BookCategory，由阅读记录时间戳驱动） */
+const RECENT_CATEGORY_KEY = '__recent__';
+
+/** 「最近」分类最多展示的本数 */
+const RECENT_LIST_MAX = 30;
+
+/**
+ * 书架排序（纯函数）：用户导入书籍排在内置经典之前（两组内保持原有
+ * 顺序不变——内置书保持目录清单顺序、用户书保持注册顺序）。
+ */
+export function sortBooksUserFirst(books: Book[]): Book[] {
+  const isUserBook = (b: Book): boolean => b.id.startsWith('user-');
+  return [...books].sort((a, b) => Number(isUserBook(b)) - Number(isUserBook(a)));
+}
+
 export default function LibraryScreen({ navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const theme = useSettingsStore((s) => s.theme);
@@ -37,6 +54,8 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
   const loading = useLibraryStore((s) => s.loading);
   const error = useLibraryStore((s) => s.error);
   const loadBooks = useLibraryStore((s) => s.loadBooks);
+  const libraryLayout = useSettingsStore((s) => s.libraryLayout);
+  const setLibraryLayout = useSettingsStore((s) => s.setLibraryLayout);
 
   /** 当前选中分类 key（'' 表示全部） */
   const [activeCategory, setActiveCategory] = useState('');
@@ -49,19 +68,41 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
     loadBooks();
   }, [loadBooks]);
 
-  /** 「全部 + 分类」标签数据 */
-  const tabs = useMemo(
-    () => buildCategoryTabs(categories.map((c) => ({ key: c.key, label: c.label }))),
-    [categories],
-  );
+  /** 最近阅读时间戳（bookId -> epoch ms）：随阅读进展更新，「最近」tab 数据源 */
+  const recentBooks = useReaderStore((s) => s.recentBooks);
 
-  /** 按分类过滤 */
-  const filtered = useMemo(() => {
-    if (!activeCategory) {
-      return books;
+  /** 「全部 + 最近 + 分类」标签数据（最近紧跟全部之后） */
+  const tabs = useMemo(() => {
+    const base = buildCategoryTabs(categories.map((c) => ({ key: c.key, label: c.label })));
+    return [base[0], { key: RECENT_CATEGORY_KEY, label: '最近' }, ...base.slice(1)];
+  }, [categories]);
+
+  /** 「最近」列表：有阅读记录的书按最近阅读时间倒序（上限 30 本） */
+  const recentList = useMemo(() => {
+    const entries = Object.entries(recentBooks);
+    if (entries.length === 0) {
+      return [];
     }
-    return books.filter((b) => b.category === (activeCategory as BookCategory));
-  }, [books, activeCategory]);
+    const stamps = new Map(entries);
+    return books
+      .filter((b) => stamps.has(b.id))
+      .sort((a, b) => (stamps.get(b.id) ?? 0) - (stamps.get(a.id) ?? 0))
+      .slice(0, RECENT_LIST_MAX);
+  }, [books, recentBooks]);
+
+  /** 过滤 + 排序（全部/最近/分类；用户书始终优先） */
+  const filtered = useMemo(() => {
+    let list: Book[];
+    if (activeCategory === RECENT_CATEGORY_KEY) {
+      list = recentList;
+    } else {
+      const sorted = sortBooksUserFirst(books);
+      list = activeCategory
+        ? sorted.filter((b) => b.category === (activeCategory as BookCategory))
+        : sorted;
+    }
+    return list;
+  }, [books, activeCategory, recentList]);
 
   /** 打开书籍 → 阅读器（BugFix 进度续读：该书有持久化阅读位置时恢复到
    * 上次的章节与段落，无记录或记录越界回落第一章） */
@@ -200,6 +241,19 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
           >
             <Text style={[styles.searchBtnText, { color: colors.primary }]}>🔍 搜索</Text>
           </Pressable>
+          {/* 展示方式切换：网格（2 列）⇄ 列表（1 列），随 settings 持久化 */}
+          <Pressable
+            onPress={() =>
+              setLibraryLayout(libraryLayout === 'grid' ? 'list' : 'grid')
+            }
+            style={[styles.searchBtn, { backgroundColor: colors.primarySoft }]}
+            accessibilityRole="button"
+            accessibilityLabel={libraryLayout === 'grid' ? '切换为列表展示' : '切换为网格展示'}
+          >
+            <Text style={[styles.searchBtnText, { color: colors.primary }]}>
+              {libraryLayout === 'grid' ? '☰' : '⊞'}
+            </Text>
+          </Pressable>
         </View>
       </View>
 
@@ -210,12 +264,13 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
         onChange={setActiveCategory}
       />
 
-      {/* 书籍网格 */}
+      {/* 书籍网格/列表 */}
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
-        numColumns={2}
-        columnWrapperStyle={styles.gridRow}
+        numColumns={libraryLayout === 'grid' ? 2 : 1}
+        key={libraryLayout}
+        columnWrapperStyle={libraryLayout === 'grid' ? styles.gridRow : undefined}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
           <BookCard

@@ -126,9 +126,10 @@ describe('Bug 2：向前拼接的触发与补偿', () => {
   });
 
   test('目录导航确定性：显式跳章清除残留 segmentId 参数并落章首', () => {
-    // navigate 对既有路由浅合并参数，残留 segmentId 会让定位武装指向错误章的段落
+    // navigate 对既有路由浅合并参数：残留 segmentId 会让定位武装指向错误章的段落；
+    // jumpSeq 每次跳转刷新——同章重复跳转（参数其余字段不变）也能触发重置 effect 落回章首
     expect(source).toMatch(
-      /navigation\?\.navigate\('Reader', \{ bookId, chapterId: cid, segmentId: undefined \}\);/,
+      /navigation\?\.navigate\('Reader', \{\s*\n\s*bookId,\s*\n\s*chapterId: cid,\s*\n\s*segmentId: undefined,\s*\n\s*jumpSeq: Date\.now\(\),\s*\n\s*\}\);/,
     );
     expect(source).toMatch(/const explicitChapterJumpRef = useRef\(false\);/);
     expect(source).toMatch(
@@ -322,9 +323,9 @@ describe('Bug 3 边界：模式切换跨章跟随定位', () => {
     expect(source).toMatch(/armScrollLocate\(seg \?\? ''\);/);
   });
 
-  test('切章 effect 依赖含 armScrollLocate（不再直接写 pendingScroll）', () => {
+  test('切章 effect 依赖含 armScrollLocate 与 jumpSeq（不再直接写 pendingScroll；同章重跳可复位）', () => {
     expect(source).toMatch(
-      /\}, \[chapterId, segmentId, listRef, rowOffsets, armScrollLocate\]\);/,
+      /\}, \[chapterId, segmentId, jumpSeq, listRef, rowOffsets, armScrollLocate\]\);/,
     );
   });
 });

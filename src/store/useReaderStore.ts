@@ -30,7 +30,16 @@ interface ReaderPersist {
      */
     segmentId?: string;
   } | null;
+  /**
+   * 每本书最近一次打开/阅读的时间戳（bookId -> epoch ms）。
+   * 书架「最近」分类的数据源：按时间倒序展示最近读过的书。
+   * 上限 RECENT_BOOKS_MAX 本（超出淘汰最旧的），旧版本数据缺失视为无记录。
+   */
+  recentBooks: Record<string, number>;
 }
+
+/** 最近阅读记录上限：超出后淘汰最旧的记录（防止长期使用无限膨胀） */
+const RECENT_BOOKS_MAX = 100;
 
 interface ReaderState extends ReaderPersist {
   /** 当前书籍 ID */
@@ -76,6 +85,7 @@ export const useReaderStore = create<ReaderState>()(
   persist(
     (set, get) => ({
       lastRead: null,
+      recentBooks: {},
       bookId: null,
       chapterId: null,
       segmentId: null,
@@ -106,6 +116,25 @@ export const useReaderStore = create<ReaderState>()(
           lastRead: nextSegmentId
             ? { bookId, chapterId, segmentId: nextSegmentId }
             : { bookId, chapterId },
+          // 最近阅读记录：书架「最近」分类按此时间倒序。写入时同步裁剪，
+          // 防止长期使用无限膨胀（旧记录时间戳不变，按时间淘汰最旧的）
+          recentBooks: (() => {
+            const next: Record<string, number> = {
+              ...state.recentBooks,
+              [bookId]: Date.now(),
+            };
+            const ids = Object.keys(next);
+            if (ids.length <= RECENT_BOOKS_MAX) {
+              return next;
+            }
+            ids
+              .sort((a, b) => next[a] - next[b])
+              .slice(0, ids.length - RECENT_BOOKS_MAX)
+              .forEach((id) => {
+                delete next[id];
+              });
+            return next;
+          })(),
         });
       },
 
@@ -127,7 +156,15 @@ export const useReaderStore = create<ReaderState>()(
         if (state.segmentId === segmentId && nextLastRead === last) {
           return;
         }
-        set({ segmentId, lastRead: nextLastRead });
+        set({
+          segmentId,
+          lastRead: nextLastRead,
+          // 实际阅读进展也刷新最近记录（重开同一书同位置时 openChapter
+          // 幂等返回不写时间戳，由这里兜底刷新「最近」排序）
+          ...(state.bookId
+            ? { recentBooks: { ...state.recentBooks, [state.bookId]: Date.now() } }
+            : null),
+        });
       },
 
       annotateSegment: (segmentId, text) => {
@@ -168,7 +205,7 @@ export const useReaderStore = create<ReaderState>()(
     {
       name: 'guoxue-reader',
       storage: createJSONStorage(() => mmkvStorage),
-      partialize: (state) => ({ lastRead: state.lastRead }),
+      partialize: (state) => ({ lastRead: state.lastRead, recentBooks: state.recentBooks }),
     },
   ),
 );

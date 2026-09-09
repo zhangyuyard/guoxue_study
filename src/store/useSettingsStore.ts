@@ -154,6 +154,8 @@ interface SettingsState extends ReaderSettings {
   recitationHintGranularity: RecitationHintGranularity;
   /** 收藏列表分组视图开关（P2-09）：false=平铺（默认） / true=按首标签分组 */
   bookmarkGroupedView: boolean;
+  /** 书架展示方式：grid=2 列网格（默认）/ list=单列列表 */
+  libraryLayout: 'grid' | 'list';
   /** 背诵复习提醒设置（B4）：开关 + 提醒时刻 */
   reminderEnabled: boolean;
   reminderHour: number;
@@ -183,6 +185,8 @@ interface SettingsState extends ReaderSettings {
   setConversionMode: (mode: ConversionMode) => void;
   setRecitationHintGranularity: (granularity: RecitationHintGranularity) => void;
   setBookmarkGroupedView: (grouped: boolean) => void;
+  /** 切换书架展示方式（网格/列表） */
+  setLibraryLayout: (layout: 'grid' | 'list') => void;
   /** 更新朗读语速（P2-02，取值 0.5–2.0） */
   setSpeechRate: (rate: number) => void;
   /** 更新复习提醒设置（部分合并，B4） */
@@ -218,6 +222,7 @@ export const useSettingsStore = create<SettingsState>()(
       translation: { ...DEFAULT_TRANSLATION_SETTINGS },
       recitationHintGranularity: 'whole',
       bookmarkGroupedView: false,
+      libraryLayout: 'grid',
       speechRate: 1.0,
       ...DEFAULT_REMINDER_SETTINGS,
       // P1-09 每日目标：默认开启、默认 5 段（常量统一定义在 utils/dailyGoal）
@@ -249,6 +254,8 @@ export const useSettingsStore = create<SettingsState>()(
         set({ recitationHintGranularity }),
 
       setBookmarkGroupedView: (bookmarkGroupedView) => set({ bookmarkGroupedView }),
+
+      setLibraryLayout: (libraryLayout) => set({ libraryLayout }),
 
       setSpeechRate: (speechRate) => set({ speechRate }),
 
