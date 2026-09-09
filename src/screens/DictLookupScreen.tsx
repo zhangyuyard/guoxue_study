@@ -121,14 +121,15 @@ export default function DictLookupScreen({ route, navigation }: Props): React.JS
 
   /**
    * 打开字典管理页（管理入口按钮）。
-   * DictLookup 挂载于两处：
-   *   1. 「我的」Tab 的 ProfileStack —— 该 navigator 注册了 DictManage，直接 navigate；
-   *   2. RootStack 级（阅读器解析面板「在字典中查看」直达）—— RootStack 未注册
-   *      DictManage（它在兄弟分支 Main→Profile→ProfileStack 中），navigate 只向父级
-   *      冒泡、无法进入兄弟分支，直接 navigate 会被静默丢弃（按钮无响应的根因）。
-   *      此处经 Main Tab 容器做嵌套导航：切到「我的」Tab 并落到词典管理页。
+   * DictLookup 挂载于两处，DictManage 亦然（同构注册，路由检测自动适配）：
+   *   1. 「我的」Tab 的 ProfileStack —— 两个 navigator 均注册了 DictManage，
+   *      直接 navigate（返回回 ProfileStack 的查字页/我的页）；
+   *   2. RootStack 级（阅读器解析面板「在字典中查看」直达）—— RootStack 同样
+   *      注册了 DictManage，直接 navigate 压栈（返回逐级回退到查字页 → 阅读器）。
+   *      （历史实现兜底走 Main→Profile→ProfileStack→DictManage，DictManage 压进
+   *      「我的」Tab 的栈，返回落在设置页——「返回不回查字页」的根因，已废弃。）
    * 兼容性说明：路由检测基于当前 navigator 的 routeNames（结构无关），
-   * 嵌套路径与 RootNavigator 的挂载位置（ProfileStack 三屏）保持一致。
+   * 嵌套兜底分支保留为防御性代码（当前两个挂载点均已注册 DictManage，不会触达）。
    */
   const openDictManage = useCallback((): void => {
     const state = navigation.getState();

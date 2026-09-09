@@ -11,8 +11,9 @@
  *   - Reader 与 RecitationPractice 挂在 RootStack，供书架、搜索结果、收藏列表、
  *     阅读器工具栏等任意位置进入（navigate 未命中当前 Stack 时由 React Navigation 冒泡至父级）。
  *   - 字典功能不再占用底部 Tab，三屏（DictLookup / DictManage / DictImport）挂载于
- *     ProfileStack，入口统一收敛到「我的」页词典分组；DictLookup 同时保留在
- *     RootStack（阅读器解析面板「在字典中查看」直达，返回不丢阅读位置）。
+ *     ProfileStack，入口统一收敛到「我的」页词典分组；DictLookup 与 DictManage
+ *     同时保留在 RootStack（阅读器解析面板「在字典中查看」直达，返回不丢阅读
+ *     位置；RootStack 查字页可直达词典管理，返回逐级回退不绕道「我的」Tab）。
  *   - 各页面统一使用 AppStackParamList（应用级全路由表）声明 props，
  *     保证编译期 navigate 的路由名与参数和全局注册一致。
  */
@@ -48,6 +49,9 @@ export type RootStackParamList = {
   RecitationPractice: RecitationPracticeParams;
   /** 查字页（阅读器解析面板「在字典中查看」直达；任何位置可进入） */
   DictLookup: DictLookupParams;
+  /** 词典管理页（RootStack 级注册：RootStack 实例的查字页可直达，
+   * 返回逐级回到查字页/阅读器，不再绕道「我的」Tab） */
+  DictManage: undefined;
 };
 
 /** 查字页路由参数 */

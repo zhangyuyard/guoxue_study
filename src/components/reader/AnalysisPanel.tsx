@@ -548,7 +548,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   content: {
+    // flexGrow 0：短内容不拉伸（面板随内容自适应收缩）；
+    // flexShrink 1：内容超高、面板触到 maxHeight 时 ScrollView 压缩到剩余
+    // 空间并进入滚动（缺省 flexShrink 0 会按内容全高量取——溢出被裁剪且
+    // ScrollView 自认为无需滚动，「显示不全且拖不动」的根因）。
     flexGrow: 0,
+    flexShrink: 1,
   },
   contentInner: {
     padding: 16,

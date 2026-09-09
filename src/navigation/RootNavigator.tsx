@@ -5,8 +5,9 @@
  *   ├─ Reader：全局阅读器（书架 / 搜索结果 / 收藏列表等任意位置可进入）
  *   └─ RecitationPractice：背诵练习（背诵 Tab「背诵助手」选章进入；阅读器不再直达）
  * 字典功能不再占用底部 Tab：三屏（DictLookup / DictManage / DictImport）挂载于
- * ProfileStack，入口收敛到「我的」页词典分组；DictLookup 同时保留在 RootStack，
- * 供阅读器解析面板「在字典中查看」直达（返回不丢阅读位置）。
+ * ProfileStack，入口收敛到「我的」页词典分组；DictLookup 与 DictManage 同时保留在
+ * RootStack——供阅读器解析面板「在字典中查看」直达，且 RootStack 实例的查字页
+ * 可直达词典管理（返回逐级回退，不再绕道「我的」Tab 落在设置页）。
  * Tab 图标使用 emoji 兜底，避免 react-native-vector-icons 原生字体未链接时显示问号。
  */
 import React from 'react';
@@ -147,6 +148,7 @@ function RootNavigator(): React.JSX.Element {
         component={RecitationPracticeScreen}
       />
       <RootStack.Screen name="DictLookup" component={DictLookupScreen} />
+      <RootStack.Screen name="DictManage" component={DictManageScreen} />
     </RootStack.Navigator>
   );
 }
