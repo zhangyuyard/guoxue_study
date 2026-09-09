@@ -20,6 +20,7 @@
  */
 import DocumentPicker from 'react-native-document-picker';
 import RNFS from 'react-native-fs';
+import { InteractionManager } from 'react-native';
 import { open } from 'react-native-quick-sqlite';
 import type { Book, ServiceResult } from '@/types';
 import { getBuiltinSpec, BUILTIN_CATALOG, type BuiltinBookSpec } from '@/data/builtinCatalog';
@@ -54,6 +55,27 @@ const BUILTIN_DIR_NAME = 'builtin';
 
 /** 内置书 FTS 后台索引队列运行中标记（防并发装载重复排队） */
 let builtinFtsQueueRunning = false;
+/**
+ * FTS 队列「用户优先」门闩：在此之前的时间戳内队列不得开始解析新书。
+ * 用户点卡片触发 ensureBookLoaded 水合时置位（+30s，每次水合刷新），
+ * 解析完成后再续 10s 缓冲——用户水合后大概率继续翻页/点击，队列必须
+ * 彻底让路。队列只在书间检查点检查该标志（正在解析的一本书由分片
+ * 解析按章让出，tap 可在章间插队，无需中断整本）。
+ */
+let ftsQueuePausedUntil = 0;
+/** 水合期间门闩时长：覆盖一次大书解析 + 后续连续操作窗口 */
+const FTS_PAUSE_ON_HYDRATE_MS = 30_000;
+/** 水合完成后追加缓冲：避免队列在用户连续操作间隙立刻抢跑 */
+const FTS_PAUSE_AFTER_HYDRATE_MS = 10_000;
+/** 门闩轮询间隔：暂停期间每 250ms 查一次是否解禁 */
+const FTS_PAUSE_POLL_MS = 250;
+/**
+ * 队列书间让出下限（ms）。旧值 16ms 让出形同虚设——连续书解析之间
+ * JS 几乎不间断占用，tap 排队可达秒级。改为 200ms 与
+ * InteractionManager.runAfterInteractions 竞速：至少间隔 200ms，
+ * 且等当前交互/动画收尾。测试可注入短间隔（见 __setFtsQueueYieldForTests）。
+ */
+let ftsQueueYieldMs = 200;
 /** FTS 队列自动排队开关（测试环境关闭，避免挂起定时器拖慢/悬住 jest 进程） */
 let builtinFtsAutoSchedule = true;
 /** 内置书元数据是否已注册（每进程一次；目录/抑制变化由 setSuppressedBuiltins 增量生效） */
@@ -468,14 +490,58 @@ function registerBuiltinMetaOnce(): void {
   }
 }
 
-/** 单本内置书装载（builtin/ 文件解析 → APK assets 直读兜底），不含注册 */
+/** 让出 JS 线程一拍（setTimeout 0）：把已排队的 tap/触摸/渲染任务放行 */
+function yieldToJs(): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * 与交互收尾竞速的让出 promise；InteractionManager 不可用（测试桩/
+ * 异常环境）时返回 undefined——此时书间让出必须退化为纯 setTimeout
+ * 下限等待，绝不能拿「已 resolve 的 promise」参与竞速（那会让下限
+ * 失效，等于没让出）。
+ */
+function runAfterInteractionsSafe(): Promise<void> | undefined {
+  try {
+    // 经 unknown 双重断言：RN 类型里 runAfterInteractions 返回 thenable
+    //（无 catch/finally），与标准 Promise 结构不兼容，需放宽签名判断
+    const im = InteractionManager as unknown as
+      | { runAfterInteractions?: () => Promise<void> }
+      | undefined;
+    if (im && typeof im.runAfterInteractions === 'function') {
+      return im.runAfterInteractions();
+    }
+  } catch {
+    // 测试桩/异常环境下降级
+  }
+  return undefined;
+}
+
+/**
+ * FTS 队列书间让出：InteractionManager（等交互收尾）与 setTimeout
+ * （至少 ftsQueueYieldMs，默认 200ms）竞速——两者都满足前不开始下一本书
+ * 的解析。InteractionManager 不可用时只等 setTimeout 下限。
+ */
+function ftsInterBookYield(): Promise<void> {
+  const timerDone = new Promise<void>((resolve) => setTimeout(resolve, ftsQueueYieldMs));
+  const interactionDone = runAfterInteractionsSafe();
+  if (!interactionDone) {
+    return timerDone;
+  }
+  return Promise.race([interactionDone, timerDone]);
+}
+
+/** 单本内置书装载（builtin/ 文件解析 → APK assets 直读兜底），不含注册。
+ * chunked 默认 true：水合与 FTS 队列两条路径都走分片解析（大书装配
+ * 期间按章让出 JS，tap/动画可插队）。 */
 async function loadBuiltinBookBody(
   spec: BuiltinBookSpec,
+  chunked = true,
 ): Promise<ParsedFileBook | null> {
   const canonicalPath = `${getBuiltinDirPath()}/${spec.id}.txt`;
-  let parsed = await parseBookFile(canonicalPath, `${spec.id}.txt`, spec.id, spec);
+  let parsed = await parseBookFile(canonicalPath, `${spec.id}.txt`, spec.id, spec, chunked);
   if (!parsed) {
-    parsed = await parseBuiltinFromAssets(spec, canonicalPath);
+    parsed = await parseBuiltinFromAssets(spec, canonicalPath, chunked);
   }
   return parsed;
 }
@@ -509,6 +575,12 @@ export async function ensureBookLoaded(
   const spec = getBuiltinSpec(bookId)!;
   const task = (async (): Promise<ServiceResult<Book>> => {
     try {
+      // 用户优先门闩：水合前置位（+30s，每次水合刷新）。FTS 后台队列在
+      // 书间检查点见此标志即轮询等待，绝不与用户当前操作争抢 JS。
+      ftsQueuePausedUntil = Date.now() + FTS_PAUSE_ON_HYDRATE_MS;
+      // 让出一拍再开始解析：把已在事件队列里的 tap/触摸事件先放行，
+      // 避免「点了没反应、事件在水合同步解析结束后才生效」的假死体感。
+      await yieldToJs();
       const canonicalPath = `${getBuiltinDirPath()}/${spec.id}.txt`;
       // 指纹校验：落盘文件与资产大小不一致先覆盖补写（物化时机之外的自愈）
       if (typeof spec.sizeBytes === 'number' && spec.sizeBytes > 0) {
@@ -543,6 +615,12 @@ export async function ensureBookLoaded(
     } catch (e) {
       return { success: false, error: (e as Error).message };
     } finally {
+      // 解析收尾再续 10s 缓冲（无论成败）：水合刚完成的用户大概率
+      // 立刻翻页/点击，队列必须等这波连续操作结束再恢复后台索引。
+      ftsQueuePausedUntil = Math.max(
+        ftsQueuePausedUntil,
+        Date.now() + FTS_PAUSE_AFTER_HYDRATE_MS,
+      );
       ensureInFlight.delete(bookId);
     }
   })();
@@ -554,10 +632,19 @@ export async function ensureBookLoaded(
  * 内置书 FTS 后台索引队列（按需装载架构的搜索配套）。
  * 全文搜索主路径查 SQLite segments_fts，不再依赖内存全量注册——启动后
  * 空闲期逐书解析 → upsert 进 FTS → 立即丢弃书体（不经 TextLibraryService，
- * 内存峰值恒为单本）。串行 + 每书让出线程，绝不与用户操作争抢 JS。
- * 已入索引的书跳过（幂等增量）；单书失败吞错跳过，下轮启动重试。
+ * 内存峰值恒为单本）。已入索引的书跳过（幂等增量）；单书失败吞错跳过，
+ * 下轮启动重试。
+ *
+ * 用户优先策略（真机 BugFix：启动后点卡片响应缓慢）：
+ *  - 首次启动延迟默认 10s（原 3s），先让书架/水合链路彻底站稳；
+ *  - 每本书开始前检查「用户优先门闩」（ftsQueuePausedUntil）：用户
+ *    水合期间轮询等待（250ms 一次），门闩过期才继续下一本；
+ *  - 书间让出从 setTimeout(16) 升级为 InteractionManager 与 setTimeout(200)
+ *    竞速：至少 200ms 间隔且等当前交互/动画收尾，大幅降低连续占用；
+ *  - 单本解析走分片路径（loadBuiltinBookBody chunked）：书内按章让出，
+ *    用户 tap 可在章间插队，正解析一本书时无需中断也不会拖死交互。
  */
-export function scheduleBuiltinFtsIndexBuild(delayMs = 3000): void {
+export function scheduleBuiltinFtsIndexBuild(delayMs = 10000): void {
   if (builtinFtsQueueRunning) {
     return;
   }
@@ -570,6 +657,12 @@ export function scheduleBuiltinFtsIndexBuild(delayMs = 3000): void {
       if (hiddenBuiltins.has(spec.id)) {
         continue;
       }
+      // 用户优先门闩：书间检查点——水合进行中/缓冲期内轮询等待，
+      // 绝不开始新书解析（只在书间让路，不中断书内分片解析）。
+      while (Date.now() < ftsQueuePausedUntil) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise<void>((resolve) => setTimeout(resolve, FTS_PAUSE_POLL_MS));
+      }
       try {
         if (!StorageService.isBookIndexedInFts(spec.id)) {
           const parsed = await loadBuiltinBookBody(spec);
@@ -580,9 +673,9 @@ export function scheduleBuiltinFtsIndexBuild(delayMs = 3000): void {
       } catch {
         // 单书失败不阻断队列（下轮启动重试）
       }
-      // 每书让出线程：批量解析期间 UI 完全可交互
+      // 每书让出：至少 200ms 且等当前交互/动画收尾，批量解析期间 UI 可交互
       // eslint-disable-next-line no-await-in-loop
-      await new Promise<void>((resolve) => setTimeout(resolve, 16));
+      await ftsInterBookYield();
     }
   };
   run()
@@ -592,12 +685,21 @@ export function scheduleBuiltinFtsIndexBuild(delayMs = 3000): void {
     });
 }
 
+/** 仅测试：注入 FTS 队列书间让出间隔（ms，0 = 立即让出）。
+ * 用例注入短间隔避免真实 200ms×77 本拖慢测试；门闩/竞速语义不变。 */
+export function __setFtsQueueYieldForTests(ms: number): void {
+  ftsQueueYieldMs = ms;
+}
+
 /** 仅测试用：重置惰性装载模块级状态（注册标记跨用例残留会破坏冷启动场景）；
- * 同时关闭 FTS 队列自动排队（防 3s 挂起定时器悬住 jest 进程）。 */
+ * 同时关闭 FTS 队列自动排队（防 10s 挂起定时器悬住 jest 进程），
+ * 并清空「用户优先」门闩与书间让出注入（恢复默认 200ms）。 */
 export function __resetBuiltinLazyStateForTests(): void {
   builtinMetaRegistered = false;
   builtinFtsQueueRunning = false;
   builtinFtsAutoSchedule = false;
+  ftsQueuePausedUntil = 0;
+  ftsQueueYieldMs = 200;
   ensureInFlight.clear();
 }
 
@@ -899,36 +1001,32 @@ export function makeUserBookId(now = Date.now()): string {
   return `user-${now.toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
 
-/**
- * 将文本解析为 Book。
- * 章节规则：行首「第X章/回/节/卷/篇」独立行视为章节标题；
- * 英文行首 Chapter/Book/Part + 序号（阿拉伯/罗马数字/序数词）独立行同样切章；
- * opts.markers 启用时 @@CH@@标题 行同样切章（结构化格式统一标记），
- * 标记行无标题时补「第N章」（按标记行出现顺序计数）；
- * 标题前若有正文则归「开篇」；全篇无标题则整本一章，
- * 段落过多时按 SEGMENTS_PER_PART 切为「第N部分」。
- */
-export function parseTxtBook(
-  fileName: string,
-  text: string,
-  bookId = makeUserBookId(),
-  opts?: ParseTxtBookOptions,
-): Book {
-  const fallbackTitle =
-    fileName.replace(/\.(txt|md|markdown|html?|xhtml|fb2|epub)$/i, '').trim() || '未命名书籍';
-  const title = opts?.title?.trim() || fallbackTitle;
-  const author = opts?.author?.trim() || '佚名';
-  const normalized = text.replace(/\r\n?/g, '\n');
+/** 逐行扫描产出的章节草稿 */
+interface RawChapter {
+  title: string;
+  body: string[];
+}
 
-  // 1) 切出 [章节标题, 标题下正文] 序列
+/** 分片解析的让出粒度：每装配 30 章让出一次 JS 线程 */
+const PARSE_CHUNK_CHAPTERS = 30;
+
+/**
+ * 逐行扫描切出 [章节标题, 标题下正文] 序列与标题前正文（同步纯函数）。
+ * useMarkers 启用时 @@CH@@ 标记行同样切章（结构化格式统一标记），
+ * 标记行无标题时补「第N章」（按标记行出现顺序计数）。
+ * 同步版与分片版装配路径共用本函数，保证解析结果逐字节一致。
+ */
+function splitRawChapters(
+  normalized: string,
+  useMarkers: boolean,
+): { rawChapters: RawChapter[]; preface: string[] } {
   const lines = normalized.split('\n');
-  type RawChapter = { title: string; body: string[] };
   const rawChapters: RawChapter[] = [];
   let current: RawChapter | null = null;
   const preface: string[] = [];
   let markerCount = 0;
   for (const line of lines) {
-    const marker = opts?.markers ? CHAPTER_MARKER_LINE_RE.exec(line) : null;
+    const marker = useMarkers ? CHAPTER_MARKER_LINE_RE.exec(line) : null;
     if (marker) {
       if (current) {
         rawChapters.push(current);
@@ -952,10 +1050,19 @@ export function parseTxtBook(
   if (current) {
     rawChapters.push(current);
   }
+  return { rawChapters, preface };
+}
 
+/**
+ * 章节装配器：pushChapter 抽为共享闭包，同步版（parseTxtBook）与
+ * 分片版（parseTxtBookChunked）走完全相同的逐章装配逻辑。
+ */
+function createChapterBuilder(bookId: string): {
+  chapters: Book['chapters'];
+  pushChapter: (chapterTitle: string, bodyLines: string[]) => void;
+} {
   const chapters: Book['chapters'][number][] = [];
   let chapterOrder = 0;
-
   const pushChapter = (chapterTitle: string, bodyLines: string[]): void => {
     if (chapters.length >= MAX_CHAPTERS) {
       return;
@@ -980,7 +1087,53 @@ export function parseTxtBook(
       segments,
     });
   };
+  return { chapters, pushChapter };
+}
 
+/**
+ * 解析收尾：书名/作者/描述元数据组装（同步与分片路径共用）。
+ * 章节规则沿用原实现：无章节标记整本一章「全文」或切「第N部分」；
+ * 有标记时标题前正文归「开篇」。
+ */
+function finishParsedBook(
+  fileName: string,
+  bookId: string,
+  chapters: Book['chapters'],
+  opts?: ParseTxtBookOptions,
+): Book {
+  const fallbackTitle =
+    fileName.replace(/\.(txt|md|markdown|html?|xhtml|fb2|epub)$/i, '').trim() || '未命名书籍';
+  const title = opts?.title?.trim() || fallbackTitle;
+  const author = opts?.author?.trim() || '佚名';
+  const totalSegments = chapters.reduce((n, c) => n + c.segments.length, 0);
+  return {
+    id: bookId,
+    title,
+    author,
+    category: 'user',
+    description: `共 ${chapters.length} 章 ${totalSegments} 段 · 导入自 ${opts?.sourceLabel ?? 'TXT'}`,
+    chapters,
+  };
+}
+
+/**
+ * 将文本解析为 Book（同步版，用户书导入等场景使用，签名不变）。
+ * 章节规则：行首「第X章/回/节/卷/篇」独立行视为章节标题；
+ * 英文行首 Chapter/Book/Part + 序号（阿拉伯/罗马数字/序数词）独立行同样切章；
+ * opts.markers 启用时 @@CH@@标题 行同样切章（结构化格式统一标记），
+ * 标记行无标题时补「第N章」（按标记行出现顺序计数）；
+ * 标题前若有正文则归「开篇」；全篇无标题则整本一章，
+ * 段落过多时按 SEGMENTS_PER_PART 切为「第N部分」。
+ */
+export function parseTxtBook(
+  fileName: string,
+  text: string,
+  bookId = makeUserBookId(),
+  opts?: ParseTxtBookOptions,
+): Book {
+  const normalized = text.replace(/\r\n?/g, '\n');
+  const { rawChapters, preface } = splitRawChapters(normalized, opts?.markers ?? false);
+  const { chapters, pushChapter } = createChapterBuilder(bookId);
   const prefaceParagraphs = toParagraphs(preface.join('\n'));
 
   if (rawChapters.length === 0) {
@@ -1005,15 +1158,64 @@ export function parseTxtBook(
     }
   }
 
-  const totalSegments = chapters.reduce((n, c) => n + c.segments.length, 0);
-  return {
-    id: bookId,
-    title,
-    author,
-    category: 'user',
-    description: `共 ${chapters.length} 章 ${totalSegments} 段 · 导入自 ${opts?.sourceLabel ?? 'TXT'}`,
-    chapters,
-  };
+  return finishParsedBook(fileName, bookId, chapters, opts);
+}
+
+/**
+ * parseTxtBook 的分片版：切章扫描与逐章装配逻辑与同步版完全共用
+ * （splitRawChapters / createChapterBuilder），解析结果逐字节一致；
+ * 唯一差异是每装配 PARSE_CHUNK_CHAPTERS（30）章让出一次 JS 线程。
+ * 为什么：资治通鉴 9.2MB 的整本同步装配会阻塞 JS 数百 ms~秒级——
+ * 内置书水合与 FTS 后台队列均走本函数后，用户 tap/触摸可在章间
+ * 插队，loading 圈不再冻结。仅内置书链路使用；用户书导入仍走
+ * 同步版 parseTxtBook（签名与行为均不变）。
+ */
+export async function parseTxtBookChunked(
+  fileName: string,
+  text: string,
+  bookId: string,
+  opts?: ParseTxtBookOptions,
+): Promise<Book> {
+  const normalized = text.replace(/\r\n?/g, '\n');
+  const { rawChapters, preface } = splitRawChapters(normalized, opts?.markers ?? false);
+  const { chapters, pushChapter } = createChapterBuilder(bookId);
+  const prefaceParagraphs = toParagraphs(preface.join('\n'));
+
+  if (rawChapters.length === 0) {
+    if (prefaceParagraphs.length <= SEGMENTS_PER_PART) {
+      pushChapter('全文', preface);
+    } else {
+      let partsDone = 0;
+      for (let i = 0; i < prefaceParagraphs.length; i += SEGMENTS_PER_PART) {
+        const part = prefaceParagraphs.slice(i, i + SEGMENTS_PER_PART);
+        pushChapter(`第${Math.floor(i / SEGMENTS_PER_PART) + 1}部分`, [
+          part.join('\n\n'),
+        ]);
+        partsDone += 1;
+        // 分片让出：部分切分场景同样按批量让出，保持线程可插队
+        if (partsDone % PARSE_CHUNK_CHAPTERS === 0) {
+          // eslint-disable-next-line no-await-in-loop
+          await yieldToJs();
+        }
+      }
+    }
+  } else {
+    if (prefaceParagraphs.length > 0) {
+      pushChapter('开篇', preface);
+    }
+    let chaptersDone = 0;
+    for (const rc of rawChapters) {
+      pushChapter(rc.title, rc.body);
+      chaptersDone += 1;
+      // 分片让出：每 30 章放行一次已排队的 tap/触摸/渲染任务
+      if (chaptersDone % PARSE_CHUNK_CHAPTERS === 0) {
+        // eslint-disable-next-line no-await-in-loop
+        await yieldToJs();
+      }
+    }
+  }
+
+  return finishParsedBook(fileName, bookId, chapters, opts);
 }
 
 // ============ 持久化与注册 ============
@@ -1042,6 +1244,7 @@ async function parseBookFile(
   fileName: string,
   bookId: string,
   spec?: BuiltinBookSpec,
+  chunked = false,
 ): Promise<ParsedFileBook | null> {
   try {
     const stat = await RNFS.stat(sourcePath);
@@ -1064,10 +1267,15 @@ async function parseBookFile(
     } else {
       text = decodeTextBytes(bytesRes.data).text;
     }
-    const book = parseTxtBook(fileName, text, bookId, {
+    const parseOpts = {
       markers: isStructuredFormat(ext) || !!spec,
       sourceLabel: spec ? '内置' : ext.toUpperCase(),
-    });
+    };
+    // chunked：内置书水合/FTS 队列传 true，大书装配期间按章让出 JS；
+    // 用户书导入等其余链路默认 false 走原同步路径（解析结果一致）。
+    const book = chunked
+      ? await parseTxtBookChunked(fileName, text, bookId, parseOpts)
+      : parseTxtBook(fileName, text, bookId, parseOpts);
     if (book.chapters.length === 0) {
       return null;
     }
@@ -1092,13 +1300,19 @@ async function parseBookFile(
 async function parseBuiltinFromAssets(
   spec: BuiltinBookSpec,
   canonicalPath: string,
+  chunked = false,
 ): Promise<ParsedFileBook | null> {
   try {
     const text = await RNFS.readFileAssets(`books/${spec.id}.txt`, 'utf8');
-    const book = parseTxtBook(`${spec.id}.txt`, text, spec.id, {
-      markers: true,
-      sourceLabel: '内置',
-    });
+    const book = chunked
+      ? await parseTxtBookChunked(`${spec.id}.txt`, text, spec.id, {
+          markers: true,
+          sourceLabel: '内置',
+        })
+      : parseTxtBook(`${spec.id}.txt`, text, spec.id, {
+          markers: true,
+          sourceLabel: '内置',
+        });
     if (book.chapters.length === 0) {
       return null;
     }

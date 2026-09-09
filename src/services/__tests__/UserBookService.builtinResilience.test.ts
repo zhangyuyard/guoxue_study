@@ -195,10 +195,11 @@ import {
   UserBookService,
   getLibrarySyncDiagnostics,
   __resetBuiltinLazyStateForTests,
+  __setFtsQueueYieldForTests,
 } from '@/services/UserBookService';
 import { TextLibraryService } from '@/services/TextLibraryService';
 import { StorageService } from '@/services/StorageService';
-import { getBuiltinSpec } from '@/data/builtinCatalog';
+import { BUILTIN_CATALOG, getBuiltinSpec } from '@/data/builtinCatalog';
 
 /** 取受控文本库的记录状态（mock 注入，真实类型上不存在） */
 interface MockLibState {
@@ -272,6 +273,9 @@ describe('UserBookService 内置书按需装载（性能架构回归）', () => 
     __rnfsState.readReplies = {};
     __rnfsState.sizes = {};
     __resetBuiltinLazyStateForTests();
+    // 队列书间让出注入 0ms：默认 200ms×77 本会把既有队列用例拖到 15s+；
+    // 注入只改节奏，门闩/竞速/逐书语义不变（默认值与注入生效由下方专用用例验证）
+    __setFtsQueueYieldForTests(0);
     libState().builtinCalls = [];
     libState().builtinLast = [];
     libState().hydratedLast = null;
@@ -289,6 +293,8 @@ describe('UserBookService 内置书按需装载（性能架构回归）', () => 
   });
 
   afterEach(() => {
+    // 门闩用例启用 fake timers，此处兜底恢复，防断言失败污染后续用例
+    jest.useRealTimers();
     isIndexedSpy.mockRestore();
     upsertSpy.mockRestore();
   });
@@ -405,7 +411,7 @@ describe('UserBookService 内置书按需装载（性能架构回归）', () => 
     ftsIndexed.add('daodejing');
 
     UserBookService.scheduleBuiltinFtsIndexBuild(0);
-    // 队列串行逐书 setTimeout(16ms) 让出，轮询等待跑完（上限 5s 防挂死）
+    // 队列串行逐书让出（beforeEach 已注入 0ms），轮询等待跑完（上限 5s 防挂死）
     for (let i = 0; i < 250 && upsertSpy.mock.calls.length < 75; i += 1) {
       // eslint-disable-next-line no-await-in-loop
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
@@ -415,5 +421,67 @@ describe('UserBookService 内置书按需装载（性能架构回归）', () => 
     expect(upsertSpy).toHaveBeenCalledTimes(75);
     expect(libState().builtinCalls).toEqual([]);
     expect(libState().hydratedIds).toEqual([]);
+  });
+
+  test('用户优先门闩：水合期间 FTS 队列暂停（书间检查点等待），越过门闩后恢复索引', async () => {
+    jest.useFakeTimers();
+    __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = [];
+    __rnfsState.readReply = Buffer.from(SAMPLE_BODY, 'utf8').toString('base64');
+
+    // 用户先点卡片：ensureBookLoaded 任务体同步置位门闩（Date.now()+30s）
+    const hydrate = UserBookService.ensureBookLoaded(BUILTIN_ROW_ID);
+    // fake timers 下放行 yieldToJs 的 setTimeout(0) 与 RNFS mock 的微任务链
+    await jest.advanceTimersByTimeAsync(0);
+    await hydrate;
+    expect(libState().hydratedIds).toContain(BUILTIN_ROW_ID);
+
+    // loadAndRegisterAll 的自动排队被重置钩子关闭（防 10s 挂起定时器），
+    // 这里显式 0 延迟排队（与既有 FTS 队列用例同口径）
+    UserBookService.scheduleBuiltinFtsIndexBuild(0);
+
+    // 推进 15s：队列已进入首本书的书间检查点，
+    // 但门闩（t≈0s 置位的 +30s）未过期 → 零解析零 upsert
+    await jest.advanceTimersByTimeAsync(15_000);
+    expect(upsertSpy).not.toHaveBeenCalled();
+
+    // 再推进 30s（t=45s > 门闩过期点 30s）：检查点轮询解禁，队列恢复逐书索引
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(upsertSpy).toHaveBeenCalledTimes(77);
+    expect(libState().hydratedIds).toEqual([BUILTIN_ROW_ID]);
+  });
+
+  test('队列书间让出注入生效：__setFtsQueueYieldForTests(50) 后书间隔 ≥50ms', async () => {
+    // 覆写 beforeEach 注入的 0ms：若注入不生效，书间隔≈0 会让断言失败
+    __setFtsQueueYieldForTests(50);
+    __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = [];
+    __rnfsState.readReply = Buffer.from(SAMPLE_BODY, 'utf8').toString('base64');
+
+    // 只留两本未入索引，测量一次真实的书间让出间隔
+    for (const spec of BUILTIN_CATALOG) {
+      if (spec.id !== 'lunyu' && spec.id !== 'daodejing') {
+        ftsIndexed.add(spec.id);
+      }
+    }
+    const upsertStamps: number[] = [];
+    upsertSpy.mockImplementation((book: { id: string }) => {
+      upsertStamps.push(Date.now());
+      ftsIndexed.add(book.id);
+      return { success: true, data: true };
+    });
+
+    UserBookService.scheduleBuiltinFtsIndexBuild(0);
+    for (let i = 0; i < 100 && upsertStamps.length < 2; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    }
+    expect(upsertStamps).toHaveLength(2);
+    // 两本书之间必须隔 ≥50ms（注入的下限；setTimeout 竞速只会更晚不更早）
+    expect(upsertStamps[1] - upsertStamps[0]).toBeGreaterThanOrEqual(45);
+
+    // 排空残余队列：剩余 75 本虽被 ftsIndexed 跳过解析，但仍逐书让出
+    //（50ms×75 真实定时器会拖住 jest worker 触发 force-exit 警告）——
+    // 注入回 0ms 让队列立刻跑完
+    __setFtsQueueYieldForTests(0);
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
   });
 });
