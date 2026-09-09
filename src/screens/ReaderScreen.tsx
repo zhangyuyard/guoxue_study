@@ -33,6 +33,7 @@ import {
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  LayoutChangeEvent,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -987,9 +988,13 @@ function PageModeView({
             showsVerticalScrollIndicator={false}
           >
             <View style={[styles.pageInner, { width: pageWidth }]}>
-              <Text style={[styles.chapterTitle, { color: colors.text }]}>
-                {chapterTitle}
-              </Text>
+              <ChapterTitleText
+                title={chapterTitle}
+                pinyinMode={pinyinMode}
+                conversionMode={displayMode}
+                workId={workId}
+                bookId={bookId}
+              />
             </View>
           </ScrollView>
         );
@@ -1007,9 +1012,14 @@ function PageModeView({
           <View style={[styles.pageInner, { width: pageWidth }]}>
             {page.blocks.map((b) =>
               b.id === TITLE_BLOCK_ID ? (
-                <Text key={b.id} style={[styles.chapterTitle, { color: colors.text }]}>
-                  {chapterTitle}
-                </Text>
+                <ChapterTitleText
+                  key={b.id}
+                  title={chapterTitle}
+                  pinyinMode={pinyinMode}
+                  conversionMode={displayMode}
+                  workId={workId}
+                  bookId={bookId}
+                />
               ) : (
                 <SegmentBlockItem
                   key={b.id}
@@ -1068,15 +1078,17 @@ function PageModeView({
               sizer 必须在同一宽度下量高，否则量得高度与实际排版不一致，
               分页结果与可视区域错位（页面内容填不满/溢出的根因之一） */}
           <View style={[styles.pageInner, { width: pageWidth }]}>
-            <Text
+            <ChapterTitleText
+              title={chapterTitle}
+              pinyinMode={pinyinMode}
+              conversionMode={displayMode}
+              workId={workId}
+              bookId={bookId}
               onLayout={(e) => {
                 setTitleHeight(e.nativeEvent.layout.height);
                 setTitleMeasured(true);
               }}
-              style={[styles.chapterTitle, { color: colors.text }]}
-            >
-              {chapterTitle}
-            </Text>
+            />
             {/* 【9】分批挂载：仅渲染前 sizerLimit 段参与量高（见 sizerLimit 注释） */}
             {segments.slice(0, sizerLimit).map((seg) => {
               const plan = splitPlan[seg.id];
@@ -1155,10 +1167,58 @@ function PageModeView({
         <View style={styles.pageLoading}>
           {/* 【9】loading 局部化：显示章节名 + 轻量 spinner（不再是一整张无信息的
               空白 loading 页）；量高已分批执行不阻塞 JS，期间顶部/底部功能区可用 */}
-          <Text style={[styles.chapterTitle, { color: colors.text }]}>{chapterTitle}</Text>
+          <ChapterTitleText
+            title={chapterTitle}
+            pinyinMode={pinyinMode}
+            conversionMode={displayMode}
+            workId={workId}
+            bookId={bookId}
+          />
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
       )}
+    </View>
+  );
+}
+
+// ============ 章节标题（注音版） ============
+
+/**
+ * 章节标题统一渲染（滚动模式标题行 / 翻页模式标题块、sizer、loading 占位共用）。
+ * 注音关闭时 PinyinText 自动降级为纯文本（样式经 baseTextStyle 与旧纯 Text
+ * 保持一致：加粗 + 居中）；开启时逐字注音。注音开启会使标题高度增加
+ * （字格变上下双行结构），翻页模式 sizer 用同一组件量高 → 分页自动适配，
+ * 无需额外估算；滚动模式标题行走 handleRowLayout 实测，天然自适应。
+ */
+function ChapterTitleText({
+  title,
+  pinyinMode,
+  conversionMode,
+  workId,
+  bookId,
+  onLayout,
+}: {
+  title: string;
+  pinyinMode: PinyinMode;
+  conversionMode?: 'simplified' | 'traditional';
+  workId?: string;
+  bookId?: string;
+  /** 透传外层 View 的布局事件：翻页 sizer 取 height（量高分页），
+   *  滚动模式标题行取 y（rowOffsets 行偏移登记） */
+  onLayout?: (e: LayoutChangeEvent) => void;
+}): React.JSX.Element {
+  return (
+    <View style={styles.chapterTitleWrap} onLayout={onLayout}>
+      <PinyinText
+        text={title}
+        fontSize={PAGE_TITLE_FONT_SIZE}
+        lineHeight={1.3}
+        pinyinMode={pinyinMode}
+        conversionMode={conversionMode}
+        workId={workId}
+        bookId={bookId}
+        baseTextStyle={styles.chapterTitleText}
+      />
     </View>
   );
 }
@@ -3402,9 +3462,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         );
       }
       return (
-        <View onLayout={(e) => handleRowLayout(item.id, e.nativeEvent.layout.y)}>
-          <Text style={[styles.chapterTitle, { color: colors.text }]}>{item.title}</Text>
-        </View>
+        <ChapterTitleText
+          title={item.title ?? ''}
+          pinyinMode={pinyinMode}
+          conversionMode={conversionMode}
+          workId={item.chapterId}
+          bookId={bookId ?? undefined}
+          onLayout={(e) => handleRowLayout(item.id, e.nativeEvent.layout.y)}
+        />
       );
     },
     [
@@ -4357,11 +4422,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chapterTitle: {
-    fontSize: PAGE_TITLE_FONT_SIZE,
+  // 章节标题（注音版）：容器负责间距与水平居中；文字样式经 PinyinText 的
+  // baseTextStyle 注入（注音字格/非汉字 run/降级纯文本三路统一生效）
+  chapterTitleWrap: {
+    marginBottom: 24,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+  },
+  chapterTitleText: {
     fontWeight: '600',
     textAlign: 'center',
-    marginBottom: 24,
   },
   segment: {
     marginBottom: PARAGRAPH_SPACING,

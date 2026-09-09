@@ -59,8 +59,9 @@ let builtinFtsQueueRunning = false;
  * FTS 队列「用户优先」门闩：在此之前的时间戳内队列不得开始解析新书。
  * 用户点卡片触发 ensureBookLoaded 水合时置位（+30s，每次水合刷新），
  * 解析完成后再续 10s 缓冲——用户水合后大概率继续翻页/点击，队列必须
- * 彻底让路。队列只在书间检查点检查该标志（正在解析的一本书由分片
- * 解析按章让出，tap 可在章间插队，无需中断整本）。
+ * 彻底让路。队列在书间检查点检查该标志；分片索引写入（chunked upsert）
+ * 也在片间检查（水合/交互时挂起，解除后断点续写）；书内分片解析按章
+ * 让出，tap 可在章间插队，无需中断整本。
  */
 let ftsQueuePausedUntil = 0;
 /** 水合期间门闩时长：覆盖一次大书解析 + 后续连续操作窗口 */
@@ -76,6 +77,12 @@ const FTS_PAUSE_POLL_MS = 250;
  * 且等当前交互/动画收尾。测试可注入短间隔（见 __setFtsQueueYieldForTests）。
  */
 let ftsQueueYieldMs = 200;
+/**
+ * 分片索引写入进行中的书（bookId 集合）：填充完成顺带入索引（fire-and-forget）
+ * 与 FTS 队列并发时互斥去重——INSERT OR REPLACE 虽幂等，但数百万字的书
+ * 重复整本写入纯属浪费。队列书间检查点跳过在写的书，下轮启动兜底。
+ */
+const ftsUpsertInFlight = new Set<string>();
 /** FTS 队列自动排队开关（测试环境关闭，避免挂起定时器拖慢/悬住 jest 进程） */
 let builtinFtsAutoSchedule = true;
 /** 内置书元数据是否已注册（每进程一次；目录/抑制变化由 setSuppressedBuiltins 增量生效） */
@@ -921,15 +928,19 @@ async function fillRemainingBuiltinChapters(
         });
       }
     }
-    // 填充完成：书体已在内存，若尚未入 FTS 索引则顺带补齐（省重复解析）
-    if (!StorageService.isBookIndexedInFts(spec.id)) {
-      try {
-        StorageService.upsertFtsForBook(
-          assembleBuiltinBook(spec, shells.map((s) => s.chapter)),
-        );
-      } catch {
-        // 索引失败由下轮启动的 FTS 队列兜底
-      }
+    // 填充完成：书体已在内存，若尚未入 FTS 索引则顺带补齐（省重复解析）。
+    // 分片异步写入：同步版对资治通鉴级（约 300 万字）的书单块执行会把
+    // JS 线程占死数秒至数十秒（初次打开 app 全 UI 无响应的根因之一），
+    // 且此刻用户刚打开本书正准备阅读，绝不能阻塞。
+    if (!StorageService.isBookIndexedInFts(spec.id) && !ftsUpsertInFlight.has(spec.id)) {
+      ftsUpsertInFlight.add(spec.id);
+      void StorageService.upsertFtsForBookChunked(
+        assembleBuiltinBook(spec, shells.map((s) => s.chapter)),
+        { shouldPause: () => Date.now() < ftsQueuePausedUntil },
+      ).then(
+        () => ftsUpsertInFlight.delete(spec.id),
+        () => ftsUpsertInFlight.delete(spec.id),
+      );
     }
   } catch {
     // 填充整体异常：静默中止（空壳章保留，重进重水合）
@@ -982,11 +993,25 @@ export function scheduleBuiltinFtsIndexBuild(delayMs = 10000): void {
       if (builtinFillInFlight.has(spec.id)) {
         continue;
       }
+      // 分片索引写入进行中的书跳过（填充顺带入索引与队列的并发去重）
+      if (ftsUpsertInFlight.has(spec.id)) {
+        continue;
+      }
       try {
         if (!StorageService.isBookIndexedInFts(spec.id)) {
           const parsed = await loadBuiltinBookBody(spec);
           if (parsed) {
-            StorageService.upsertFtsForBook(parsed.book);
+            // 分片异步写入：片间让出 + 用户优先门闩片间生效（水合/交互
+            // 时挂起，解除后断点续写）。同步版单块执行资治通鉴级会把
+            // JS 线程占死数秒至数十秒（初次启动全 UI 无响应的根因）。
+            ftsUpsertInFlight.add(spec.id);
+            try {
+              await StorageService.upsertFtsForBookChunked(parsed.book, {
+                shouldPause: () => Date.now() < ftsQueuePausedUntil,
+              });
+            } finally {
+              ftsUpsertInFlight.delete(spec.id);
+            }
           }
         }
       } catch {
@@ -1019,6 +1044,7 @@ export function __resetBuiltinLazyStateForTests(): void {
   builtinFtsAutoSchedule = false;
   ftsQueuePausedUntil = 0;
   ftsQueueYieldMs = 200;
+  ftsUpsertInFlight.clear();
   builtinFillInFlight.clear();
   builtinFillListeners.clear();
   ensureInFlight.clear();

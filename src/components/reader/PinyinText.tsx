@@ -525,6 +525,13 @@ export interface PinyinTextProps {
    * 跨界的非汉字 run 会在边界处文本级切开，两块各渲染属于自己的部分。
    */
   charRange?: [number, number];
+  /**
+   * 基础文字样式覆盖（章节标题等非正文场景）：合并进注音汉字格 /
+   * 非汉字 run 的文字样式与「off 降级纯文本」样式（后合并、优先级高于
+   * 组件默认，可覆盖 fontWeight / textAlign 等）。仅接受普通样式对象
+   * （StyleSheet 注册结果或内联对象）；引用需稳定以免破坏 memo。
+   */
+  baseTextStyle?: TextStyle;
 }
 
 function PinyinTextBase({
@@ -542,6 +549,7 @@ function PinyinTextBase({
   workId,
   bookId,
   charRange,
+  baseTextStyle,
 }: PinyinTextProps): React.JSX.Element {
   const theme = useSettingsStore((s) => s.theme);
   const storeConversionMode = useSettingsStore((s) => s.conversionMode);
@@ -642,16 +650,6 @@ function PinyinTextBase({
         textAlign: 'center',
         includeFontPadding: false,
       },
-      char: {
-        fontSize,
-        lineHeight: charLineHeight,
-        color: colors.text,
-        textAlign: 'center',
-        includeFontPadding: false,
-      },
-      rareChar: {
-        textDecorationLine: 'underline',
-      },
       run: {
         paddingTop: pinyinLineHeight + PINYIN_LINE_GAP,
         paddingBottom: rowGap,
@@ -660,6 +658,18 @@ function PinyinTextBase({
         lineHeight: charLineHeight,
         color: colors.text,
         includeFontPadding: false,
+        ...baseTextStyle,
+      },
+      char: {
+        fontSize,
+        lineHeight: charLineHeight,
+        color: colors.text,
+        textAlign: 'center',
+        includeFontPadding: false,
+        ...baseTextStyle,
+      },
+      rareChar: {
+        textDecorationLine: 'underline',
       },
       // 通假字「通」标识：悬浮于拼音行上方的独立圆形描边小标，水平居中于汉字正上方
       // top=-(markSize)：底部紧贴拼音行顶部（仍在拼音上方，但尽量压低以减少与上一行的重叠）
@@ -689,7 +699,7 @@ function PinyinTextBase({
         includeFontPadding: true,
       },
     };
-  }, [fontSize, lineHeight, pinyinSize, pinyinMode, colors]);
+  }, [fontSize, lineHeight, pinyinSize, pinyinMode, colors, baseTextStyle]);
 
   // 浮窗状态（置于主组件层，弹窗开闭不触发 buildCells/styles 重建）
   const [polyphonePopup, setPolyphonePopup] = useState<PolyphonePopupData | null>(null);
@@ -943,6 +953,7 @@ function PinyinTextBase({
             lineHeight: getLineHeightPx(fontSize, lineHeight),
             color: colors.text,
           },
+          baseTextStyle,
         ]}
       >
         {plainText}

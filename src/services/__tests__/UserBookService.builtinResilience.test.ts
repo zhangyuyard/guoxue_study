@@ -284,11 +284,12 @@ describe('UserBookService 内置书按需装载（性能架构回归）', () => 
     isIndexedSpy = jest
       .spyOn(StorageService, 'isBookIndexedInFts')
       .mockImplementation((id: string) => ftsIndexed.has(id));
+    // 生产代码走分片异步索引（同步版仅导入路径使用）：spy 分片版
     upsertSpy = jest
-      .spyOn(StorageService, 'upsertFtsForBook')
+      .spyOn(StorageService, 'upsertFtsForBookChunked')
       .mockImplementation((book: { id: string }) => {
         ftsIndexed.add(book.id);
-        return { success: true, data: true };
+        return Promise.resolve({ success: true, data: true });
       });
   });
 
@@ -466,7 +467,7 @@ describe('UserBookService 内置书按需装载（性能架构回归）', () => 
     upsertSpy.mockImplementation((book: { id: string }) => {
       upsertStamps.push(Date.now());
       ftsIndexed.add(book.id);
-      return { success: true, data: true };
+      return Promise.resolve({ success: true, data: true });
     });
 
     UserBookService.scheduleBuiltinFtsIndexBuild(0);
@@ -523,6 +524,8 @@ describe('UserBookService 内置书按需装载（性能架构回归）', () => 
     expect(fillTicks).toContain(BUILTIN_ROW_ID);
     expect(upsertSpy).toHaveBeenCalledWith(
       expect.objectContaining({ id: BUILTIN_ROW_ID }),
+      // 分片版第二参数：用户优先门闩片间生效
+      expect.objectContaining({ shouldPause: expect.any(Function) }),
     );
     off();
   });

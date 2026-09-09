@@ -143,6 +143,7 @@ import {
   initDatabase,
   ensureFtsIndex,
   upsertFtsForBook,
+  upsertFtsForBookChunked,
   deleteFtsForBook,
   buildFtsRows,
 } from '@/services/StorageService';
@@ -337,5 +338,61 @@ describe('upsertFtsForBook / deleteFtsForBook', () => {
     expect(typeof StorageService.deleteFtsForBook).toBe('function');
     expect(typeof StorageService.buildFtsRows).toBe('function');
     expect(typeof StorageService.ensureFtsIndex).toBe('function');
+  });
+});
+
+describe('upsertFtsForBookChunked（分片异步索引：初次启动 UI 无响应 BugFix）', () => {
+  beforeEach(() => {
+    __ftsState.ftsRows = [];
+    __ftsState.insertCalls = 0;
+    initDatabase();
+  });
+
+  test('写入结果与同步版一致（全部段落入索引，字段映射相同）', async () => {
+    const book = makeBook('chunky-a', '分片甲书', [
+      { id: 'chunky-a-c1', title: '第一章', segs: ['甲一分片'] },
+      { id: 'chunky-a-c2', title: '第二章', segs: ['甲二分片', '甲三生辉'] },
+    ]);
+    const res = await upsertFtsForBookChunked(book, { chunkChapters: 1 });
+    expect(res.success).toBe(true);
+    const rows = __ftsState.ftsRows.filter((r: { book_id: unknown }) => r.book_id === 'chunky-a');
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r: { segment_id: unknown }) => r.segment_id)).toEqual([
+      'chunky-a-c1-s1',
+      'chunky-a-c2-s1',
+      'chunky-a-c2-s2',
+    ]);
+  });
+
+  test('重复调用幂等（INSERT OR REPLACE 不产生重复行）', async () => {
+    const book = makeBook('chunky-b', '分片乙书', [
+      { id: 'chunky-b-c1', title: '第一章', segs: ['乙一分片'] },
+    ]);
+    await upsertFtsForBookChunked(book, { chunkChapters: 1 });
+    await upsertFtsForBookChunked(book, { chunkChapters: 1 });
+    expect(__ftsState.ftsRows).toHaveLength(1);
+  });
+
+  test('shouldPause 挂起：门闩解除后断点续写，最终完整入索引', async () => {
+    const book = makeBook('chunky-c', '暂停书', [
+      { id: 'chunky-c-c1', title: '一', segs: ['丙一分片'] },
+      { id: 'chunky-c-c2', title: '二', segs: ['丙二分片'] },
+    ]);
+    let paused = true;
+    // 门闩 300ms 后解除：片间检查挂起（250ms 轮询），解除后完成剩余片
+    setTimeout(() => {
+      paused = false;
+    }, 300);
+    const res = await upsertFtsForBookChunked(book, {
+      chunkChapters: 1,
+      shouldPause: () => paused,
+    });
+    expect(res.success).toBe(true);
+    const rows = __ftsState.ftsRows.filter((r: { book_id: unknown }) => r.book_id === 'chunky-c');
+    expect(rows).toHaveLength(2);
+  });
+
+  test('聚合导出包含分片版', () => {
+    expect(typeof StorageService.upsertFtsForBookChunked).toBe('function');
   });
 });
