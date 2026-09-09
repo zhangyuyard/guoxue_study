@@ -1202,6 +1202,20 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const rowOffsets = useRef<Map<string, number>>(new Map());
   /** 追加下一章的并发/重复守卫 */
   const loadingNext = useRef(false);
+  /**
+   * 最近一次成功 append 的时刻：onContentSizeChange 的锚点兜底补偿用它
+   * 区分「本次 contentSize 增量是否混入了 append 高度」。attempt 中
+   * append 先于 prepend 执行，二者的渲染在同一帧合并，contentSize 增量
+   * = prepend 高度 + append 高度——若不作区分，兜底补偿会把视口向前
+   * 多甩出一个 append 章的高度（跳章后连滚多章的根因之一）。
+   */
+  const lastAppendAtRef = useRef(0);
+  /**
+   * append 与 prepend 视为「同 tick 合并渲染」的时间窗：attempt 中两者背靠背
+   * 执行（毫秒级间隔），其 contentSize 变化合并为一次事件；超过该窗的 append
+   * 与 prepend 互不影响，锚点增量兜底可放心使用 contentSize 增量补偿。
+   */
+  const APPEND_COALESCE_MS = 100;
   /** 向前拼接上一章的并发/重复守卫 */
   const loadingPrev = useRef(false);
   /**
@@ -2017,6 +2031,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     const merged = [...continuousRef.current, loadedChapter];
     continuousRef.current = merged;
     continuousChapterIdsRef.current = new Set(merged.map((c) => c.id));
+    lastAppendAtRef.current = Date.now();
     setContinuousChapters(merged);
     // 滑动窗口：追加成功后若序列超限，立即丢头腾位（当前章守卫已保证可行）
     maybeDropHeadChapters();
@@ -2210,9 +2225,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     if (prefetchNeighborsTimer.current) {
       clearTimeout(prefetchNeighborsTimer.current);
     }
-    prefetchNeighborsTimer.current = setTimeout(() => {
+      prefetchNeighborsTimer.current = setTimeout(() => {
       prefetchNeighborsTimer.current = null;
-      /** 有上一章可拼但尚未就位时有限次重试（见 attempt 内校验） */
+      /** 无进展时有限次重试（见 attempt 尾部校验） */
       const MAX_TRIES = 4;
       const RETRY_MS = 1500;
       const attempt = (tries: number): void => {
@@ -2229,27 +2244,24 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           }
           return;
         }
+        const beforeFirstId = continuousRef.current[0]?.id ?? null;
+        const beforeLen = continuousRef.current.length;
         appendNextChapter();
         prependPreviousChapter();
-        // 校验上一章是否真的就位：定位未完成（pendingScroll）/ 锚点占用
-        // 等情况会让 prepend 静默失败——仍有上一章可拼且未就位时重试。
-        // 用户手动拼接成功则自然收敛（去重守卫兜底，绝不重复插入）。
-        if (tries < MAX_TRIES && book) {
-          const loaded = continuousRef.current;
-          const firstIdx =
-            loaded.length > 0
-              ? book.chapters.findIndex((c) => c.id === loaded[0].id)
-              : -1;
-          const hasPrevToLoad = firstIdx > 0;
-          const prevLoaded =
-            hasPrevToLoad &&
-            continuousChapterIdsRef.current.has(book.chapters[firstIdx - 1].id);
-          if (hasPrevToLoad && !prevLoaded) {
-            prefetchNeighborsTimer.current = setTimeout(
-              () => attempt(tries + 1),
-              RETRY_MS,
-            );
-          }
+        // 重试条件 = 本轮【零进展】（拼接被 pendingScroll / 锚点占用等暂时挡住）。
+        // 勿改成「上一章未就位就重试」：每次成功 prepend 一章后，新首章的
+        // 上一章天然未加载（预取语义只拼一章），该条件恒真 → 空转重试，
+        // 每轮 append+prepend 各一章，再叠加上锚点补偿与 append 同帧合并
+        // 引发的过度前甩（见 onContentSizeChange 锚点兜底），表现为
+        // 「跳章后页面不停滚动多章 / 下拉一次翻动好几章」。
+        const after = continuousRef.current;
+        const progressed =
+          after.length > beforeLen || (after[0]?.id ?? null) !== beforeFirstId;
+        if (!progressed && tries < MAX_TRIES) {
+          prefetchNeighborsTimer.current = setTimeout(
+            () => attempt(tries + 1),
+            RETRY_MS,
+          );
         }
       };
       attempt(0);
@@ -3606,18 +3618,48 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
               // 优于不补偿（那会整屏跳到上一章开头）。增量非正则等锚点/超时处理。
               const anchorNow = prependAnchor.current;
               if (anchorNow) {
-                const delta = h - contentH.current;
-                if (delta > 0 && contentH.current > 0) {
+                // 精确路径（优先）：锚点行已重排时直接用「新 y − 旧 y（恒 0，
+                // 锚点行是列表首行）」补偿——只含插入高度，与同期 append 的
+                // 下方内容无关，绝不受同帧合并的 contentSize 增量污染。
+                const newY = rowOffsets.current.get(anchorNow.firstRowId);
+                if (typeof newY === 'number' && newY > 0) {
                   anchorNow.snapshot.forEach((oldY, key) => {
                     if (rowOffsets.current.get(key) === oldY) {
-                      rowOffsets.current.set(key, oldY + delta);
+                      rowOffsets.current.set(key, oldY + newY);
                     }
                   });
                   listRef.current?.scrollToOffset({
-                    offset: Math.max(0, scrollOffset.current + delta),
+                    // 基准与行布局路径一致：用解析时刻实际偏移（触发到解析
+                    // 之间用户可能已滚动，陈旧 baseOffset 会把视野拽回触发点）
+                    offset: Math.max(0, scrollOffset.current + newY),
                     animated: false,
                   });
                   prependAnchor.current = null;
+                } else if (
+                  anchorNow.createdAt - lastAppendAtRef.current >
+                  APPEND_COALESCE_MS
+                ) {
+                  // 增量兜底路径（仅限本次增量纯属 prepend 时）：
+                  // attempt 先 append 后 prepend，同 tick 内二者的渲染合并、
+                  // contentSize 增量 = 两者之和，混入 append 高度会把视口
+                  // 向前多甩一章（跳章后连滚多章根因）——距锚点创建一个
+                  // 合并窗口内有过 append 即视为增量可疑，让位给锚点行布局
+                  // 路径（handleRowLayout）或超时兜底。
+                  // 注：锚点存活期间 appendNextChapter 本就被互斥守卫阻塞，
+                  // 因此只可能存在「同 tick 先 append 后 prepend」的污染源。
+                  const delta = h - contentH.current;
+                  if (delta > 0 && contentH.current > 0) {
+                    anchorNow.snapshot.forEach((oldY, key) => {
+                      if (rowOffsets.current.get(key) === oldY) {
+                        rowOffsets.current.set(key, oldY + delta);
+                      }
+                    });
+                    listRef.current?.scrollToOffset({
+                      offset: Math.max(0, scrollOffset.current + delta),
+                      animated: false,
+                    });
+                    prependAnchor.current = null;
+                  }
                 }
               }
               // 滑动窗口丢头补偿：头部章节被丢弃后保留内容整体上移「丢弃高度」，

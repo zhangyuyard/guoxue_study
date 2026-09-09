@@ -329,3 +329,28 @@ describe('Bug 3 边界：模式切换跨章跟随定位', () => {
     );
   });
 });
+
+describe('跳章后连滚多章 / 下拉一次翻多章回归防护（attempt 零进展重试 + 锚点补偿防污染）', () => {
+  test('attempt 重试条件必须是「零进展」而非「上一章未就位」', () => {
+    // 「上一章未就位就重试」恒真（预取只拼一章，新首章的上一章天然未加载）
+    // → 空转重试把一轮预取放大成 4 轮 append+prepend，叠补偿失准即连滚多章
+    expect(source).toMatch(/const progressed =/);
+    expect(source).toMatch(/if \(!progressed && tries < MAX_TRIES\) \{/);
+    expect(source).not.toMatch(/const hasPrevToLoad =/);
+  });
+
+  test('append 成功必须记录 lastAppendAtRef（锚点增量兜底防污染依据）', () => {
+    expect(source).toMatch(/const lastAppendAtRef = useRef\(0\);/);
+    expect(source).toMatch(/lastAppendAtRef\.current = Date\.now\(\);/);
+  });
+
+  test('onContentSizeChange 锚点兜底：精确 y 路径优先 + append 同 tick 污染门控', () => {
+    // 同 tick 的 append+prepend 渲染合并，contentSize 增量 = 两者之和，
+    // 直接拿增量补偿会把视口向前多甩一个 append 章的高度（连滚多章根因）
+    expect(source).toMatch(/const newY = rowOffsets\.current\.get\(anchorNow\.firstRowId\);/);
+    expect(source).toMatch(
+      /anchorNow\.createdAt - lastAppendAtRef\.current >\s*\n?\s*APPEND_COALESCE_MS/,
+    );
+    expect(source).toMatch(/const APPEND_COALESCE_MS = 100;/);
+  });
+});
