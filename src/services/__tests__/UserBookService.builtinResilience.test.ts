@@ -484,4 +484,82 @@ describe('UserBookService 内置书按需装载（性能架构回归）', () => 
     __setFtsQueueYieldForTests(0);
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
   });
+
+  test('ensureBookReady 首章优先：只装配目标章即上屏，其余空壳由后台填充补齐并入索引', async () => {
+    __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = [];
+    const multiBody =
+      '@@CH@@第一篇\n\n甲内容。\n\n@@CH@@第二篇\n\n乙内容。\n\n@@CH@@第三篇\n\n丙内容。';
+    __rnfsState.readReply = Buffer.from(multiBody, 'utf8').toString('base64');
+    const fillTicks: string[] = [];
+    const off = UserBookService.onBuiltinFillProgress((id) => fillTicks.push(id));
+
+    const res = await UserBookService.ensureBookReady(BUILTIN_ROW_ID, {
+      priorityChapterId: `${BUILTIN_ROW_ID}-c2`,
+    });
+    expect(res.success).toBe(true);
+
+    // 首屏书体：目录完整（3 章），只有目标章 c2 有正文，c1/c3 为空壳
+    expect(libState().hydratedLast?.id).toBe(BUILTIN_ROW_ID);
+    const chapters = libState().hydratedLast?.chapters ?? [];
+    expect(chapters).toHaveLength(3);
+    expect(chapters[1].id).toBe(`${BUILTIN_ROW_ID}-c2`);
+    expect(chapters[1].segments.length).toBeGreaterThan(0);
+    expect(chapters[0].segments).toHaveLength(0);
+    expect(chapters[2].segments).toHaveLength(0);
+
+    // 后台填充：全部章节正文就位、进度回调触发、顺带入 FTS 索引
+    for (
+      let i = 0;
+      i < 50 &&
+      (libState().hydratedLast?.chapters ?? []).some((c) => c.segments.length === 0);
+      i += 1
+    ) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    expect(
+      (libState().hydratedLast?.chapters ?? []).every((c) => c.segments.length > 0),
+    ).toBe(true);
+    expect(fillTicks).toContain(BUILTIN_ROW_ID);
+    expect(upsertSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: BUILTIN_ROW_ID }),
+    );
+    off();
+  });
+
+  test('ensureBookReady 填充完成顺带入 FTS 索引恰一次（多批填充全量就位）', async () => {
+    __rnfsState.readDirResults[UserBookService.getBooksRootPath()] = [];
+    // 31 章：填充分两批（30+1），覆盖多批合并路径
+    const parts: string[] = [];
+    for (let i = 1; i <= 31; i += 1) {
+      parts.push(`@@CH@@第${i}篇\n\n这是第${i}篇的正文内容。`);
+    }
+    __rnfsState.readReply = Buffer.from(parts.join('\n\n'), 'utf8').toString('base64');
+
+    const p = UserBookService.ensureBookReady(BUILTIN_ROW_ID, {
+      priorityChapterId: `${BUILTIN_ROW_ID}-c1`,
+    });
+    const res = await p;
+    expect(res.success).toBe(true);
+    expect(libState().hydratedIds).toContain(BUILTIN_ROW_ID);
+
+    // 等后台填充收尾（31 章两批，0ms 让出，真实计时器毫秒级；上限 5s 防挂死）
+    for (
+      let i = 0;
+      i < 250 &&
+      (libState().hydratedLast?.chapters ?? []).some((c) => c.segments.length === 0);
+      i += 1
+    ) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    }
+    // 填充完成后书体已在内存：顺带入 FTS 索引恰一次（省队列重复解析；
+    // 队列侧 isBookIndexedInFts 已索引跳过的幂等守卫由既有队列用例覆盖）
+    expect(upsertSpy).toHaveBeenCalledTimes(1);
+    expect(upsertSpy.mock.calls[0][0]).toMatchObject({ id: BUILTIN_ROW_ID });
+    // 全部章节正文就位（多批填充完成）
+    expect(
+      (libState().hydratedLast?.chapters ?? []).every((c) => c.segments.length > 0),
+    ).toBe(true);
+  });
 });

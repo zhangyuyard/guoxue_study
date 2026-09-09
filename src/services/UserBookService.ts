@@ -546,6 +546,49 @@ async function loadBuiltinBookBody(
   return parsed;
 }
 
+/** 指纹自愈：落盘文件与资产大小不一致先覆盖补写（物化时机之外的自愈）。
+ * ensureBookLoaded / ensureBookReady 共用。 */
+async function ensureBuiltinAssetFresh(spec: BuiltinBookSpec): Promise<void> {
+  if (typeof spec.sizeBytes !== 'number' || spec.sizeBytes <= 0) {
+    return;
+  }
+  const canonicalPath = `${getBuiltinDirPath()}/${spec.id}.txt`;
+  try {
+    // eslint-disable-next-line no-await-in-loop
+    const st = await RNFS.stat(canonicalPath);
+    const destSize = Number((st as { size?: number | string }).size ?? 0);
+    if (destSize > 0 && destSize !== spec.sizeBytes) {
+      // eslint-disable-next-line no-await-in-loop
+      await RNFS.copyFileAssets(`books/${spec.id}.txt`, canonicalPath);
+    }
+  } catch {
+    // stat 失败（文件缺失/IO 异常）交由读取路径兜底
+  }
+}
+
+/** 内置书正文文本直读（不经解析）：文件 → assets 兜底。
+ * 首章优先快速水合用——只需原文即可切章与装配目标章。 */
+async function readBuiltinText(
+  spec: BuiltinBookSpec,
+): Promise<{ text: string; contentHash: string } | null> {
+  const canonicalPath = `${getBuiltinDirPath()}/${spec.id}.txt`;
+  try {
+    const bytesRes = await readFileBytes(canonicalPath);
+    if (bytesRes.success && bytesRes.data && bytesRes.data.length > 0) {
+      const text = decodeTextBytes(bytesRes.data).text;
+      return { text, contentHash: contentSignature(utf8Bytes(text)) };
+    }
+  } catch {
+    // 文件读取失败走 assets 兜底
+  }
+  try {
+    const text = await RNFS.readFileAssets(`books/${spec.id}.txt`, 'utf8');
+    return { text, contentHash: contentSignature(utf8Bytes(text)) };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 确保内置书全文已装载（按需装载核心入口）。
  * 用户书始终全量注册（数量少、单本有限），直接返回；内置书未水合时
@@ -581,21 +624,8 @@ export async function ensureBookLoaded(
       // 让出一拍再开始解析：把已在事件队列里的 tap/触摸事件先放行，
       // 避免「点了没反应、事件在水合同步解析结束后才生效」的假死体感。
       await yieldToJs();
-      const canonicalPath = `${getBuiltinDirPath()}/${spec.id}.txt`;
       // 指纹校验：落盘文件与资产大小不一致先覆盖补写（物化时机之外的自愈）
-      if (typeof spec.sizeBytes === 'number' && spec.sizeBytes > 0) {
-        try {
-          // eslint-disable-next-line no-await-in-loop
-          const st = await RNFS.stat(canonicalPath);
-          const destSize = Number((st as { size?: number | string }).size ?? 0);
-          if (destSize > 0 && destSize !== spec.sizeBytes) {
-            // eslint-disable-next-line no-await-in-loop
-            await RNFS.copyFileAssets(`books/${spec.id}.txt`, canonicalPath);
-          }
-        } catch {
-          // stat 失败（文件缺失/IO 异常）交由读取路径兜底
-        }
-      }
+      await ensureBuiltinAssetFresh(spec);
       const parsed = await loadBuiltinBookBody(spec);
       if (!parsed) {
         return { success: false, error: `书籍内容加载失败：${spec.title}` };
@@ -626,6 +656,290 @@ export async function ensureBookLoaded(
   })();
   ensureInFlight.set(bookId, task);
   return task;
+}
+
+/** 首章优先快速水合：进行中标记（书 ID 集合）。
+ * FTS 后台队列见此标志即跳过该书（填充完成后由填充流程顺带入索引，
+ * 省一次重复解析）；下轮启动重试兜底。 */
+const builtinFillInFlight = new Set<string>();
+/** 章节填充进度监听（阅读器订阅：当前章正文就位后刷新派生） */
+const builtinFillListeners = new Set<(bookId: string) => void>();
+
+/**
+ * 订阅内置书章节后台填充进度（每批 30 章合并后触发一次回调）。
+ * 返回取消订阅函数。阅读器用它驱动 hydrateTick 重算：用户跳到尚未
+ * 填充完的章时，「正文空壳」章在填充到该章后自动变为可读。
+ */
+export function onBuiltinFillProgress(cb: (bookId: string) => void): () => void {
+  builtinFillListeners.add(cb);
+  return () => {
+    builtinFillListeners.delete(cb);
+  };
+}
+
+/** ensureBookReady 的并发去重（首屏快速路径，与全量装载分开记账） */
+const readyInFlight = new Map<string, Promise<ServiceResult<Book>>>();
+
+/**
+ * 首章优先快速水合（阅读器专用入口，问题：首开加载圈太长）。
+ * 与 ensureBookLoaded（整本解析完才 resolve）的区别：只解析用户要读的
+ * 目标章（几十 ms 量级）即 hydrate 上屏——其余章节先以「空壳章」（仅有
+ * id/title/order、segments 为空）占位保证目录完整，随后由后台任务按批
+ * （30 章/批）填充并逐批合并回文本库（onBuiltinFillProgress 通知阅读器）。
+ *
+ * 空壳章与解析器的 id 严格对齐：pushChapter 只在段落非空时递增编号，
+ * 而「body 仅空白 ⟺ toParagraphs 为空」（已核对 toParagraphs 实现），
+ * 故空壳构建用相同的空白判定跳过无正文章节，两者产出的 `bookId-cN`
+ * 序列逐一对齐（77 部/3243 章已脚本验证）。
+ *
+ * 背景填充期间持续压住 FTS 队列门闩（填充本身就是用户活动）；填充完成
+ * 后书体已在内存，顺带 upsert FTS 索引（若未入索引），省一次重复解析。
+ * 失败兜底：文本直读失败 → 走整本分片解析旧路径（ensureBookLoaded 语义）。
+ */
+export async function ensureBookReady(
+  bookId: string,
+  opts?: { priorityChapterId?: string | null },
+): Promise<ServiceResult<Book>> {
+  if (!bookId) {
+    return { success: false, error: '书籍 ID 不能为空' };
+  }
+  if (TextLibraryService.isUserBook(bookId) || !getBuiltinSpec(bookId)) {
+    return TextLibraryService.getBook(bookId);
+  }
+  if (hiddenBuiltins.has(bookId)) {
+    return { success: false, error: '该书籍已被删除' };
+  }
+  if (TextLibraryService.isBookHydrated(bookId)) {
+    // 已水合（含早期部分水合）：正文空壳章由填充进度订阅驱动刷新，
+    // 这里直接返回当前书体，绝不重置回解析流程
+    return TextLibraryService.getBook(bookId);
+  }
+  const fullInFlight = ensureInFlight.get(bookId);
+  if (fullInFlight) {
+    return fullInFlight;
+  }
+  const inFlight = readyInFlight.get(bookId);
+  if (inFlight) {
+    return inFlight;
+  }
+  const spec = getBuiltinSpec(bookId)!;
+  const task = (async (): Promise<ServiceResult<Book>> => {
+    try {
+      ftsQueuePausedUntil = Date.now() + FTS_PAUSE_ON_HYDRATE_MS;
+      await yieldToJs();
+      await ensureBuiltinAssetFresh(spec);
+      const body = await readBuiltinText(spec);
+      if (!body) {
+        // 兜底：文本直读失败 → 整本分片解析旧路径
+        const parsed = await loadBuiltinBookBody(spec);
+        if (!parsed) {
+          return { success: false, error: `书籍内容加载失败：${spec.title}` };
+        }
+        const reg = (
+          TextLibraryService as unknown as {
+            hydrateBook?: (book: Book) => { success: boolean; error?: string };
+          }
+        ).hydrateBook;
+        if (typeof reg === 'function') {
+          const regRes = reg.call(TextLibraryService, parsed.book);
+          if (!regRes.success) {
+            return { success: false, error: regRes.error ?? '注册书体失败' };
+          }
+        }
+        return TextLibraryService.getBook(bookId);
+      }
+      const shells = buildBuiltinChapterShells(bookId, body.text);
+      if (shells.length === 0) {
+        // 兜底：切章失败（异常文本）→ 整本分片解析旧路径
+        const parsed = await loadBuiltinBookBody(spec);
+        if (!parsed) {
+          return { success: false, error: `书籍内容加载失败：${spec.title}` };
+        }
+        const reg = (
+          TextLibraryService as unknown as {
+            hydrateBook?: (book: Book) => { success: boolean; error?: string };
+          }
+        ).hydrateBook;
+        if (typeof reg === 'function') {
+          const regRes = reg.call(TextLibraryService, parsed.book);
+          if (!regRes.success) {
+            return { success: false, error: regRes.error ?? '注册书体失败' };
+          }
+        }
+        return TextLibraryService.getBook(bookId);
+      }
+      // 目标章优先装配：只解析用户要读的这一章（回退第一章），其余留空壳
+      const target =
+        shells.find((s) => s.chapter.id === opts?.priorityChapterId) ?? shells[0];
+      const paras = toParagraphs(target.bodyLines.join('\n'));
+      target.chapter.segments = paras.map((p, idx) => ({
+        id: `${target.chapter.id}-s${idx + 1}`,
+        chapterId: target.chapter.id,
+        order: idx + 1,
+        text: p,
+      }));
+      const earlyBook = assembleBuiltinBook(spec, shells.map((s) => s.chapter));
+      const reg = (
+        TextLibraryService as unknown as {
+          hydrateBook?: (book: Book) => { success: boolean; error?: string };
+        }
+      ).hydrateBook;
+      if (typeof reg === 'function') {
+        const regRes = reg.call(TextLibraryService, earlyBook);
+        if (!regRes.success) {
+          return { success: false, error: regRes.error ?? '注册书体失败' };
+        }
+      }
+      // 后台填充：不阻塞首屏 promise（resolve 后阅读器当帧可渲染目标章）
+      void fillRemainingBuiltinChapters(spec, shells);
+      return TextLibraryService.getBook(bookId);
+    } catch (e) {
+      return { success: false, error: (e as Error).message };
+    } finally {
+      readyInFlight.delete(bookId);
+    }
+  })();
+  readyInFlight.set(bookId, task);
+  return task;
+}
+
+/**
+ * 内置书空壳章构建：@@CH@@ 标记文本 → 全量章节骨架（segments 空）。
+ * 切章/开篇/空白跳过规则与解析器完全一致（见函数头注释），仅不做
+ * toParagraphs 装配（重活留给目标章与后台填充）。
+ */
+function buildBuiltinChapterShells(
+  bookId: string,
+  text: string,
+): { chapter: Book['chapters'][number]; bodyLines: string[] }[] {
+  const normalized = text.replace(/\r\n?/g, '\n');
+  const { rawChapters, preface } = splitRawChapters(normalized, true);
+  const shells: { chapter: Book['chapters'][number]; bodyLines: string[] }[] = [];
+  let order = 0;
+  const addShell = (chapterTitle: string, bodyLines: string[]): void => {
+    // 与解析器对齐：body 仅空白 → toParagraphs 为空 → 该章不编号不产出
+    if (bodyLines.join('\n').trim() === '') {
+      return;
+    }
+    order += 1;
+    const chapterId = `${bookId}-c${order}`;
+    shells.push({
+      chapter: { id: chapterId, bookId, title: chapterTitle, order, segments: [] },
+      bodyLines,
+    });
+  };
+  if (toParagraphs(preface.join('\n')).length > 0) {
+    addShell('开篇', preface);
+  }
+  for (const rc of rawChapters) {
+    addShell(rc.title, rc.body);
+  }
+  return shells;
+}
+
+/** 内置书体组装（目录清单元数据 + 章节列表） */
+function assembleBuiltinBook(
+  spec: BuiltinBookSpec,
+  chapters: Book['chapters'],
+): Book {
+  return {
+    id: spec.id,
+    title: spec.title,
+    author: spec.author,
+    category: spec.category,
+    description: spec.description,
+    chapters,
+  };
+}
+
+/**
+ * 后台分批填充剩余章节：每 30 章一批（与 parseTxtBookChunked 同粒度），
+ * 批内同步装配、批间让出 JS，并把合并后的书体重新 hydrate（引用替换
+ * 使 TextLibraryService 缓存正确失效）+ 通知订阅者。填充即用户活动，
+ * 期间持续压住 FTS 队列门闩；全部完成后书体在内存，顺带补 FTS 索引。
+ * 失败静默中止（空壳章保留，重进该书重新走 ensureBookReady 水合）。
+ */
+async function fillRemainingBuiltinChapters(
+  spec: BuiltinBookSpec,
+  shells: { chapter: Book['chapters'][number]; bodyLines: string[] }[],
+): Promise<void> {
+  builtinFillInFlight.add(spec.id);
+  try {
+    const hydrate = (
+      TextLibraryService as unknown as {
+        hydrateBook?: (book: Book) => { success: boolean; error?: string };
+      }
+    ).hydrateBook;
+    // 先让出一拍再开始批量装配：ensureBookReady 的首屏 promise 先 resolve
+    //（首屏只含目标章解析），填充绝不与首屏渲染争抢同一拍
+    // eslint-disable-next-line no-await-in-loop
+    await yieldToJs();
+    for (let start = 0; start < shells.length; start += PARSE_CHUNK_CHAPTERS) {
+      // 填充期间压住 FTS 队列（书间检查点生效），完成后留 10s 收尾缓冲
+      ftsQueuePausedUntil = Math.max(
+        ftsQueuePausedUntil,
+        Date.now() + FTS_PAUSE_ON_HYDRATE_MS,
+      );
+      let batchFilled = 0;
+      for (
+        let i = start;
+        i < Math.min(start + PARSE_CHUNK_CHAPTERS, shells.length);
+        i += 1
+      ) {
+        const shell = shells[i];
+        if (shell.chapter.segments.length > 0) {
+          continue; // 目标章已在首屏装配，跳过
+        }
+        const paras = toParagraphs(shell.bodyLines.join('\n'));
+        shell.chapter.segments = paras.map((p, idx) => ({
+          id: `${shell.chapter.id}-s${idx + 1}`,
+          chapterId: shell.chapter.id,
+          order: idx + 1,
+          text: p,
+        }));
+        batchFilled += 1;
+      }
+      // 批间让出一拍：tap/触摸/渲染可插队
+      // eslint-disable-next-line no-await-in-loop
+      await yieldToJs();
+      if (batchFilled > 0 && typeof hydrate === 'function') {
+        const merged = assembleBuiltinBook(
+          spec,
+          shells.map((s) => s.chapter),
+        );
+        try {
+          hydrate.call(TextLibraryService, merged);
+        } catch {
+          // 单批合并失败不中止（空壳保留，下次进入重水合）
+        }
+        builtinFillListeners.forEach((cb) => {
+          try {
+            cb(spec.id);
+          } catch {
+            // 单个订阅者异常不影响其余订阅者与填充流程
+          }
+        });
+      }
+    }
+    // 填充完成：书体已在内存，若尚未入 FTS 索引则顺带补齐（省重复解析）
+    if (!StorageService.isBookIndexedInFts(spec.id)) {
+      try {
+        StorageService.upsertFtsForBook(
+          assembleBuiltinBook(spec, shells.map((s) => s.chapter)),
+        );
+      } catch {
+        // 索引失败由下轮启动的 FTS 队列兜底
+      }
+    }
+  } catch {
+    // 填充整体异常：静默中止（空壳章保留，重进重水合）
+  } finally {
+    builtinFillInFlight.delete(spec.id);
+    ftsQueuePausedUntil = Math.max(
+      ftsQueuePausedUntil,
+      Date.now() + FTS_PAUSE_AFTER_HYDRATE_MS,
+    );
+  }
 }
 
 /**
@@ -662,6 +976,11 @@ export function scheduleBuiltinFtsIndexBuild(delayMs = 10000): void {
       while (Date.now() < ftsQueuePausedUntil) {
         // eslint-disable-next-line no-await-in-loop
         await new Promise<void>((resolve) => setTimeout(resolve, FTS_PAUSE_POLL_MS));
+      }
+      // 填充中的书跳过：其后台填充完成后会顺带入索引（书体已在内存），
+      // 这里再解析一遍纯属浪费；本轮跳过、下轮启动重试兜底
+      if (builtinFillInFlight.has(spec.id)) {
+        continue;
       }
       try {
         if (!StorageService.isBookIndexedInFts(spec.id)) {
@@ -700,7 +1019,10 @@ export function __resetBuiltinLazyStateForTests(): void {
   builtinFtsAutoSchedule = false;
   ftsQueuePausedUntil = 0;
   ftsQueueYieldMs = 200;
+  builtinFillInFlight.clear();
+  builtinFillListeners.clear();
   ensureInFlight.clear();
+  readyInFlight.clear();
 }
 
 /**
@@ -2266,6 +2588,8 @@ export const UserBookService = {
   stableBookIdFromPath,
   loadAndRegisterAll,
   ensureBookLoaded,
+  ensureBookReady,
+  onBuiltinFillProgress,
   scheduleBuiltinFtsIndexBuild,
   isUserBook,
   getAllBooks,

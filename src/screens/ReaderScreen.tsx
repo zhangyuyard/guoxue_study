@@ -1458,9 +1458,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const segmentId = params?.segmentId ?? null;
 
   // 按需水合（性能）：内置书启动只注册目录元数据（书架秒开），进入阅读器
-  // 时若该书全文尚未水合，先异步 ensureBookLoaded 单本装载（单本文件解析，
-  // 几十~两百 ms），期间复用「加载中」视图；完成后 hydrateTick 自增驱动
-  // 下方同步派生重算（同步派生架构不变——水合前后都当帧可得）。
+  // 时经 ensureBookReady 首章优先快速水合——只解析当前章（几十 ms）即上屏，
+  // 其余章节由后台分批填充（订阅 onBuiltinFillProgress 驱动 hydrateTick
+  // 重算：跳到尚未填充完的章时，该章正文就位后自动变为可读）。
   const [hydrateTick, setHydrateTick] = useState(0);
   const [builtinHydrating, setBuiltinHydrating] = useState(false);
   const [builtinHydrateFailed, setBuiltinHydrateFailed] = useState(false);
@@ -1478,7 +1478,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     let cancelled = false;
     setBuiltinHydrating(true);
     setBuiltinHydrateFailed(false);
-    UserBookService.ensureBookLoaded(bookId)
+    UserBookService.ensureBookReady(bookId, { priorityChapterId: chapterId })
       .then((res) => {
         if (cancelled) {
           return;
@@ -1498,6 +1498,19 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     return () => {
       cancelled = true;
     };
+  }, [bookId, chapterId]);
+
+  // 章节后台填充进度订阅：每批 30 章合并后触发，当前书命中时重算派生
+  //（用户跳进空壳章后，该章正文就位即自动渲染，无需重进）
+  useEffect(() => {
+    if (!bookId || TextLibraryService.isUserBook(bookId)) {
+      return undefined;
+    }
+    return UserBookService.onBuiltinFillProgress((filledBookId) => {
+      if (filledBookId === bookId) {
+        setHydrateTick((t) => t + 1);
+      }
+    });
   }, [bookId]);
 
   // 文本数据：随路由参数【同步派生】（BugFix：切章时旧章内容多渲染一帧的闪烁）。
@@ -3310,8 +3323,15 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     );
   }
 
-  // 加载中（含内置书按需水合期：单本文件解析，通常 <300ms）
-  if (!chapter || !book || builtinHydrating) {
+  // 加载中（含内置书按需水合期：目标章解析通常 <100ms；以及跳入「空壳章」
+  // ——首章优先水合后其余章节由后台分批填充，正文就位前保持加载态）
+  const chapterPending =
+    !!book &&
+    !!chapter &&
+    !!bookId &&
+    !TextLibraryService.isUserBook(bookId) &&
+    chapter.segments.length === 0;
+  if (!chapter || !book || builtinHydrating || chapterPending) {
     return (
       <SafeAreaView style={[styles.container, styles.center, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
