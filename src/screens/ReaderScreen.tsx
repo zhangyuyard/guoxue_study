@@ -218,6 +218,22 @@ const CHAPTER_HEAD_DWELL_SCREENS = 0.5;
 const NEIGHBOR_PREFETCH_DELAY_MS = 400;
 
 /**
+ * 【P1 灰度开关】maintainVisibleContentPosition 原生视口保持
+ * （docs/paging-implementation-evaluation.md；RN 0.72 起 Android 支持，本项目 0.74.7 可用）。
+ * 开启后「头部插入上一章 / 滑动窗口丢头」的滚动偏移保持改由原生层完成：
+ * FlatList 下方 ScrollView 在子视图因数据插入/移除整体位移时自动调整 offset，
+ * 使视口内第一个可见行保持在原视口位置——等价于手写补偿链路
+ * （prependAnchor 登记 → handleRowLayout / onContentSizeChange 消费、
+ * headDropCompensation 写入消费）的全部效果，且不存在「contentSize 增量
+ * 归因」「补偿基准陈旧」「同 tick 合并污染」三类手写方案固有竞态。
+ * 开启时不再登记锚点/补偿量（再执行手写 scrollTo 会双重补偿），相关代码
+ * 全部保留作为回退路径：真机若发现异常，改回 false 一行整体回退。
+ */
+const MVCP_ENABLED = true;
+/** 保持视口内第一个可见行稳定；不设 autoscrollToTopThreshold（拼接后不自动跳到新章） */
+const MVCP_CONFIG = { minIndexForVisible: 0 } as const;
+
+/**
  * 阅读行（滚动模式 FlatList 的数据单元）
  * 连续滚动时正文跨章拼接：每章先渲染一个「标题行」，再渲染该章的若干「段落行」。
  */
@@ -1973,7 +1989,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         }
       }
     }
-    headDropCompensation.current = keptY - droppedY;
+    if (!MVCP_ENABLED) {
+      // 手写补偿路径（回退用）：MVCP 开启时原生层在头部行移除后自动保持
+      // 视口稳定，再回退 offset 会双重补偿（视口上甩一个丢弃高度）。
+      headDropCompensation.current = keptY - droppedY;
+    }
     const merged = loaded.filter((c) => !droppedIds.has(c.id));
     continuousRef.current = merged;
     continuousChapterIdsRef.current = new Set(merged.map((c) => c.id));
@@ -2120,12 +2140,18 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     if (pendingScroll.current.target && !pendingScroll.current.done) {
       return;
     }
-    prependAnchor.current = {
-      firstRowId: `${TITLE_ROW_PREFIX}${firstId}`,
-      baseOffset: scrollOffset.current,
-      createdAt: Date.now(),
-      snapshot: new Map(rowOffsets.current),
-    };
+    if (!MVCP_ENABLED) {
+      // 手写补偿路径（MVCP_ENABLED=false 的回退路径）：登记锚点，由
+      // handleRowLayout 的锚点行布局路径 / onContentSizeChange 的增量兜底
+      // 消费。MVCP 开启时原生层在头部插入行后自动保持视口稳定，再执行
+      // 手写 scrollTo 会双重补偿（视口被前甩一个插入高度）。
+      prependAnchor.current = {
+        firstRowId: `${TITLE_ROW_PREFIX}${firstId}`,
+        baseOffset: scrollOffset.current,
+        createdAt: Date.now(),
+        snapshot: new Map(rowOffsets.current),
+      };
+    }
     const merged = [prevChapter, ...continuousRef.current];
     continuousRef.current = merged;
     continuousChapterIdsRef.current = new Set(merged.map((c) => c.id));
@@ -3600,6 +3626,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             // 导入书大段落按字符预算收缩，避免首帧逐字注音渲染压死 JS 线程。
             initialNumToRender={scrollInitialRows}
             contentContainerStyle={styles.content}
+            // 【P1】头部插入/丢头的视口保持由原生层完成（见 MVCP_ENABLED 注释）；
+            // MVCP_ENABLED=false 时回退到手写补偿链路（prependAnchor 等）
+            maintainVisibleContentPosition={MVCP_ENABLED ? MVCP_CONFIG : undefined}
             onViewableItemsChanged={onViewableItemsChanged}
             viewabilityConfig={viewabilityConfig}
             onScroll={handleScroll}
@@ -3613,9 +3642,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             onStartReached={handleStartReached}
             onStartReachedThreshold={CONTIGUOUS_PRELOAD_SCREENS}
             onContentSizeChange={(_w, h) => {
-              // 锚点兜底补偿：锚点行若移出渲染窗口，onLayout 永不触发，此时用
-              // contentSize 增量（首次变化恰为插入高度）做一次性补偿——
-              // 优于不补偿（那会整屏跳到上一章开头）。增量非正则等锚点/超时处理。
+              // 锚点兜底补偿（MVCP_ENABLED=false 时的手写回退路径；MVCP 开启时
+              // 锚点不登记，本块天然空转）：锚点行若移出渲染窗口，onLayout
+              // 永不触发，此时用 contentSize 增量（首次变化恰为插入高度）做
+              // 一次性补偿——优于不补偿（那会整屏跳到上一章开头）。增量非正
+              // 则等锚点/超时处理。
               const anchorNow = prependAnchor.current;
               if (anchorNow) {
                 // 精确路径（优先）：锚点行已重排时直接用「新 y − 旧 y（恒 0，

@@ -52,7 +52,7 @@ legado 滚动模式也是「先把章节排进视口尺寸的连续内容」，�
 | 优先级 | 事项 | 收益 | 代价 |
 |---|---|---|---|
 | P0 | 已完成：跳章连滚 Bug 修复（见 §4） | 止血 | 小 |
-| P1 | 试验 `maintainVisibleContentPosition`，成功后退役 prependAnchor/快照/增量兜底/丢头补偿约 300 行手写补偿 | 根除一整类补偿竞态 Bug（本次即第 3 起） | 1 次专项 + 真机回归 |
+| P1 | ✅ 已实施（灰度试验中）：`maintainVisibleContentPosition` 原生视口保持上线（`MVCP_ENABLED` 灰度开关），头部插入/丢头补偿改由原生层完成；手写链路（prependAnchor/快照/增量兜底/丢头补偿）不再登记但保留为回退路径，真机异常改 `false` 一行回退 | 根除一整类补偿竞态 Bug（本次即第 3 起） | 1 次专项 + 真机回归 |
 | P2 | 视口锚点统一为「行 id + 深度」内容坐标模型（推广 layoutAnchor） | 注音切换/换行高场景彻底免疫 | 中，需动 handleRowLayout 语义 |
 | P3 | Skia 真卷页仿真翻页（pageCurl shader） | 观感对齐 legado | 大（新原生依赖 + PageFlipPager 重构） |
 
