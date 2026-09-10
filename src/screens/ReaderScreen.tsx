@@ -235,6 +235,20 @@ const MVCP_ENABLED = true;
 const MVCP_CONFIG = { minIndexForVisible: 0 } as const;
 
 /**
+ * 【P0】滚动模式 FlatList 渲染窗口调参（对齐 legado / RecyclerView 缓存尺度）。
+ * RN 默认 windowSize=21 → 渲染窗口约 10 屏，注音行逐字字格成本高，窗口边缘
+ * 批量挂载过猛（滚动掉帧）。收敛为前后各约 4 屏 + 更小更密的批量：
+ * - windowSize=9：渲染窗口 ≈ 9 屏视口（默认 21），内存与挂载量近乎减半；
+ * - maxToRenderPerBatch=8（默认 10）：每批挂载行数下降，单批 JS 阻塞更短；
+ * - updateCellsBatchingPeriod=40（默认 50）：批次间隔略缩，追帧能力不降。
+ * 数据链路（跨章拼接 / 预取门闩 / 锚点补偿）不受影响：窗口外的行不布局，
+ * 由既有 onContentSizeChange contentSize 兜底路径覆盖（MVCP 开启时原生保持）。
+ */
+const LIST_WINDOW_SIZE = 9;
+const LIST_MAX_TO_RENDER_PER_BATCH = 8;
+const LIST_UPDATE_CELLS_BATCHING_PERIOD = 40;
+
+/**
  * 阅读行（滚动模式 FlatList 的数据单元）
  * 连续滚动时正文跨章拼接：每章先渲染一个「标题行」，再渲染该章的若干「段落行」。
  */
@@ -3690,6 +3704,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             // 行数按打开章内容量预算计算（scrollInitialRows）：内置书仍为 30 行，
             // 导入书大段落按字符预算收缩，避免首帧逐字注音渲染压死 JS 线程。
             initialNumToRender={scrollInitialRows}
+            // 【P0】渲染窗口收敛与批量调参（见 LIST_WINDOW_SIZE 注释）
+            windowSize={LIST_WINDOW_SIZE}
+            maxToRenderPerBatch={LIST_MAX_TO_RENDER_PER_BATCH}
+            updateCellsBatchingPeriod={LIST_UPDATE_CELLS_BATCHING_PERIOD}
             contentContainerStyle={styles.content}
             // 【P1】头部插入/丢头的视口保持由原生层完成（见 MVCP_ENABLED 注释）；
             // MVCP_ENABLED=false 时回退到手写补偿链路（prependAnchor 等）

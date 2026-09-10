@@ -17,6 +17,10 @@ import {
   getCanonProvider,
 } from '@/services/PinyinService';
 import type { CanonProvider } from '@/types';
+import { installPhrasePinyinSyncProviderForTests } from './phrasePinyin.helper';
+
+// P0 资产下沉：测试环境注入词组层同步 provider（与静态 import 时代行为一致）
+installPhrasePinyinSyncProviderForTests();
 
 // ---- mock 控制状态（由用例写入，驱动 quick-sqlite mock 返回）----
 const state = {

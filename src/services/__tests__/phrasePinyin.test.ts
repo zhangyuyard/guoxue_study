@@ -4,6 +4,10 @@
  * 经 build-phrase-pinyin.mjs 过滤为含多音字的 2~8 字纯汉字词组。
  */
 import { annotate, computePhraseOverlay } from '@/services/PinyinService';
+import { installPhrasePinyinSyncProviderForTests } from './phrasePinyin.helper';
+
+// P0 资产下沉：测试环境注入词组层同步 provider（与静态 import 时代行为一致）
+installPhrasePinyinSyncProviderForTests();
 
 describe('computePhraseOverlay 正向最大匹配', () => {
   test('词组命中：覆盖表给出词组内各字读音（含单音字）', () => {

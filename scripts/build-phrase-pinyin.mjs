@@ -1,5 +1,5 @@
 /**
- * 构建 phrase-pinyin 词组读音数据（src/data/phrase-pinyin.json）。
+ * 构建 phrase-pinyin 词组读音数据（android/app/src/main/assets/data/phrase-pinyin.json）。
  *
  * 数据来源：mozillazg/phrase-pinyin-data（MIT）large_pinyin.txt ——
  * 汉典词典 + 汉典成语词典 + CC-CEDICT + 手工纠正的合并词库（v0.19.0，41 万词组）。
@@ -9,13 +9,17 @@
  * - 仅保留含至少一个多音字（pinyin-dict.json 的 polyphone 集，684 字）的词组——
  *   单音字词组不参与读音仲裁，无需收录。
  *
+ * 【P0】产物下沉为 Android assets（不再静态 import 进 JS bundle），
+ * 运行时 PinyinService.ensurePhrasePinyinData() 经 readFileAssets 异步载入。
+ *
  * 输出格式：{ meta: {source, version, count}, phrases: { "词组": "pīn yīn", ... } }
  * 用法：node scripts/build-phrase-pinyin.mjs [src] [out]
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const SRC = process.argv[2] ?? '/tmp/ppd/large_pinyin.txt';
-const OUT = process.argv[3] ?? 'src/data/phrase-pinyin.json';
+const OUT =
+  process.argv[3] ?? 'android/app/src/main/assets/data/phrase-pinyin.json';
 
 const dict = JSON.parse(readFileSync('src/data/pinyin-dict.json', 'utf8'));
 const POLYPHONE = dict.polyphone;

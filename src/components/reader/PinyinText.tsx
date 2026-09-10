@@ -23,6 +23,10 @@ import { usePinyin } from '@/hooks/usePinyin';
 import { getPolyphoneReadings } from '@/services/PinyinService';
 import { ConversionService } from '@/services/ConversionService';
 import { GuyinService, GUYIN_ATTRIBUTION, type GuyinEntry } from '@/services/GuyinService';
+import {
+  ensurePhrasePinyinData,
+  isPhrasePinyinDataLoaded,
+} from '@/services/PinyinService';
 import { useReadingOverrideStore } from '@/store/useReadingOverrideStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getColors, highlightColors, withAlpha, type ThemeColors } from '@/theme';
@@ -720,6 +724,27 @@ function PinyinTextBase({
     clearPinyinCache();
     annotate();
   }, [overrides, annotate]);
+
+  // ---------- 词组层晚到载入失效（P0） ----------
+  // 词组数据（phrase-pinyin，assets 异步载入）若在本组件生命周期内才完成载入，
+  // 需清注音缓存并重注音，保证首屏注音与词组层就位后一致；
+  // 载入先于挂载完成（App 启动预热常态）时本 effect 零开销直接返回。
+  // 多个可见行同时挂载时各自触发一次清缓存+重算，属一次性成本。
+  useEffect(() => {
+    if (isPhrasePinyinDataLoaded()) {
+      return;
+    }
+    let alive = true;
+    void ensurePhrasePinyinData().then((ok) => {
+      if (ok && alive) {
+        clearPinyinCache();
+        annotate();
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [annotate]);
 
   const handlePolyphonePress = useCallback((cell: CharCellData) => {
     const readings = getPolyphoneReadings(cell.char);

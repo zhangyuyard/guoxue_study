@@ -11,6 +11,10 @@
  */
 import { annotate } from '@/services/PinyinService';
 import type { PinyinAnnotation } from '@/types';
+import { installPhrasePinyinSyncProviderForTests } from './phrasePinyin.helper';
+
+// P0 资产下沉：测试环境注入词组层同步 provider（与静态 import 时代行为一致）
+installPhrasePinyinSyncProviderForTests();
 
 /** 单条金标：text 含目标字 char 的句子，expected 为该字在此句的正确读音（带声调符号） */
 interface GoldCase {

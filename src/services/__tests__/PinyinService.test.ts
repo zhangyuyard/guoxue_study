@@ -19,6 +19,10 @@ import {
   setReadingOverrideProvider,
   type ReadingProvider,
 } from '@/services/PinyinService';
+import { installPhrasePinyinSyncProviderForTests } from './phrasePinyin.helper';
+
+// P0 资产下沉：测试环境注入词组层同步 provider（与静态 import 时代行为一致）
+installPhrasePinyinSyncProviderForTests();
 
 /** 取某字的注音项 */
 function pinyinOf(anns: PinyinAnnotation[], char: string): string {

@@ -20,7 +20,7 @@ import type {
 import pinyinDictData from '@/data/pinyin-dict.json';
 import polyphoneRulesData from '@/data/polyphone-rules.json';
 import yitiData from '@/data/yiti-zi.json';
-import phrasePinyinData from '@/data/phrase-pinyin.json';
+import RNFS from 'react-native-fs';
 import { toSimplified } from '@/utils/conversion';
 import {
   buildHanSequence,
@@ -139,15 +139,114 @@ const YITI_GROUPS = yitiData.groups as unknown as YitiGroup[];
 // 数据：mozillazg/phrase-pinyin-data（MIT）large_pinyin.txt v0.19.0 = 汉典词典 +
 // 汉典成语词典 + CC-CEDICT + 手工纠正；构建脚本 build-phrase-pinyin.mjs 过滤为
 // 「2~8 字纯汉字且含至少一个多音字」的词组（约 18 万条）。
-// 懒初始化：Map（18 万条）构建成本一次性、约几十 ms，推迟到首次 annotate 时，
-// 避免拖慢模块加载与冷启动。
+//
+// 【P0 性能】数据不再静态 import：4.9MB JSON 在 bundle 执行期整块 parse 会拖慢
+// 冷启动首帧。现下沉为 Android assets（data/phrase-pinyin.json），运行时经
+// RNFS.readFileAssets 异步载入（ensurePhrasePinyinData），App 启动延后任务预热；
+// 载入完成前 getPhraseMap 返回空 Map（词组层缺席 → 仲裁链由规则库 / pinyin-pro
+// 兜底，行为等同无词库），载入完成后由 PinyinText 晚到失效机制触发重注音。
+// 测试环境经 setPhrasePinyinSyncProvider 注入同步 provider（jestSetupFile 惰性
+// 读盘），与旧「首次 annotate 时懒建 Map」语义逐字节等价。
 const PHRASE_SOURCE_LABEL = 'phrase-pinyin-data（汉典/CC-CEDICT 合并词库）';
 const PHRASE_MAX_LEN = 8;
+const PHRASE_ASSET_PATH = 'data/phrase-pinyin.json';
+
+/** phrase-pinyin.json 载荷结构（build-phrase-pinyin.mjs 输出） */
+interface PhrasePinyinPayload {
+  phrases: Record<string, string>;
+}
+
+type PhraseSyncProvider = () => PhrasePinyinPayload;
+type PhraseAsyncLoader = () => Promise<string>;
 
 let phraseMapCache: Map<string, string> | null = null;
+/** 测试环境同步 provider（jest 注入；设置后重置缓存，下次 getPhraseMap 懒调用） */
+let phraseSyncProvider: PhraseSyncProvider | null = null;
+/** 运行时异步载入器（可注入替换；默认 assets 读取） */
+let phraseAsyncLoader: PhraseAsyncLoader | null = null;
+/** 单例载入 promise（失败时置 null 允许重试） */
+let phraseReadyPromise: Promise<boolean> | null = null;
+
+/** 注入测试同步 provider（jestSetupFile 用；与旧静态 import 懒初始化语义等价） */
+export function setPhrasePinyinSyncProvider(p: PhraseSyncProvider | null): void {
+  phraseSyncProvider = p;
+  phraseMapCache = null;
+}
+
+/** 注入异步载入器（返回 JSON 原文；测试/特殊环境可替换） */
+export function setPhrasePinyinAsyncLoader(l: PhraseAsyncLoader | null): void {
+  phraseAsyncLoader = l;
+  phraseReadyPromise = null;
+}
+
+/** 测试辅助：复位词组层到未载入态（清缓存与全部注入） */
+export function resetPhrasePinyinForTests(): void {
+  phraseMapCache = null;
+  phraseSyncProvider = null;
+  phraseAsyncLoader = null;
+  phraseReadyPromise = null;
+}
+
+/** 词组层是否已完成载入（Map 已构建且非空） */
+export function isPhrasePinyinDataLoaded(): boolean {
+  return phraseMapCache !== null && phraseMapCache.size > 0;
+}
+
+/** 默认载入器：Android assets 直读；iOS 预留 MainBundlePath 兜底（未打包则降级） */
+function defaultPhraseAssetLoader(): Promise<string> {
+  const fs = RNFS as unknown as {
+    readFileAssets?: (path: string, encoding: string) => Promise<string>;
+    readFile?: (path: string, encoding: string) => Promise<string>;
+    MainBundlePath?: string;
+  };
+  if (typeof fs.readFileAssets === 'function') {
+    return fs.readFileAssets(PHRASE_ASSET_PATH, 'utf8');
+  }
+  if (fs.MainBundlePath && typeof fs.readFile === 'function') {
+    return fs.readFile(`${fs.MainBundlePath}/${PHRASE_ASSET_PATH}`, 'utf8');
+  }
+  return Promise.reject(new Error('phrase-pinyin assets unavailable'));
+}
+
+/**
+ * 确保词组数据就绪（幂等单例）。resolve true = 词组层可用；false = 载入失败
+ * （降级为无词库，规则库 / pinyin-pro 兜底；可再次调用重试）。
+ * 同步 provider 存在时（测试环境）直接走同步路径。
+ */
+export function ensurePhrasePinyinData(): Promise<boolean> {
+  if (isPhrasePinyinDataLoaded()) {
+    return Promise.resolve(true);
+  }
+  if (phraseSyncProvider) {
+    return Promise.resolve(getPhraseMap().size > 0);
+  }
+  if (!phraseReadyPromise) {
+    const loader = phraseAsyncLoader ?? defaultPhraseAssetLoader;
+    phraseReadyPromise = loader()
+      .then((text) => {
+        const payload = JSON.parse(text) as PhrasePinyinPayload;
+        phraseMapCache = new Map(Object.entries(payload.phrases));
+        return phraseMapCache.size > 0;
+      })
+      .catch(() => {
+        // 载入失败：清空 promise 允许下次调用重试；期间词组层缺席（空 Map）
+        phraseMapCache = phraseMapCache ?? new Map();
+        phraseReadyPromise = null;
+        return false;
+      });
+  }
+  return phraseReadyPromise;
+}
+
 function getPhraseMap(): Map<string, string> {
   if (!phraseMapCache) {
-    phraseMapCache = new Map(Object.entries(phrasePinyinData.phrases));
+    if (phraseSyncProvider) {
+      phraseMapCache = new Map(Object.entries(phraseSyncProvider().phrases));
+    } else {
+      // 运行时数据尚未异步载入：空覆盖（不阻塞同步注音路径），
+      // ensurePhrasePinyinData 完成后整体替换，PinyinText 晚到机制触发重算
+      phraseMapCache = new Map();
+    }
   }
   return phraseMapCache;
 }

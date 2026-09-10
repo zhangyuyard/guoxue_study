@@ -29,7 +29,10 @@ import {
 
 import RootNavigator from '@/navigation/RootNavigator';
 import { DictEngine } from '@/services/dict/DictEngine';
-import { setReadingOverrideProvider } from '@/services/PinyinService';
+import {
+  ensurePhrasePinyinData,
+  setReadingOverrideProvider,
+} from '@/services/PinyinService';
 import { StorageService } from '@/services/StorageService';
 import { syncReminderFromStores } from '@/services/ReviewReminderService';
 import { useAchievementStore } from '@/store/useAchievementStore';
@@ -81,6 +84,16 @@ function App(): React.JSX.Element {
     //    内部防重入）→ ③ 成就重算（内部自刷背诵/收藏/笔记，幂等，仅新解锁项落账）。
     // 卸载/effect 重跑时取消未执行任务，避免重复调度。
     return scheduleStartupTasks([
+      {
+        // 词组读音数据（phrase-pinyin，4.9MB assets）预热：P0 下沉后运行时
+        // 首次注音前需异步载入；放在延后任务首位，用户点进阅读器前大概率
+        // 已就绪（readFileAssets + parse 约 200~500ms，独占 macrotask 不挡首帧）。
+        // 幂等单例；失败由阅读器 PinyinText 晚到机制兜底重试。
+        key: 'warmPhrasePinyin',
+        run: () => {
+          void ensurePhrasePinyinData();
+        },
+      },
       {
         // 用户读音纠正注入读音仲裁链最顶端（provider 内部实时读 store state，
         // persist 水合后自动生效；重复注入幂等，effect 重跑无副作用）
