@@ -844,6 +844,92 @@ export function onBuiltinFillProgress(cb: (bookId: string) => void): () => void 
 /** ensureBookReady 的并发去重（首屏快速路径，与全量装载分开记账） */
 const readyInFlight = new Map<string, Promise<ServiceResult<Book>>>();
 
+/** fillBuiltinChapterNow 的并发去重（bookId:chapterId） */
+const chapterFillInFlight = new Set<string>();
+
+/**
+ * 按需优先填充单个内置书章节（阅读器「向前拼接预热」专用）。
+ * 背景：后台填充按书序进行（fillRemainingBuiltinChapters 从第 1 章起），
+ * 跳章阅读时「上一章」可能长期处于空壳态——向前拼接若插入空壳章会先
+ * 渲染空白、后台填到该章时又整体暴涨（大幅跳动）。本函数按 meta 字节
+ * 区间切片（毫秒级）即刻装配目标章，复用既有 hydrate 合并 + 进度通知
+ * 链路；与后台填充并发安全（后台循环对 segments 非空的章直接跳过，
+ * 双方写入内容幂等）。非内置书/未水合/无该章返回 false。
+ */
+export async function fillBuiltinChapterNow(
+  bookId: string,
+  chapterId: string,
+): Promise<boolean> {
+  if (!bookId || !chapterId) {
+    return false;
+  }
+  const spec = getBuiltinSpec(bookId);
+  if (!spec || hiddenBuiltins.has(bookId)) {
+    return false;
+  }
+  const bookRes = TextLibraryService.getBook(bookId);
+  if (!bookRes.success || !bookRes.data) {
+    return false; // 未水合（无壳可填）：由 ensureBookReady 主链路负责
+  }
+  const chapter = bookRes.data.chapters.find((c) => c.id === chapterId);
+  if (!chapter) {
+    return false;
+  }
+  if (chapter.segments.length > 0) {
+    return true; // 已有正文
+  }
+  const key = `${bookId}:${chapterId}`;
+  if (chapterFillInFlight.has(key)) {
+    return false; // 已在填充：完成时经进度通知驱动重试
+  }
+  chapterFillInFlight.add(key);
+  try {
+    const meta = await loadBuiltinMeta(spec);
+    if (!meta) {
+      return false;
+    }
+    const entry = meta.chapters.find((c) => c.id === chapterId);
+    if (!entry) {
+      return false;
+    }
+    const slice = await readBuiltinChapterSlice(spec, entry.s, entry.e);
+    if (slice === null) {
+      return false;
+    }
+    const paras = toParagraphs(slice);
+    chapter.segments = paras.map((p, idx) => ({
+      id: `${chapterId}-s${idx + 1}`,
+      chapterId,
+      order: idx + 1,
+      text: p,
+    }));
+    // 复用填充链路的合并 + 通知语义：重注册书体（LRU 刷新）并通知订阅者
+    //（阅读器 hydrateTick / 拼接重试均由进度订阅驱动）
+    const hydrate = (
+      TextLibraryService as unknown as {
+        hydrateBook?: (book: Book) => { success: boolean; error?: string };
+      }
+    ).hydrateBook;
+    if (typeof hydrate === 'function') {
+      try {
+        hydrate.call(TextLibraryService, bookRes.data);
+      } catch {
+        // 合并失败不抛出（segments 已就位，下次进入重水合兜底）
+      }
+    }
+    builtinFillListeners.forEach((cb) => {
+      try {
+        cb(bookId);
+      } catch {
+        // 单个订阅者异常不影响其余订阅者
+      }
+    });
+    return true;
+  } finally {
+    chapterFillInFlight.delete(key);
+  }
+}
+
 /**
  * meta 快路径：构建全量章节壳（仅目录级，正文空），并按字节区间切片
  * 装配目标章（优先章/第一章），hydrate 上屏。全文零整读。
@@ -3088,6 +3174,7 @@ export const UserBookService = {
   loadAndRegisterAll,
   ensureBookLoaded,
   ensureBookReady,
+  fillBuiltinChapterNow,
   onBuiltinFillProgress,
   scheduleBuiltinFtsIndexBuild,
   isUserBook,

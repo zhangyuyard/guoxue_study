@@ -43,10 +43,15 @@ describe('P1 灰度：maintainVisibleContentPosition 原生视口保持', () => 
   });
 
   test('锚点登记必须由 !MVCP_ENABLED 守卫（防双重补偿）', () => {
-    // prependPreviousChapter 中的登记块
+    // prependPreviousChapter 中的登记块。MVCP 开启时 offset>0 的头部插入
+    // 由原生层补偿；offset≈0 的顶端插入（读上一章）MVCP 不可靠，r28 起改走
+    // scrollToIndex 对齐 + 标题行 onLayout 修正（topAlignRef），不走测量锚点。
     expect(source).toMatch(
       /if \(!MVCP_ENABLED\) \{\s*\n\s*\/\/ 手写补偿路径（MVCP_ENABLED=false 的回退路径）[\s\S]*?prependAnchor\.current = \{/,
     );
+    // 顶端插入：scrollToIndex 对齐 + 消费守卫必须成对出现
+    expect(source).toMatch(/if \(scrollOffset\.current <= 0\) \{\s*\n\s*const insertedRows = prevChapter\.segments\.length \+ 1;/);
+    expect(source).toMatch(/rowId === topAlign\.rowId/);
   });
 
   test('丢头补偿写入必须由 !MVCP_ENABLED 守卫（防双重补偿）', () => {
@@ -59,7 +64,7 @@ describe('P1 灰度：maintainVisibleContentPosition 原生视口保持', () => 
     // 双消费点 + 超时兜底 + 增量污染门控，全部保留
     expect(source).toMatch(/const prependAnchor = useRef</);
     expect(source).toMatch(/const APPEND_COALESCE_MS = 100;/);
-    expect(source).toMatch(/const ANCHOR_TIMEOUT_MS = 2000;/);
+    expect(source).toMatch(/const ANCHOR_TIMEOUT_MS = 8000;/);
     expect(source).toMatch(/const headDropCompensation = useRef\(0\);/);
     expect(source).toMatch(/rowId === anchor\.firstRowId && y > 0/);
   });

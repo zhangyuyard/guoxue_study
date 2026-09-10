@@ -168,8 +168,14 @@ const MAX_CONTINUOUS_CHAPTERS = 30;
  * 若因行回收等极端情况迟迟等不到（如锚点行恰好移出渲染窗口），超时后放弃补偿
  * （视野会跳到上一章开头，属于可接受的降级），确保 appendNextChapter 的
  * prependAnchor 守卫不会被长期卡死、用户滚动不会被陈旧锚点反复拽回。
+ * 旧值 2000 被真机实测打穿（r27）：prepend 插入整章后 VirtualizedList 重挂
+ * 新表头 initialNumToRender 行（注音行极重），JS 单块阻塞 ~2.2s——阻塞期间
+ * 定时器与布局回调都无法执行，锚点在消费前就到期被弃 → 视口跳到上一章开头
+ * （跳章后上滚「大幅跳动」根因之一）。放宽到 8000：锚点消费发生在插入的
+ * 同一轮渲染提交之后（阻塞一结束即消费），不存在「用户滚走后陈旧锚点拽人」
+ * 的窗口——阻塞期间用户根本无法滚动。
  */
-const ANCHOR_TIMEOUT_MS = 2000;
+const ANCHOR_TIMEOUT_MS = 8000;
 
 /**
  * 模式切换后「定位到当前段」的最长等待时间。
@@ -1417,6 +1423,19 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   /** 比例精修轮询入口（实现体在 scrollInitialRows 之后按需赋值，同 locatePendingRowRef 模式） */
   const startRatioRefinePollRef = useRef<(segmentId: string) => void>(() => undefined);
   /**
+   * 向前拼接的「空壳章待填」记录：上一章尚未填充（内置书壳）时 prepend 拒插，
+   * 转为按需优先填充；填充完成由进度订阅重试拼接（用户仍在顶部附近时）。
+   */
+  const pendingPrevPrependRef = useRef<{ chapterId: string; requestedAt: number } | null>(null);
+  /** prependPreviousChapter 最新实现的 ref（填充进度订阅闭包安全调用） */
+  const prependPrevRef = useRef<() => void>(() => undefined);
+  /**
+   * 顶端插入补偿（读上一章）：待对齐的旧首章标题行。prepend 后由
+   * scrollToIndex(插入行数) 拉到视口顶（估算落点），该行挂载后用
+   * cell 级真实 y 一次性修正（见 handleRowLayout 消费点）。
+   */
+  const topAlignRef = useRef<{ rowId: string; createdAt: number; done: boolean } | null>(null);
+  /**
    * 注音切换等「行高整体变化」场景的视口锚点（滚动模式防跳动）。
    * 注音开启/关闭会使正文行高成倍变化（PinyinText 逐字两行 ↔ HighlightText 单行），
    * 视口上方全部内容的高度随之改变，而滚动 offset 数值不变 → 视口内的内容直接
@@ -1672,9 +1691,26 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           continuousRef.current = merged;
           setContinuousChapters(merged);
         }
+        // 空壳章待填的向前拼接重试：上一章按需填充完成后，用户若仍在
+        // 顶部附近（意图未消失）则自动补拼；已滚走则丢弃意图
+        const pending = pendingPrevPrependRef.current;
+        if (pending) {
+          const filled = fresh.data.chapters.find((c) => c.id === pending.chapterId);
+          if (filled && filled.segments.length > 0) {
+            pendingPrevPrependRef.current = null;
+            if (
+              readerMode === 'scroll' &&
+              scrollOffset.current <= viewH.current * CONTIGUOUS_PRELOAD_SCREENS
+            ) {
+              prependPrevRef.current();
+            }
+          } else if (Date.now() - pending.requestedAt > 30000) {
+            pendingPrevPrependRef.current = null; // 兜底过期，防永久挂起
+          }
+        }
       }
     });
-  }, [bookId]);
+  }, [bookId, readerMode]);
 
   // 文本数据：随路由参数【同步派生】（BugFix：切章时旧章内容多渲染一帧的闪烁）。
   // 旧实现经 init effect 异步 setState 加载：点「下一章」后参数已变、章节状态仍是
@@ -1712,6 +1748,27 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     }
     return null;
   }, [bookId, chapterId, book, chapter, builtinHydrateFailed]);
+
+  /**
+   * 上一章预热（滚动模式）：内置书后台填充按书序进行，跳到靠后章节时
+   * 「上一章」可能长期处于空壳态——用户往上滚触发向前拼接时才临时填充，
+   * 期间视口上方无内容（空白/回弹）。本 effect 在章就绪后立即按需优先
+   * 填充上一章（meta 切片毫秒级），用户上滚时拼接零等待。
+   * 幂等性由 fillBuiltinChapterNow 保证（已有正文直接返回，并发去重）。
+   */
+  useEffect(() => {
+    if (readerMode !== 'scroll' || !bookId || !chapter || !book) {
+      return;
+    }
+    if (TextLibraryService.isUserBook(bookId)) {
+      return; // 用户书无空壳概念（整本同时就位）
+    }
+    const idx = book.chapters.findIndex((c) => c.id === chapter.id);
+    const prev = idx > 0 ? book.chapters[idx - 1] : undefined;
+    if (prev && prev.segments.length === 0) {
+      void UserBookService.fillBuiltinChapterNow(bookId, prev.id);
+    }
+  }, [readerMode, bookId, book, chapter]);
 
   /**
    * 滚动拼接序列的「当帧一致视图」（切章闪烁的另一半修复）。
@@ -2268,6 +2325,15 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     if (continuousRef.current.some((c) => c.id === prevChapter.id)) {
       return;
     }
+    // 空壳章守卫：内置书后台填充按书序进行，跳章后「上一章」可能尚未填充。
+    // 插入空壳会先渲染空白（标题行高度≈0 内容），后台填到该章时整体暴涨
+    // （大幅跳动）。拒插 + 按需优先填充（meta 切片毫秒级），填充完成由
+    // 进度订阅重试拼接（用户仍在顶部附近时）。
+    if (prevChapter.segments.length === 0) {
+      void UserBookService.fillBuiltinChapterNow(book.id, prev.id);
+      pendingPrevPrependRef.current = { chapterId: prev.id, requestedAt: Date.now() };
+      return;
+    }
     // 「打开时定位到指定段落」尚未完成时不要插入：两者都会调 scrollToOffset，
     // 会互相覆盖。等定位落位后由滚动事件按需触发（滚到顶部才需要上一章）。
     if (pendingScroll.current.target && !pendingScroll.current.done) {
@@ -2285,11 +2351,39 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         snapshot: new Map(rowOffsets.current),
       };
     }
+    // 顶端插入补偿（scrollToIndex 法，r28）：offset≈0（章首回弹「读上一章」）
+    // 时 MVCP 补偿不可靠（r23 已踩坑），而测量式锚点在窗口化下也会失效——
+    // 插入后旧行（原章标题）落在渲染窗口外，onLayout 永不触发、锚点消费不到
+    //（prepend 重挂新表头行的 JS 阻塞还会打穿锚点超时，真机 r27 实测仍跳）。
+    // 改为按「插入章行数 K」直接把旧首行（原章标题）对齐到视口顶：
+    // offset≈0 时「保持视口」⟺「原章标题仍在顶部」，无需测量插入高度。
+    // scrollToIndex 的估算落点偏差由标题行挂载后的 onLayout 一次性修正
+    // （topAlignRef，见 handleRowLayout）。
+    if (scrollOffset.current <= 0) {
+      const insertedRows = prevChapter.segments.length + 1;
+      topAlignRef.current = {
+        rowId: `${TITLE_ROW_PREFIX}${firstId}`,
+        createdAt: Date.now(),
+        done: false,
+      };
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          listRef.current?.scrollToIndex({
+            index: insertedRows,
+            viewPosition: 0,
+            animated: false,
+          });
+        });
+      });
+    }
     const merged = [prevChapter, ...continuousRef.current];
     continuousRef.current = merged;
     continuousChapterIdsRef.current = new Set(merged.map((c) => c.id));
     setContinuousChapters(merged);
+    pendingPrevPrependRef.current = null;
   }, [book, readerMode, pendingScroll, rowOffsets, expireAnchorIfNeeded]);
+  // 填充进度订阅经 ref 调用最新实现（订阅 effect 注册早于本 useCallback）
+  prependPrevRef.current = prependPreviousChapter;
 
   /**
    * 【5】自动向前拼接的统一执行入口（全部触发点共用，触发点只负责判定）：
@@ -2766,6 +2860,26 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const handleRowLayout = useCallback(
     (rowId: string, y: number) => {
       rowOffsets.current.set(rowId, y);
+      // 顶端插入补偿修正：scrollToIndex 估算落位后，旧首章标题行挂载上报
+      // 真实 y——对齐到该 y（标题行贴视口顶）即完成「保持视口」的精确补偿。
+      // 超时/已消费/用户已大幅滚动（估算落点附近用户主动移动）则放弃。
+      const topAlign = topAlignRef.current;
+      if (topAlign && !topAlign.done && rowId === topAlign.rowId) {
+        topAlign.done = true;
+        topAlignRef.current = null;
+        if (
+          y > 0 &&
+          Date.now() - topAlign.createdAt < 5000 &&
+          Math.abs(scrollOffset.current - y) > 2
+        ) {
+          const estimated = scrollOffset.current;
+          scrollOffset.current = y;
+          listRef.current?.scrollToOffset({ offset: y, animated: false });
+          console.info(
+            `[PERF][locate] top align row=${rowId} est=${Math.round(estimated)}->y=${Math.round(y)}`,
+          );
+        }
+      }
       // 注音切换视口锚点：目标行重排后按「新 y + 视口顶入深度」一次性落位。
       // 超时（LOCATE_TIMEOUT_MS）未等到重排则放弃，避免陈旧锚点在后续布局中
       // 突然生效把用户拽走。
@@ -4066,8 +4180,17 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
                 // 精确路径（优先）：锚点行已重排时直接用「新 y − 旧 y（恒 0，
                 // 锚点行是列表首行）」补偿——只含插入高度，与同期 append 的
                 // 下方内容无关，绝不受同帧合并的 contentSize 增量污染。
+                // 【r28 防误补偿】rowOffsets 是「最近一次 onLayout」的缓存，
+                // 锚点行未随插入重新布局时（落入渲染窗口外）读到的是陈旧值——
+                // 必须与快照中该行的旧 y 比对：相等即尚未重排，让位给增量
+                // 兜底路径，绝不能拿旧 y 当「插入高度」补偿。
                 const newY = rowOffsets.current.get(anchorNow.firstRowId);
-                if (typeof newY === 'number' && newY > 0) {
+                const oldY = anchorNow.snapshot.get(anchorNow.firstRowId);
+                if (
+                  typeof newY === 'number' &&
+                  newY > 0 &&
+                  newY !== oldY
+                ) {
                   anchorNow.snapshot.forEach((oldY, key) => {
                     if (rowOffsets.current.get(key) === oldY) {
                       rowOffsets.current.set(key, oldY + newY);
