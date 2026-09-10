@@ -577,20 +577,37 @@ async function ensureBuiltinAssetFresh(spec: BuiltinBookSpec): Promise<void> {
  * 首章优先快速水合用——只需原文即可切章与装配目标章。 */
 async function readBuiltinText(
   spec: BuiltinBookSpec,
-): Promise<{ text: string; contentHash: string } | null> {
+): Promise<{ text: string; contentHash?: string } | null> {
   const canonicalPath = `${getBuiltinDirPath()}/${spec.id}.txt`;
+  // ① native UTF-8 直读（首选）：解码在 native 层完成，JS 零逐字节开销。
+  // 旧路径（readFileBytes base64 分块 + isStrictUtf8 全量校验 + decodeUtf8
+  // 逐字节拼接）对资治通鉴级 9MB 文本是 3-10s 的连续同步阻塞——「初次
+  // 点卡片长时间无响应」的第一大块。内置资产由构建脚本生成、恒为 UTF-8，
+  // 直读必然成功；失败（文件缺失/损坏/非 UTF-8）走 ② 字节路径兜底。
+  try {
+    const text = await RNFS.readFile(canonicalPath, 'utf8');
+    if (text) {
+      // contentHash 仅导入查重消费（user_books 表），内置首开链路无人使用；
+      // 不再对 9MB 文本做 utf8Bytes 全量重编码 + 双散列（原为 2-7s 的
+      // 第二大块，纯浪费）。
+      return { text };
+    }
+  } catch {
+    // 直读失败（文件缺失/IO 异常）走字节路径兜底
+  }
+  // ② 字节路径（编码检测 + JS 逐字节解码）：仅非 UTF-8 内容触达
   try {
     const bytesRes = await readFileBytes(canonicalPath);
     if (bytesRes.success && bytesRes.data && bytesRes.data.length > 0) {
-      const text = decodeTextBytes(bytesRes.data).text;
-      return { text, contentHash: contentSignature(utf8Bytes(text)) };
+      return { text: decodeTextBytes(bytesRes.data).text };
     }
   } catch {
     // 文件读取失败走 assets 兜底
   }
+  // ③ assets 兜底（native utf8 解码）
   try {
     const text = await RNFS.readFileAssets(`books/${spec.id}.txt`, 'utf8');
-    return { text, contentHash: contentSignature(utf8Bytes(text)) };
+    return { text };
   } catch {
     return null;
   }
@@ -755,7 +772,7 @@ export async function ensureBookReady(
         }
         return TextLibraryService.getBook(bookId);
       }
-      const shells = buildBuiltinChapterShells(bookId, body.text);
+      const shells = await buildBuiltinChapterShells(bookId, body.text);
       if (shells.length === 0) {
         // 兜底：切章失败（异常文本）→ 整本分片解析旧路径
         const parsed = await loadBuiltinBookBody(spec);
@@ -814,13 +831,18 @@ export async function ensureBookReady(
  * 内置书空壳章构建：@@CH@@ 标记文本 → 全量章节骨架（segments 空）。
  * 切章/开篇/空白跳过规则与解析器完全一致（见函数头注释），仅不做
  * toParagraphs 装配（重活留给目标章与后台填充）。
+ * 分批让出版：切章走 splitRawChaptersChunked（每 2 万行让出），空白
+ * 判定（join+trim）每 SHELL_BATCH 章 让出一次——原单块版对 9MB 全程
+ * 同步约 1-2s；本函数仅首开快速水合路径调用（ensureBookReady）。
  */
-function buildBuiltinChapterShells(
+const SHELL_BATCH_CHAPTERS = 40;
+
+async function buildBuiltinChapterShells(
   bookId: string,
   text: string,
-): { chapter: Book['chapters'][number]; bodyLines: string[] }[] {
+): Promise<{ chapter: Book['chapters'][number]; bodyLines: string[] }[]> {
   const normalized = text.replace(/\r\n?/g, '\n');
-  const { rawChapters, preface } = splitRawChapters(normalized, true);
+  const { rawChapters, preface } = await splitRawChaptersChunked(normalized, true);
   const shells: { chapter: Book['chapters'][number]; bodyLines: string[] }[] = [];
   let order = 0;
   const addShell = (chapterTitle: string, bodyLines: string[]): void => {
@@ -838,8 +860,12 @@ function buildBuiltinChapterShells(
   if (toParagraphs(preface.join('\n')).length > 0) {
     addShell('开篇', preface);
   }
-  for (const rc of rawChapters) {
-    addShell(rc.title, rc.body);
+  for (let i = 0; i < rawChapters.length; i += 1) {
+    addShell(rawChapters[i].title, rawChapters[i].body);
+    if ((i + 1) % SHELL_BATCH_CHAPTERS === 0 && i + 1 < rawChapters.length) {
+      // eslint-disable-next-line no-await-in-loop
+      await yieldToJs();
+    }
   }
   return shells;
 }
@@ -860,11 +886,12 @@ function assembleBuiltinBook(
 }
 
 /**
- * 后台分批填充剩余章节：每 30 章一批（与 parseTxtBookChunked 同粒度），
- * 批内同步装配、批间让出 JS，并把合并后的书体重新 hydrate（引用替换
- * 使 TextLibraryService 缓存正确失效）+ 通知订阅者。填充即用户活动，
- * 期间持续压住 FTS 队列门闩；全部完成后书体在内存，顺带补 FTS 索引。
- * 失败静默中止（空壳章保留，重进该书重新走 ensureBookReady 水合）。
+ * 后台时间片填充剩余章节：逐章装配，每章完成检查耗时，超过
+ * FILL_TIME_BUDGET_MS（12ms）即让出 JS 并把合并后的书体重新 hydrate
+ *（引用替换使 TextLibraryService 缓存正确失效）+ 通知订阅者。
+ * 填充即用户活动，期间持续压住 FTS 队列门闩；全部完成后书体在内存，
+ * 顺带补 FTS 索引（分片异步）。失败静默中止（空壳章保留，重进该书
+ * 重新走 ensureBookReady 水合）。
  */
 async function fillRemainingBuiltinChapters(
   spec: BuiltinBookSpec,
@@ -881,52 +908,75 @@ async function fillRemainingBuiltinChapters(
     //（首屏只含目标章解析），填充绝不与首屏渲染争抢同一拍
     // eslint-disable-next-line no-await-in-loop
     await yieldToJs();
-    for (let start = 0; start < shells.length; start += PARSE_CHUNK_CHAPTERS) {
-      // 填充期间压住 FTS 队列（书间检查点生效），完成后留 10s 收尾缓冲
+    // 时间片驱动（替代固定 30 章/批）：每装配完一章检查耗时，超过
+    // FILL_TIME_BUDGET_MS 即让出 JS 并 hydrate+通知。原 30 章/批对
+    // 资治通鉴级（章均 1.5 万字）单片可达数秒，是「点卡片后长时间
+    // 无法操作」的第四大块；时间片最坏块 = 单章 toParagraphs（约 10-30ms）。
+    let sliceFilled = 0;
+    let sliceStart = Date.now();
+    for (let i = 0; i < shells.length; i += 1) {
+      const shell = shells[i];
+      if (shell.chapter.segments.length > 0) {
+        continue; // 目标章已在首屏装配，跳过
+      }
+      // 填充期间压住 FTS 队列（片间检查点生效），完成后留 10s 收尾缓冲
       ftsQueuePausedUntil = Math.max(
         ftsQueuePausedUntil,
         Date.now() + FTS_PAUSE_ON_HYDRATE_MS,
       );
-      let batchFilled = 0;
-      for (
-        let i = start;
-        i < Math.min(start + PARSE_CHUNK_CHAPTERS, shells.length);
-        i += 1
-      ) {
-        const shell = shells[i];
-        if (shell.chapter.segments.length > 0) {
-          continue; // 目标章已在首屏装配，跳过
-        }
-        const paras = toParagraphs(shell.bodyLines.join('\n'));
-        shell.chapter.segments = paras.map((p, idx) => ({
-          id: `${shell.chapter.id}-s${idx + 1}`,
-          chapterId: shell.chapter.id,
-          order: idx + 1,
-          text: p,
-        }));
-        batchFilled += 1;
-      }
-      // 批间让出一拍：tap/触摸/渲染可插队
-      // eslint-disable-next-line no-await-in-loop
-      await yieldToJs();
-      if (batchFilled > 0 && typeof hydrate === 'function') {
-        const merged = assembleBuiltinBook(
-          spec,
-          shells.map((s) => s.chapter),
-        );
-        try {
-          hydrate.call(TextLibraryService, merged);
-        } catch {
-          // 单批合并失败不中止（空壳保留，下次进入重水合）
-        }
-        builtinFillListeners.forEach((cb) => {
+      const paras = toParagraphs(shell.bodyLines.join('\n'));
+      shell.chapter.segments = paras.map((p, idx) => ({
+        id: `${shell.chapter.id}-s${idx + 1}`,
+        chapterId: shell.chapter.id,
+        order: idx + 1,
+        text: p,
+      }));
+      sliceFilled += 1;
+      if (Date.now() - sliceStart >= FILL_TIME_BUDGET_MS) {
+        // 片间让出一拍：tap/触摸/渲染可插队；让出后立即合并+通知
+        //（阅读器 hydrateTick 按章引用 diff，粒度越细重算越轻）
+        // eslint-disable-next-line no-await-in-loop
+        await yieldToJs();
+        if (sliceFilled > 0 && typeof hydrate === 'function') {
+          const merged = assembleBuiltinBook(
+            spec,
+            shells.map((s) => s.chapter),
+          );
           try {
-            cb(spec.id);
+            hydrate.call(TextLibraryService, merged);
           } catch {
-            // 单个订阅者异常不影响其余订阅者与填充流程
+            // 单片合并失败不中止（空壳保留，下次进入重水合）
           }
-        });
+          builtinFillListeners.forEach((cb) => {
+            try {
+              cb(spec.id);
+            } catch {
+              // 单个订阅者异常不影响其余订阅者与填充流程
+            }
+          });
+        }
+        sliceFilled = 0;
+        sliceStart = Date.now();
       }
+    }
+    // 尾片（不足预算余额）合并+通知
+    if (sliceFilled > 0 && typeof hydrate === 'function') {
+      const merged = assembleBuiltinBook(
+        spec,
+        shells.map((s) => s.chapter),
+      );
+      try {
+        hydrate.call(TextLibraryService, merged);
+      } catch {
+        // 尾片合并失败不中止
+      }
+      builtinFillListeners.forEach((cb) => {
+        try {
+          cb(spec.id);
+        } catch {
+          // 单个订阅者异常不影响其余订阅者与填充流程
+        }
+      });
     }
     // 填充完成：书体已在内存，若尚未入 FTS 索引则顺带补齐（省重复解析）。
     // 分片异步写入：同步版对资治通鉴级（约 300 万字）的书单块执行会把
@@ -1049,6 +1099,20 @@ export function __resetBuiltinLazyStateForTests(): void {
   builtinFillListeners.clear();
   ensureInFlight.clear();
   readyInFlight.clear();
+}
+
+/** 仅测试：切章同步版与分批让出版各跑一遍（分批状态机漂移防护——
+ * 两版共用 scanChapterLineRange，但跨批续作正确性只有端到端可比对）。 */
+export async function __splitChaptersBothWaysForTests(
+  normalized: string,
+): Promise<{
+  sync: { rawChapters: RawChapter[]; preface: string[] };
+  chunked: { rawChapters: RawChapter[]; preface: string[] };
+}> {
+  return {
+    sync: splitRawChapters(normalized, true),
+    chunked: await splitRawChaptersChunked(normalized, true),
+  };
 }
 
 /**
@@ -1359,46 +1423,119 @@ interface RawChapter {
 const PARSE_CHUNK_CHAPTERS = 30;
 
 /**
+ * 后台填充的时间片预算（ms）：每装配完一章检查耗时，超预算即让出。
+ * 块上限 = 单章 toParagraphs（资治通鉴级约 10-30ms）。替代原固定
+ * 30 章/批（对大书单片可达数秒，点卡片后长时间无法操作的第四大块）。
+ */
+const FILL_TIME_BUDGET_MS = 12;
+
+/**
  * 逐行扫描切出 [章节标题, 标题下正文] 序列与标题前正文（同步纯函数）。
  * useMarkers 启用时 @@CH@@ 标记行同样切章（结构化格式统一标记），
  * 标记行无标题时补「第N章」（按标记行出现顺序计数）。
  * 同步版与分片版装配路径共用本函数，保证解析结果逐字节一致。
  */
+/**
+ * 切章扫描状态（跨批续作）：同步版 splitRawChapters 与分批版
+ * splitRawChaptersChunked 共用同一逐行状态机（scanChapterLineRange），
+ * 两版产出恒等（有对齐测试锁定）。
+ */
+interface ChapterScanState {
+  rawChapters: RawChapter[];
+  current: RawChapter | null;
+  preface: string[];
+  markerCount: number;
+}
+
+function createChapterScanState(): ChapterScanState {
+  return { rawChapters: [], current: null, preface: [], markerCount: 0 };
+}
+
+/** 扫描 lines 的 [from, to) 区间并入状态（逐行规则与原实现逐语句一致） */
+function scanChapterLineRange(
+  state: ChapterScanState,
+  lines: string[],
+  from: number,
+  to: number,
+  useMarkers: boolean,
+): void {
+  for (let i = from; i < to; i += 1) {
+    const line = lines[i];
+    const marker = useMarkers ? CHAPTER_MARKER_LINE_RE.exec(line) : null;
+    if (marker) {
+      if (state.current) {
+        state.rawChapters.push(state.current);
+      }
+      state.markerCount += 1;
+      state.current = {
+        title: marker[1].trim() || `第${state.markerCount}章`,
+        body: [],
+      };
+    } else {
+      const m = CHAPTER_TITLE_RE.exec(line);
+      if (m) {
+        if (state.current) {
+          state.rawChapters.push(state.current);
+        }
+        state.current = { title: m[1].trim(), body: [] };
+      } else if (state.current) {
+        state.current.body.push(line);
+      } else {
+        state.preface.push(line);
+      }
+    }
+  }
+}
+
+function finishChapterScan(
+  state: ChapterScanState,
+): { rawChapters: RawChapter[]; preface: string[] } {
+  if (state.current) {
+    state.rawChapters.push(state.current);
+  }
+  return { rawChapters: state.rawChapters, preface: state.preface };
+}
+
 function splitRawChapters(
   normalized: string,
   useMarkers: boolean,
 ): { rawChapters: RawChapter[]; preface: string[] } {
   const lines = normalized.split('\n');
-  const rawChapters: RawChapter[] = [];
-  let current: RawChapter | null = null;
-  const preface: string[] = [];
-  let markerCount = 0;
-  for (const line of lines) {
-    const marker = useMarkers ? CHAPTER_MARKER_LINE_RE.exec(line) : null;
-    if (marker) {
-      if (current) {
-        rawChapters.push(current);
-      }
-      markerCount += 1;
-      current = { title: marker[1].trim() || `第${markerCount}章`, body: [] };
-    } else {
-      const m = CHAPTER_TITLE_RE.exec(line);
-      if (m) {
-        if (current) {
-          rawChapters.push(current);
-        }
-        current = { title: m[1].trim(), body: [] };
-      } else if (current) {
-        current.body.push(line);
-      } else {
-        preface.push(line);
-      }
+  const state = createChapterScanState();
+  scanChapterLineRange(state, lines, 0, lines.length, useMarkers);
+  return finishChapterScan(state);
+}
+
+/** 分批切章的每批行数：9MB 书约 20 万行 → 10 批，每批约 30-80ms 让出一次
+ *（tap/触摸/渲染可在批间插队）。原单块版对 9MB 全量扫描约 0.5-1.5s，
+ * 是「初次点卡片长时间无响应」的第三大块。 */
+const SPLIT_SCAN_BATCH_LINES = 20000;
+
+/**
+ * 分批让出版的切章扫描：与同步版共用 scanChapterLineRange 状态机，
+ * 每 SPLIT_SCAN_BATCH_LINES 行让出一次 JS。供首开快速水合路径
+ * （buildBuiltinChapterShells）使用；解析器（parseTxtBook 系）保持同步版。
+ */
+async function splitRawChaptersChunked(
+  normalized: string,
+  useMarkers: boolean,
+): Promise<{ rawChapters: RawChapter[]; preface: string[] }> {
+  const lines = normalized.split('\n');
+  const state = createChapterScanState();
+  for (let from = 0; from < lines.length; from += SPLIT_SCAN_BATCH_LINES) {
+    scanChapterLineRange(
+      state,
+      lines,
+      from,
+      Math.min(from + SPLIT_SCAN_BATCH_LINES, lines.length),
+      useMarkers,
+    );
+    if (from + SPLIT_SCAN_BATCH_LINES < lines.length) {
+      // eslint-disable-next-line no-await-in-loop
+      await yieldToJs();
     }
   }
-  if (current) {
-    rawChapters.push(current);
-  }
-  return { rawChapters, preface };
+  return finishChapterScan(state);
 }
 
 /**

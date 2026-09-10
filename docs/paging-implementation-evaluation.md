@@ -70,3 +70,23 @@ legado 滚动模式也是「先把章节排进视口尺寸的连续内容」，�
 - 重试条件改为「本轮零进展」（`progressed` 判定），不再追逐恒假条件
 - `appendNextChapter` 成功记录 `lastAppendAtRef`；锚点兜底补偿优先走「锚点行新 y 精确补偿」（只含插入高度，与下方 append 无关），增量路径加 `APPEND_COALESCE_MS=100` 时间窗门控——同 tick append 污染时让位给行布局路径/超时兜底
 - 回归断言锁入 `readerBugfixRegression.test.ts`；全量 869/869
+
+---
+
+## 第二轮（2026-09-10）：初次点卡片无响应的根因闭环
+
+第一轮 FTS 分片后真机仍复现。重新归因：点卡片**之后**的水合链路存在 5 个同步大块
+（资治通鉴级 9MB 书实测口径）：
+
+| # | 块 | 原耗时 | 修复 |
+|---|---|---|---|
+| ① | decodeUtf8 逐字节 JS 解码 | 3-10s | `RNFS.readFile(path,'utf8')` native 解码直读（内置资产恒为 UTF-8）；字节路径降为兜底 |
+| ② | contentSignature(utf8Bytes(text)) 无人消费的重编码+双散列 | 2-7s | 内置首开路径不再计算（仅导入查重消费，保留在导入路径） |
+| ③ | splitRawChapters 单块 9MB 逐行扫描 | 0.5-1.5s | 状态机抽核心（scanChapterLineRange）+ splitRawChaptersChunked 每 2 万行让出；一致性测试锁定两版恒等 |
+| ④ | fill 固定 30 章/批（单片可达数秒） | 数秒×10 批 | 时间片 12ms：逐章装配、超预算让出+hydrate+通知 |
+| ⑤ | FTS 固定 8 章/片（单片约 25 万字） | 0.5-2s/片 | 时间片 8ms：逐章构建+插入、章级门闩检查；chunkChapters 参数保留供测试注入 |
+
+对应开源实践：RNFS 官方「Process in Native」原则（①）、legado「重活全离 UI 上下文
++ 分批加载」（③④⑤）、React 调度器时间切片模型（④⑤）。剩余已知大块：
+decodeUtf8 兜底路径已分块 join 优化（3-10×）；启动期 4.9MB phrase-pinyin.json
+静态 import 为下一轮候选（下沉 assets 异步加载）。

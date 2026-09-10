@@ -351,10 +351,12 @@ export function upsertFtsForBook(book: Book): ServiceResult<boolean> {
   }
 }
 
-/** 分片异步索引的默认片大小（章/片）：单片原生 SQLite 插入代价毫秒级，
- *  JS 线程在片间可响应触摸/渲染（真机教训：同步版对资治通鉴级约 300 万字
- *  的书单块执行占死 JS 数秒至数十秒，初次启动建索引期间全 UI 无响应） */
-const FTS_CHUNK_CHAPTERS = 8;
+/** 时间片预算（ms）：默认路径逐章构建行+插入，每章完成检查耗时，超预算
+ * 即让出。固定 8 章/片对资治通鉴级（章均 1.5 万字）单片约 25 万字，
+ * tokenize+逐行 execute 仍可秒级——时间片把块上限压到单章量级（约 10-30ms）。
+ * （真机教训：同步版对资治通鉴级约 300 万字的书单块执行占死 JS 数秒至
+ * 数十秒，初次启动建索引期间全 UI 无响应） */
+const FTS_TIME_BUDGET_MS = 8;
 
 /** 分片异步索引的单片让出间隔（ms）：macrotask，触摸/渲染事件可在片间插队 */
 const FTS_CHUNK_YIELD_MS = 0;
@@ -362,12 +364,31 @@ const FTS_CHUNK_YIELD_MS = 0;
 /** 分片异步索引的暂停轮询间隔（ms）：shouldPause 为 true 期间挂起等待 */
 const FTS_CHUNK_PAUSE_POLL_MS = 250;
 
+/** 单章 FTS 行构建+插入（供时间片路径复用） */
+function buildAndInsertChapterFts(
+  instance: DB,
+  book: Book,
+  chapter: Book['chapters'][number],
+): void {
+  const rows: FtsRow[] = chapter.segments.map((seg) => ({
+    segmentId: seg.id,
+    bookId: book.id,
+    chapterId: chapter.id,
+    bookTitle: book.title,
+    chapterTitle: chapter.title,
+    text: seg.text,
+  }));
+  insertFtsRows(instance, rows);
+}
+
 /**
  * 分片异步版单书 FTS 索引写入（幂等 upsert，语义与 upsertFtsForBook 一致）。
- * 按章分片「构建行 + 插入」，片间让出 JS 线程（macrotask）；
- * opts.shouldPause() 为 true 时挂起轮询等待（如用户优先门闩：用户正在
- * 水合/交互时暂停建索引，门闩解除后从断点续写——INSERT OR REPLACE 幂等，
- * 重叠无副作用）。超大书跳过（与同步版同口径，仅不可被全文搜索命中）。
+ * 默认时间片驱动：逐章「构建行 + 插入」，每章完成检查耗时，超
+ * FTS_TIME_BUDGET_MS 即让出 JS 线程（macrotask）；显式传入 opts.chunkChapters
+ * 时退回固定章数分片（测试注入用）。用户优先门闩在章级检查——shouldPause()
+ * 为 true 时挂起轮询等待（用户水合/交互时暂停建索引，门闩解除后从断点
+ * 续写——INSERT OR REPLACE 幂等，重叠无副作用）。
+ * 超大书跳过（与同步版同口径，仅不可被全文搜索命中）。
  * 供后台索引队列 / 填充完成顺带入索引等非交互关键路径调用；
  * 导入书同会话立即可搜的路径仍用同步版（导入自身有明确的一次性等待语义）。
  */
@@ -388,34 +409,54 @@ export async function upsertFtsForBookChunked(
     if (!initRes.success) {
       return initRes;
     }
-    const chunkSize = Math.max(1, opts?.chunkChapters ?? FTS_CHUNK_CHAPTERS);
-    for (let i = 0; i < book.chapters.length; i += chunkSize) {
-      // 用户优先门闩：片间检查，挂起时轮询等待（250ms 一次）
+    if (opts?.chunkChapters !== undefined) {
+      // 固定章数分片（测试/兼容路径）：与旧实现逐语句一致
+      const chunkSize = Math.max(1, opts.chunkChapters);
+      for (let i = 0; i < book.chapters.length; i += chunkSize) {
+        // 用户优先门闩：片间检查，挂起时轮询等待（250ms 一次）
+        // eslint-disable-next-line no-await-in-loop
+        while (opts.shouldPause?.()) {
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise<void>((resolve) => setTimeout(resolve, FTS_CHUNK_PAUSE_POLL_MS));
+        }
+        const chunk = book.chapters.slice(i, i + chunkSize);
+        const rows: FtsRow[] = [];
+        for (const chapter of chunk) {
+          for (const seg of chapter.segments) {
+            rows.push({
+              segmentId: seg.id,
+              bookId: book.id,
+              chapterId: chapter.id,
+              bookTitle: book.title,
+              chapterTitle: chapter.title,
+              text: seg.text,
+            });
+          }
+        }
+        insertFtsRows(instance, rows);
+        // 片间让出：最后一个片也不用额外让出（循环自然结束）
+        // eslint-disable-next-line no-await-in-loop
+        if (i + chunkSize < book.chapters.length) {
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise<void>((resolve) => setTimeout(resolve, FTS_CHUNK_YIELD_MS));
+        }
+      }
+      return { success: true, data: true };
+    }
+    // 默认时间片路径（生产）：逐章构建+插入，章级门闩检查，超预算让出
+    let sliceStart = Date.now();
+    for (let i = 0; i < book.chapters.length; i += 1) {
+      // 用户优先门闩：章级检查（粒度比旧片间更细，水合响应更快）
       // eslint-disable-next-line no-await-in-loop
       while (opts?.shouldPause?.()) {
         // eslint-disable-next-line no-await-in-loop
         await new Promise<void>((resolve) => setTimeout(resolve, FTS_CHUNK_PAUSE_POLL_MS));
       }
-      const chunk = book.chapters.slice(i, i + chunkSize);
-      const rows: FtsRow[] = [];
-      for (const chapter of chunk) {
-        for (const seg of chapter.segments) {
-          rows.push({
-            segmentId: seg.id,
-            bookId: book.id,
-            chapterId: chapter.id,
-            bookTitle: book.title,
-            chapterTitle: chapter.title,
-            text: seg.text,
-          });
-        }
-      }
-      insertFtsRows(instance, rows);
-      // 片间让出：最后一个片也不用额外让出（循环自然结束）
-      // eslint-disable-next-line no-await-in-loop
-      if (i + chunkSize < book.chapters.length) {
+      buildAndInsertChapterFts(instance, book, book.chapters[i]);
+      if (Date.now() - sliceStart >= FTS_TIME_BUDGET_MS) {
         // eslint-disable-next-line no-await-in-loop
         await new Promise<void>((resolve) => setTimeout(resolve, FTS_CHUNK_YIELD_MS));
+        sliceStart = Date.now();
       }
     }
     return { success: true, data: true };
