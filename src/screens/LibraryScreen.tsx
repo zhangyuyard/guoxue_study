@@ -117,6 +117,9 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
           ? book.chapters.find((c) => c.id === last.chapterId)
           : undefined;
       const chapter = resume ?? book.chapters[0];
+      console.info(
+        `[PERF][library] tap book=${book.id} resume=${resume ? resume.id : 'no'}`,
+      );
       navigation.navigate('Reader', {
         bookId: book.id,
         chapterId: chapter.id,

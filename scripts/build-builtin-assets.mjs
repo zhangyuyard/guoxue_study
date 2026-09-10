@@ -81,42 +81,66 @@ function toMarkerText(chapters) {
  * 返回 [{ id, title }]，id 与运行时 `${bookId}-c${order}` 逐条一致。
  */
 function deriveToc(text, bookId) {
+  return deriveTocWithRanges(text, bookId).map(({ id, title }) => ({ id, title }));
+}
+
+/**
+ * deriveToc 的扩展版：额外给出每章正文在 txt 中的 UTF-8 字节区间
+ * [s, e)（s=章首正文行起点，e=下一标记行/文件尾），用于生成
+ * books/<id>.meta.json——运行时按章 RNFS.read 切片读取，首开水合
+ * 不再整读 9MB 级全文（真机 readFile 单次大读阻塞 JS 11s+）。
+ * 行界切片天然落在 UTF-8 字符边界，无截断风险。
+ */
+function deriveTocWithRanges(text, bookId) {
   const lines = text.split('\n');
   const raw = [];
   let cur = null;
   let prefaceHasBody = false;
   let markerCount = 0;
-  for (const line of lines) {
+  let off = 0;
+  let firstMarkerStart = -1;
+  for (let li = 0; li < lines.length; li += 1) {
+    const line = lines[li];
+    const lineStart = off;
+    // 末个 split 元素（文本以 \n 结尾时为空串）不带真实换行，不加 1
+    off = lineStart + Buffer.byteLength(line, 'utf8') + (li < lines.length - 1 ? 1 : 0);
     const m = /^@@CH@@(.*)$/.exec(line);
     if (m) {
       markerCount += 1;
+      if (firstMarkerStart < 0) {
+        firstMarkerStart = lineStart;
+      }
       if (cur) {
+        cur.e = lineStart;
         raw.push(cur);
       }
-      cur = { title: m[1].trim() || `第${markerCount}章`, hasBody: false };
+      cur = { title: m[1].trim() || `第${markerCount}章`, hasBody: false, s: off, e: 0 };
     } else if (cur) {
       if (line.trim()) {
         cur.hasBody = true;
       }
-    } else if (line.trim()) {
-      prefaceHasBody = true;
+    } else {
+      if (line.trim()) {
+        prefaceHasBody = true;
+      }
     }
   }
   if (cur) {
+    cur.e = off;
     raw.push(cur);
   }
   const toc = [];
   let order = 0;
   if (prefaceHasBody) {
     order += 1;
-    toc.push({ id: `${bookId}-c${order}`, title: '开篇' });
+    toc.push({ id: `${bookId}-c${order}`, t: '开篇', s: 0, e: firstMarkerStart >= 0 ? firstMarkerStart : off });
   }
   for (const ch of raw) {
     if (!ch.hasBody) {
       continue;
     }
     order += 1;
-    toc.push({ id: `${bookId}-c${order}`, title: ch.title });
+    toc.push({ id: `${bookId}-c${order}`, t: ch.title, s: ch.s, e: ch.e });
   }
   return toc;
 }
@@ -1129,12 +1153,21 @@ for (const spec of BOOKS) {
 
   fs.writeFileSync(path.join(ASSETS_DIR, `${spec.id}.txt`), text, 'utf8');
   const sizeBytes = Buffer.byteLength(text, 'utf8');
-  // 目录推导：与运行时 parseTxtBook 同规则解析产物文本，仅记录
-  // 「有正文的章节」的 id+title（运行时空章节不占 order、id 按
-  // `${bookId}-c${order}` 顺序生成，此处必须逐条对齐，否则惰性
-  // 水合前的目录跳转会指向失效章节 id）。前置正文（首标记前有
-  // 非空行）在运行时会成为「开篇」章，order 整体后移 1。
-  const toc = deriveToc(text, spec.id);
+  // 章节字节索引（meta）：与目录同规则推导，附带每章正文 [s,e) 字节区间。
+  // 运行时首开水合/后台填充/FTS 建索引均按章切片读取（RNFS.read 定位读），
+  // 不再整读全文——真机 9MB 级 readFile 单次阻塞 JS 11s+ 的根治手段。
+  const toc = deriveTocWithRanges(text, spec.id);
+  const metaPayload = {
+    v: 1,
+    bookId: spec.id,
+    sizeBytes,
+    chapters: toc,
+  };
+  fs.writeFileSync(
+    path.join(ASSETS_DIR, `${spec.id}.meta.json`),
+    JSON.stringify(metaPayload),
+    'utf8',
+  );
   report.push({ id: spec.id, title: spec.title, chapters: chapters.length, paras: paraCount, chars: charCount, kb });
   catalog.push({
     id: spec.id,

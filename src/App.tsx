@@ -70,20 +70,37 @@ function App(): React.JSX.Element {
   // 启动初始化：见文件头「启动初始化」说明（首屏必需同步做，重活逐个延后）
   useEffect(() => {
     // —— 首屏必需（同步、轻量）——
+    let t0 = Date.now();
     StorageService.initDatabase();
+    console.info(`[PERF][startup] initDatabase=${Date.now() - t0}ms`);
+    t0 = Date.now();
     loadBooks();
+    console.info(`[PERF][startup] loadBooks=${Date.now() - t0}ms`);
+    t0 = Date.now();
     DictEngine.init().catch((err: unknown) => {
       // 降级：字典 Tab 显示「引擎未就绪」态，应用其余功能不受影响
       console.warn('[App] 字典引擎初始化失败：', err);
     });
+    console.info(`[PERF][startup] dictEngineSyncPrefix=${Date.now() - t0}ms`);
     // 首屏必需项已就绪（同步部分均为轻量操作），立即放行首帧；
     // 重活不再挡在 setReady 之前（旧实现的卡死根因）
     setReady(true);
+    // 【PERF】JS 线程心跳探针：50ms 心跳，间隔 ≥300ms 记一次阻塞窗口，
+    // 用于在 logcat 时间线上定位「点击无响应」期间的 JS 饱和段
+    let lastBeat = Date.now();
+    const heartbeatTimer = setInterval(() => {
+      const now = Date.now();
+      const gap = now - lastBeat;
+      lastBeat = now;
+      if (gap >= 300) {
+        console.info(`[PERF][jank] jsBlocked=${gap}ms`);
+      }
+    }, 50);
     // —— 可延后任务（每个任务独占一个 macrotask，任务间让出 JS 线程）——
     // ① 背诵列表（SQLite 同步读）→ ② 复习提醒同步（读背诵/设置/目标数据，
     //    内部防重入）→ ③ 成就重算（内部自刷背诵/收藏/笔记，幂等，仅新解锁项落账）。
     // 卸载/effect 重跑时取消未执行任务，避免重复调度。
-    return scheduleStartupTasks([
+    const cancelTasks = scheduleStartupTasks([
       {
         // 词组读音数据（phrase-pinyin，4.9MB assets）预热：P0 下沉后运行时
         // 首次注音前需异步载入；放在延后任务首位，用户点进阅读器前大概率
@@ -120,6 +137,10 @@ function App(): React.JSX.Element {
         run: () => useAchievementStore.getState().recompute(),
       },
     ]);
+    return () => {
+      clearInterval(heartbeatTimer);
+      cancelTasks();
+    };
   }, [loadBooks]);
 
   const navigationTheme = useMemo(() => buildNavigationTheme(theme), [theme]);

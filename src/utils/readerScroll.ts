@@ -8,9 +8,14 @@
  * 被压死，表现为打开导入书后长时间无法滚动；内置经典段落极短（几十字），固定 30 行毫无压力。
  *
  * 修复策略：按「内容量（码点数）预算」而非固定行数决定初始渲染行数——
- * - 行平均码点数 ≤ longRowThreshold（内置书场景）→ 维持 maxRows，行为与旧版完全一致；
- * - 行平均码点数超阈值（导入书大段落场景）→ 按字符预算累计，初始只渲染预算内行数，
- *   其余行交给 FlatList 窗口化随滚动增量渲染。
+ * 无条件逐行累计码点数，超过 charBudget 即停止扩行，其余行交给 FlatList
+ * 窗口化随滚动增量渲染。内置短章经典（单章几段几十字）远达不到预算，
+ * 行为与旧固定 30 行一致；超长章（资治通鉴级单段数百行、导入书 2500 字大段）
+ * 初始窗口按预算收敛，首帧不再同步挂载数千乃至数万字格。
+ *
+ * 历史语义注记：旧版在「行平均码点数 ≤ 300」时早退维持 30 行（内置书免算），
+ * 但真机实测证明该早退是盲区——资治通鉴级行均仅 ~63 字，永不触发收缩，
+ * 30 行 ≈1900 字格首帧挂载实测 jsBlocked≈5.3s；故 v2 移除早退，一律按预算。
  *
  * 设计取舍说明：
  * - 不下调 MAX_SEGMENT_CHARS：用户书已按旧阈值解析并持久化（JSON 存 db），改阈值
@@ -28,18 +33,15 @@ export interface ScrollInitialRowsOptions {
   charBudget?: number;
   /** 最少初始渲染行数（预算被单行超出时的下限） */
   minRows?: number;
-  /** 最多初始渲染行数（与旧固定值 30 一致，内置书行为不变） */
+  /** 最多初始渲染行数（与旧固定值 30 一致，短章行为不变） */
   maxRows?: number;
-  /** 行平均码点数超过该值才按预算收缩初始行数（内置书段落远低于此值） */
-  longRowThreshold?: number;
 }
 
-/** 缺省值：3000 字预算约对应全文注音模式 8~10 屏内容 */
+/** 缺省值：1200 字预算——全文注音模式下约 3~4 屏内容，首帧字格量控制在千级 */
 export const SCROLL_INITIAL_ROWS_DEFAULTS = {
-  charBudget: 3000,
+  charBudget: 1200,
   minRows: 2,
   maxRows: 30,
-  longRowThreshold: 300,
 } as const;
 
 /**
@@ -124,7 +126,7 @@ export function planHeadDrop(
 }
 
 /**
- * 计算滚动模式初始渲染行数。
+ * 计算滚动模式初始渲染行数（v2：无条件按字符预算累计，无行长阈值早退）。
  * @param rowCharCounts 各行码点数（标题行传 0；顺序与渲染顺序一致）
  * @param options 计算选项
  * @returns initialNumToRender 取值（1 ~ maxRows 之间）
@@ -133,7 +135,7 @@ export function computeScrollInitialRows(
   rowCharCounts: readonly number[],
   options: ScrollInitialRowsOptions = {},
 ): number {
-  const { charBudget, minRows, maxRows, longRowThreshold } = {
+  const { charBudget, minRows, maxRows } = {
     ...SCROLL_INITIAL_ROWS_DEFAULTS,
     ...options,
   };
@@ -144,17 +146,8 @@ export function computeScrollInitialRows(
   }
 
   const withinMax = Math.min(maxRows, rowCharCounts.length);
-  let sum = 0;
-  for (let i = 0; i < withinMax; i += 1) {
-    sum += rowCharCounts[i];
-  }
 
-  // 内置书场景：行平均码点数低于阈值 → 维持固定 maxRows，与旧版行为完全一致
-  if (sum / withinMax <= longRowThreshold) {
-    return maxRows;
-  }
-
-  // 导入书大段落场景：按字符预算累计行码点数，超出即停止（标题行计 0 字）
+  // 按字符预算逐行累计，超出即停止（标题行计 0 字）
   let acc = 0;
   for (let i = 0; i < withinMax; i += 1) {
     acc += rowCharCounts[i];
@@ -163,6 +156,6 @@ export function computeScrollInitialRows(
       return Math.max(minRows, i + 1);
     }
   }
-  // 预算内已覆盖前 maxRows 行（数据不足 maxRows 行）：渲染全部即可
+  // 预算内已覆盖前 withinMax 行（短章经典场景）：渲染全部，等同旧版
   return maxRows;
 }

@@ -538,13 +538,65 @@ function ftsInterBookYield(): Promise<void> {
   return Promise.race([interactionDone, timerDone]);
 }
 
+/** meta 快路径全本组装：逐章切片 → toParagraphs → segments。
+ * chunked=true 时按时间片让出 JS（与整读分片解析同节奏）。
+ * 任一章切片失败返回 null（调用方回退整读解析）。 */
+async function assembleBuiltinFromMeta(
+  spec: BuiltinBookSpec,
+  meta: BuiltinMetaFile,
+  yieldEnabled: boolean,
+): Promise<Book | null> {
+  const chapters: Book['chapters'] = [];
+  let sliceStart = Date.now();
+  for (let i = 0; i < meta.chapters.length; i += 1) {
+    const c = meta.chapters[i];
+    // eslint-disable-next-line no-await-in-loop
+    const slice = await readBuiltinChapterSlice(spec, c.s, c.e);
+    if (slice === null) {
+      return null;
+    }
+    const paras = toParagraphs(slice);
+    chapters.push({
+      id: c.id,
+      bookId: spec.id,
+      title: c.t,
+      order: i + 1,
+      segments: paras.map((p, idx) => ({
+        id: `${c.id}-s${idx + 1}`,
+        chapterId: c.id,
+        order: idx + 1,
+        text: p,
+      })),
+    });
+    if (yieldEnabled && Date.now() - sliceStart >= FILL_TIME_BUDGET_MS) {
+      // eslint-disable-next-line no-await-in-loop
+      await yieldToJs();
+      sliceStart = Date.now();
+    }
+  }
+  return assembleBuiltinBook(spec, chapters);
+}
+
 /** 单本内置书装载（builtin/ 文件解析 → APK assets 直读兜底），不含注册。
  * chunked 默认 true：水合与 FTS 队列两条路径都走分片解析（大书装配
- * 期间按章让出 JS，tap/动画可插队）。 */
+ * 期间按章让出 JS，tap/动画可插队）。
+ * 优先 meta 快路径：按章切片组装，全程零整读（真机 9MB readFile
+ * 单次阻塞 JS 11s+ 的根治）。 */
 async function loadBuiltinBookBody(
   spec: BuiltinBookSpec,
   chunked = true,
 ): Promise<ParsedFileBook | null> {
+  const meta = await loadBuiltinMeta(spec);
+  if (meta) {
+    const book = await assembleBuiltinFromMeta(spec, meta, chunked);
+    if (book) {
+      return {
+        book,
+        sourcePath: `${getBuiltinDirPath()}/${spec.id}.txt`,
+        fileSig: `${meta.sizeBytes}:meta`,
+      };
+    }
+  }
   const canonicalPath = `${getBuiltinDirPath()}/${spec.id}.txt`;
   let parsed = await parseBookFile(canonicalPath, `${spec.id}.txt`, spec.id, spec, chunked);
   if (!parsed) {
@@ -554,10 +606,10 @@ async function loadBuiltinBookBody(
 }
 
 /** 指纹自愈：落盘文件与资产大小不一致先覆盖补写（物化时机之外的自愈）。
- * ensureBookLoaded / ensureBookReady 共用。 */
-async function ensureBuiltinAssetFresh(spec: BuiltinBookSpec): Promise<void> {
+ * ensureBookLoaded / ensureBookReady 共用。返回落盘文件当前字节数（0=未知）。 */
+async function ensureBuiltinAssetFresh(spec: BuiltinBookSpec): Promise<number> {
   if (typeof spec.sizeBytes !== 'number' || spec.sizeBytes <= 0) {
-    return;
+    return 0;
   }
   const canonicalPath = `${getBuiltinDirPath()}/${spec.id}.txt`;
   try {
@@ -567,9 +619,90 @@ async function ensureBuiltinAssetFresh(spec: BuiltinBookSpec): Promise<void> {
     if (destSize > 0 && destSize !== spec.sizeBytes) {
       // eslint-disable-next-line no-await-in-loop
       await RNFS.copyFileAssets(`books/${spec.id}.txt`, canonicalPath);
+      return spec.sizeBytes;
     }
+    return destSize;
   } catch {
     // stat 失败（文件缺失/IO 异常）交由读取路径兜底
+    return 0;
+  }
+}
+
+// ---------- 章节字节索引（meta 快路径，P0 根治大读阻塞） ----------
+// 背景：真机上 RNFS.readFile 整读资治通鉴级 9.4MB 文本一次性阻塞 JS
+// 11.2s+（点卡片无响应主因）。构建脚本随包产出 books/<id>.meta.json
+// （每章正文 [s,e) UTF-8 字节区间，与运行时章序逐条对齐），运行时按章
+// RNFS.read 定位切片读取（30KB/次，毫秒级），首开水合/后台填充/FTS 建
+// 索引均不再整读全文。meta 缺失/损坏/sizeBytes 指纹不符时整体回退旧
+// 整读扫描路径（兜底保留）。
+
+/** books/<id>.meta.json 结构（scripts/build-builtin-assets.mjs 生成） */
+interface BuiltinMetaFile {
+  v: number;
+  bookId: string;
+  /** 对应 txt 的字节数（与落盘文件指纹比对，不符即资产换代/半截文件） */
+  sizeBytes: number;
+  /** 有正文章节（含「开篇」），id 与运行时 `${bookId}-c${order}` 逐条一致 */
+  chapters: Array<{ id: string; t: string; s: number; e: number }>;
+}
+
+const builtinMetaCache = new Map<string, BuiltinMetaFile | null>();
+
+/** 读取并校验章节字节索引（幂等缓存；null = 无 meta，走慢路径） */
+async function loadBuiltinMeta(
+  spec: BuiltinBookSpec,
+): Promise<BuiltinMetaFile | null> {
+  const cached = builtinMetaCache.get(spec.id);
+  if (cached !== undefined) {
+    return cached;
+  }
+  let result: BuiltinMetaFile | null = null;
+  try {
+    const raw = await RNFS.readFileAssets(
+      `books/${spec.id}.meta.json`,
+      'utf8',
+    );
+    const parsed = JSON.parse(raw) as BuiltinMetaFile;
+    const ok =
+      parsed &&
+      parsed.v === 1 &&
+      parsed.bookId === spec.id &&
+      typeof parsed.sizeBytes === 'number' &&
+      parsed.sizeBytes > 0 &&
+      Array.isArray(parsed.chapters) &&
+      parsed.chapters.length > 0 &&
+      parsed.chapters.every(
+        (c, i) =>
+          typeof c.s === 'number' &&
+          typeof c.e === 'number' &&
+          c.s >= 0 &&
+          c.e >= c.s &&
+          c.e <= parsed.sizeBytes &&
+          c.id === `${spec.id}-c${i + 1}`,
+      );
+    if (ok) {
+      result = parsed;
+    }
+  } catch {
+    // meta 缺失/损坏：慢路径兜底
+  }
+  builtinMetaCache.set(spec.id, result);
+  return result;
+}
+
+/** 按字节区间切片读取章节正文（行界切片，无 UTF-8 截断风险）。
+ * 失败返回 null（调用方回退）。 */
+async function readBuiltinChapterSlice(
+  spec: BuiltinBookSpec,
+  s: number,
+  e: number,
+): Promise<string | null> {
+  const canonicalPath = `${getBuiltinDirPath()}/${spec.id}.txt`;
+  try {
+    const text = await RNFS.read(canonicalPath, e - s, s, 'utf8');
+    return typeof text === 'string' ? text : null;
+  } catch {
+    return null;
   }
 }
 
@@ -585,15 +718,22 @@ async function readBuiltinText(
   // 点卡片长时间无响应」的第一大块。内置资产由构建脚本生成、恒为 UTF-8，
   // 直读必然成功；失败（文件缺失/损坏/非 UTF-8）走 ② 字节路径兜底。
   try {
+    const t0 = Date.now();
     const text = await RNFS.readFile(canonicalPath, 'utf8');
     if (text) {
       // contentHash 仅导入查重消费（user_books 表），内置首开链路无人使用；
       // 不再对 9MB 文本做 utf8Bytes 全量重编码 + 双散列（原为 2-7s 的
       // 第二大块，纯浪费）。
+      console.info(
+        `[PERF][read] ${spec.id} primary-utf8 ${text.length}ch ${Date.now() - t0}ms`,
+      );
       return { text };
     }
-  } catch {
-    // 直读失败（文件缺失/IO 异常）走字节路径兜底
+  } catch (e) {
+    console.warn(
+      `[PERF][read] ${spec.id} primary-utf8 THREW:`,
+      (e as Error)?.message ?? e,
+    );
   }
   // ② 字节路径（编码检测 + JS 逐字节解码）：仅非 UTF-8 内容触达
   try {
@@ -705,6 +845,68 @@ export function onBuiltinFillProgress(cb: (bookId: string) => void): () => void 
 const readyInFlight = new Map<string, Promise<ServiceResult<Book>>>();
 
 /**
+ * meta 快路径：构建全量章节壳（仅目录级，正文空），并按字节区间切片
+ * 装配目标章（优先章/第一章），hydrate 上屏。全文零整读。
+ * 任一环节失败返回 false（调用方回退整读扫描慢路径）。
+ */
+async function hydrateBuiltinViaMeta(
+  spec: BuiltinBookSpec,
+  meta: BuiltinMetaFile,
+  priorityChapterId: string | null,
+): Promise<boolean> {
+  const hydrate = (
+    TextLibraryService as unknown as {
+      hydrateBook?: (book: Book) => { success: boolean; error?: string };
+    }
+  ).hydrateBook;
+  if (typeof hydrate !== 'function') {
+    return false;
+  }
+  const bookId = spec.id;
+  const shells: BuiltinShell[] = meta.chapters.map((c) => ({
+    chapter: { id: c.id, bookId, title: c.t, order: 0, segments: [] },
+    bodyLines: [],
+    range: { s: c.s, e: c.e },
+  }));
+  shells.forEach((s, i) => {
+    s.chapter.order = i + 1;
+  });
+  const target =
+    shells.find((s) => s.chapter.id === priorityChapterId) ?? shells[0];
+  if (!target || !target.range) {
+    return false;
+  }
+  const slice = await readBuiltinChapterSlice(
+    spec,
+    target.range.s,
+    target.range.e,
+  );
+  if (slice === null) {
+    return false;
+  }
+  const paras = toParagraphs(slice);
+  target.chapter.segments = paras.map((p, idx) => ({
+    id: `${target.chapter.id}-s${idx + 1}`,
+    chapterId: target.chapter.id,
+    order: idx + 1,
+    text: p,
+  }));
+  const regRes = hydrate.call(
+    TextLibraryService,
+    assembleBuiltinBook(
+      spec,
+      shells.map((s) => s.chapter),
+    ),
+  );
+  if (!regRes.success) {
+    return false;
+  }
+  // 后台按章切片填充其余章节（复用既有时间片填充与通知链路）
+  void fillRemainingBuiltinChapters(spec, shells);
+  return true;
+}
+
+/**
  * 首章优先快速水合（阅读器专用入口，问题：首开加载圈太长）。
  * 与 ensureBookLoaded（整本解析完才 resolve）的区别：只解析用户要读的
  * 目标章（几十 ms 量级）即 hydrate 上屏——其余章节先以「空壳章」（仅有
@@ -749,10 +951,40 @@ export async function ensureBookReady(
   const spec = getBuiltinSpec(bookId)!;
   const task = (async (): Promise<ServiceResult<Book>> => {
     try {
+      const perfT0 = Date.now();
       ftsQueuePausedUntil = Date.now() + FTS_PAUSE_ON_HYDRATE_MS;
       await yieldToJs();
-      await ensureBuiltinAssetFresh(spec);
+      const canonicalSize = await ensureBuiltinAssetFresh(spec);
+      console.info(
+        `[PERF][hydrate] ${spec.id} assetFresh=+${Date.now() - perfT0}ms`,
+      );
+      // —— meta 快路径：按章切片装配目标章，不整读全文（真机 9MB 级
+      // readFile 单次阻塞 JS 11s+ 的根治）；任一环节失败落慢路径 ——
+      const meta = await loadBuiltinMeta(spec);
+      if (meta && canonicalSize === meta.sizeBytes) {
+        const fast = await hydrateBuiltinViaMeta(
+          spec,
+          meta,
+          opts?.priorityChapterId ?? null,
+        );
+        if (fast) {
+          console.info(
+            `[PERF][hydrate] ${spec.id} meta-fast ready +${
+              Date.now() - perfT0
+            }ms`,
+          );
+          return TextLibraryService.getBook(bookId);
+        }
+        console.info(
+          `[PERF][hydrate] ${spec.id} meta-fast miss → fallback scan`,
+        );
+      }
       const body = await readBuiltinText(spec);
+      console.info(
+        `[PERF][hydrate] ${spec.id} read=${body ? body.text.length : 0}ch +${
+          Date.now() - perfT0
+        }ms`,
+      );
       if (!body) {
         // 兜底：文本直读失败 → 整本分片解析旧路径
         const parsed = await loadBuiltinBookBody(spec);
@@ -773,6 +1005,11 @@ export async function ensureBookReady(
         return TextLibraryService.getBook(bookId);
       }
       const shells = await buildBuiltinChapterShells(bookId, body.text);
+      console.info(
+        `[PERF][hydrate] ${spec.id} shells=${shells.length} +${
+          Date.now() - perfT0
+        }ms`,
+      );
       if (shells.length === 0) {
         // 兜底：切章失败（异常文本）→ 整本分片解析旧路径
         const parsed = await loadBuiltinBookBody(spec);
@@ -810,12 +1047,20 @@ export async function ensureBookReady(
       ).hydrateBook;
       if (typeof reg === 'function') {
         const regRes = reg.call(TextLibraryService, earlyBook);
+        console.info(
+          `[PERF][hydrate] ${spec.id} hydrate=${
+            regRes.success ? 'ok' : 'fail'
+          } +${Date.now() - perfT0}ms`,
+        );
         if (!regRes.success) {
           return { success: false, error: regRes.error ?? '注册书体失败' };
         }
       }
       // 后台填充：不阻塞首屏 promise（resolve 后阅读器当帧可渲染目标章）
       void fillRemainingBuiltinChapters(spec, shells);
+      console.info(
+        `[PERF][hydrate] ${spec.id} ready +${Date.now() - perfT0}ms`,
+      );
       return TextLibraryService.getBook(bookId);
     } catch (e) {
       return { success: false, error: (e as Error).message };
@@ -837,13 +1082,21 @@ export async function ensureBookReady(
  */
 const SHELL_BATCH_CHAPTERS = 40;
 
+/** 内置书章节壳（水合中间态）：meta 快路径带 range（按章切片读），
+ * 慢路径（整读扫描）带 bodyLines；填充时二者取一。 */
+interface BuiltinShell {
+  chapter: Book['chapters'][number];
+  bodyLines: string[];
+  range: { s: number; e: number } | null;
+}
+
 async function buildBuiltinChapterShells(
   bookId: string,
   text: string,
-): Promise<{ chapter: Book['chapters'][number]; bodyLines: string[] }[]> {
+): Promise<BuiltinShell[]> {
   const normalized = text.replace(/\r\n?/g, '\n');
   const { rawChapters, preface } = await splitRawChaptersChunked(normalized, true);
-  const shells: { chapter: Book['chapters'][number]; bodyLines: string[] }[] = [];
+  const shells: BuiltinShell[] = [];
   let order = 0;
   const addShell = (chapterTitle: string, bodyLines: string[]): void => {
     // 与解析器对齐：body 仅空白 → toParagraphs 为空 → 该章不编号不产出
@@ -855,6 +1108,7 @@ async function buildBuiltinChapterShells(
     shells.push({
       chapter: { id: chapterId, bookId, title: chapterTitle, order, segments: [] },
       bodyLines,
+      range: null,
     });
   };
   if (toParagraphs(preface.join('\n')).length > 0) {
@@ -889,14 +1143,19 @@ function assembleBuiltinBook(
  * 后台时间片填充剩余章节：逐章装配，每章完成检查耗时，超过
  * FILL_TIME_BUDGET_MS（12ms）即让出 JS 并把合并后的书体重新 hydrate
  *（引用替换使 TextLibraryService 缓存正确失效）+ 通知订阅者。
+ * 正文来源双轨：meta 快路径壳带 range（按章切片读，零整读），慢路径壳
+ * 带 bodyLines（整读扫描产物）；有 range 优先切片。
  * 填充即用户活动，期间持续压住 FTS 队列门闩；全部完成后书体在内存，
  * 顺带补 FTS 索引（分片异步）。失败静默中止（空壳章保留，重进该书
  * 重新走 ensureBookReady 水合）。
+ * 通知节流：合并每片都做（引用替换廉价），订阅者通知（触发阅读器
+ * 重渲染）按 FILL_NOTIFY_THROTTLE_MS 节流 + 尾片必达。
  */
 async function fillRemainingBuiltinChapters(
   spec: BuiltinBookSpec,
-  shells: { chapter: Book['chapters'][number]; bodyLines: string[] }[],
+  shells: BuiltinShell[],
 ): Promise<void> {
+  const fillPerfT0 = Date.now();
   builtinFillInFlight.add(spec.id);
   try {
     const hydrate = (
@@ -914,6 +1173,7 @@ async function fillRemainingBuiltinChapters(
     // 无法操作」的第四大块；时间片最坏块 = 单章 toParagraphs（约 10-30ms）。
     let sliceFilled = 0;
     let sliceStart = Date.now();
+    let lastNotifyAt = 0;
     for (let i = 0; i < shells.length; i += 1) {
       const shell = shells[i];
       if (shell.chapter.segments.length > 0) {
@@ -924,7 +1184,23 @@ async function fillRemainingBuiltinChapters(
         ftsQueuePausedUntil,
         Date.now() + FTS_PAUSE_ON_HYDRATE_MS,
       );
-      const paras = toParagraphs(shell.bodyLines.join('\n'));
+      // 正文双轨：meta 壳按章切片读（毫秒级），慢路径壳用内存 bodyLines
+      let bodyText: string;
+      if (shell.range) {
+        const slice = await readBuiltinChapterSlice(
+          spec,
+          shell.range.s,
+          shell.range.e,
+        );
+        if (slice === null) {
+          // 切片读失败：跳过该章（空壳保留，重进重水合兜底）
+          continue;
+        }
+        bodyText = slice;
+      } else {
+        bodyText = shell.bodyLines.join('\n');
+      }
+      const paras = toParagraphs(bodyText);
       shell.chapter.segments = paras.map((p, idx) => ({
         id: `${shell.chapter.id}-s${idx + 1}`,
         chapterId: shell.chapter.id,
@@ -933,7 +1209,7 @@ async function fillRemainingBuiltinChapters(
       }));
       sliceFilled += 1;
       if (Date.now() - sliceStart >= FILL_TIME_BUDGET_MS) {
-        // 片间让出一拍：tap/触摸/渲染可插队；让出后立即合并+通知
+        // 片间让出一拍：tap/触摸/渲染可插队；让出后合并 + 节流通知
         //（阅读器 hydrateTick 按章引用 diff，粒度越细重算越轻）
         // eslint-disable-next-line no-await-in-loop
         await yieldToJs();
@@ -947,19 +1223,23 @@ async function fillRemainingBuiltinChapters(
           } catch {
             // 单片合并失败不中止（空壳保留，下次进入重水合）
           }
-          builtinFillListeners.forEach((cb) => {
-            try {
-              cb(spec.id);
-            } catch {
-              // 单个订阅者异常不影响其余订阅者与填充流程
-            }
-          });
+          const now = Date.now();
+          if (now - lastNotifyAt >= FILL_NOTIFY_THROTTLE_MS) {
+            lastNotifyAt = now;
+            builtinFillListeners.forEach((cb) => {
+              try {
+                cb(spec.id);
+              } catch {
+                // 单个订阅者异常不影响其余订阅者与填充流程
+              }
+            });
+          }
         }
         sliceFilled = 0;
         sliceStart = Date.now();
       }
     }
-    // 尾片（不足预算余额）合并+通知
+    // 尾片（不足预算余额）合并+通知（必达）
     if (sliceFilled > 0 && typeof hydrate === 'function') {
       const merged = assembleBuiltinBook(
         spec,
@@ -982,6 +1262,9 @@ async function fillRemainingBuiltinChapters(
     // 分片异步写入：同步版对资治通鉴级（约 300 万字）的书单块执行会把
     // JS 线程占死数秒至数十秒（初次打开 app 全 UI 无响应的根因之一），
     // 且此刻用户刚打开本书正准备阅读，绝不能阻塞。
+    console.info(
+      `[PERF][fill] ${spec.id} done +${Date.now() - fillPerfT0}ms`,
+    );
     if (!StorageService.isBookIndexedInFts(spec.id) && !ftsUpsertInFlight.has(spec.id)) {
       ftsUpsertInFlight.add(spec.id);
       void StorageService.upsertFtsForBookChunked(
@@ -1049,7 +1332,13 @@ export function scheduleBuiltinFtsIndexBuild(delayMs = 10000): void {
       }
       try {
         if (!StorageService.isBookIndexedInFts(spec.id)) {
+          const ftsBookT0 = Date.now();
           const parsed = await loadBuiltinBookBody(spec);
+          console.info(
+            `[PERF][fts] ${spec.id} parse=${parsed ? 'ok' : 'null'} +${
+              Date.now() - ftsBookT0
+            }ms`,
+          );
           if (parsed) {
             // 分片异步写入：片间让出 + 用户优先门闩片间生效（水合/交互
             // 时挂起，解除后断点续写）。同步版单块执行资治通鉴级会把
@@ -1428,6 +1717,8 @@ const PARSE_CHUNK_CHAPTERS = 30;
  * 30 章/批（对大书单片可达数秒，点卡片后长时间无法操作的第四大块）。
  */
 const FILL_TIME_BUDGET_MS = 12;
+/** 填充进度订阅者通知节流（每片合并廉价、通知触发阅读器重渲染，节流防抖） */
+const FILL_NOTIFY_THROTTLE_MS = 400;
 
 /**
  * 逐行扫描切出 [章节标题, 标题下正文] 序列与标题前正文（同步纯函数）。
@@ -1951,6 +2242,7 @@ async function processOversizedBooks(
  * 缓存行顺带清理（正源在资产/文件，db 不再有 37MB JSON）。
  */
 export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSummary>> {
+  const librarySyncPerfT0 = Date.now();
   // let：db 损坏自愈重建后需替换为新鲜连接（旧连接所有查询报 disk I/O error）
   let instance = getDb();
   if (!instance) {
@@ -1979,9 +2271,17 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
     applySuppression();
     // 元数据注册（每进程一次）：书架即刻完整可见（目录含章节列表），
     // 全文按需水合。注册是纯内存操作（目录 <1MB），不依赖文件系统。
+    const syncT0 = Date.now();
     registerBuiltinMetaOnce();
+    console.info(
+      `[PERF][library-sync] registerBuiltinMeta=${Date.now() - syncT0}ms`,
+    );
     await ensureDirs();
+    const matT0 = Date.now();
     lastSyncDiagnostics.assetCopyFailures = await materializeBuiltins();
+    console.info(
+      `[PERF][library-sync] materialize=${Date.now() - matT0}ms`,
+    );
   } catch {
     // 文件夹不可用（极端机型）：降级为仅装载 db，书架仍可用
     console.warn('[UserBookService] 书籍文件夹初始化失败，降级为 db 装载');
@@ -2282,6 +2582,11 @@ export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSum
   if (builtinFtsAutoSchedule) {
     scheduleBuiltinFtsIndexBuild();
   }
+  console.info(
+    `[PERF][library-sync] done folder=${summary.folderBooks} builtin=${
+      summary.builtinBooks
+    } +${Date.now() - librarySyncPerfT0}ms`,
+  );
   return { success: true, data: summary };
 }
 

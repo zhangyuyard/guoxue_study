@@ -49,5 +49,30 @@
 - **Skia 真卷页**：评估 react-native-pagecurl / @shopify/react-native-skia 自绘卷页，替代 Animated 仿真。
 
 ---
-- P0 实施记录：2026-09-10，commit 见 git log；APK r19。
-- 每阶段完成后更新本表状态与「真机回归点」。
+- P0 实施记录：2026-09-10，commit fcbf583；APK r19。真机回归（r20 诊断包）证明 P0 不足以解决「fresh install 点卡片无响应」。
+
+## 六、P0.5（r20/r21，本轮实施）：真机归因 + 章节字节索引 + 首屏预算收紧
+
+### 真机归因结论（华为 ALT-AL10，r20 诊断包实测）
+- **主因①**：`RNFS.readFile` 整读资治通鉴 9.4MB，单次阻塞 JS **11.2s**（点卡片转圈 ~11.5s 的根因；Mac 仅 44ms——大字符串读是真机瓶颈，CPU 不是）。
+- **主因②**：fresh install 启动期 `jsBlocked=6729ms`（loadAndRegisterAll 窗口），书架出现后 ~9.5s 内点卡片被永久吞掉（JS 饱和窗口内 touch 丢失）。
+- **主因③**：首屏渲染 `jsBlocked=5281ms` + fill 尾部 `jsBlocked=2872ms`（30 行 ≈1900 字格首帧挂载，旧 `longRowThreshold:300` 早退使资治通鉴级行均 ~63 字从不收缩）。
+
+### ① 章节字节索引（meta 快路径）——对齐 KOReader「按需加载文档流」
+- **构建期**：`books/<id>.meta.json`（`{v:1, bookId, sizeBytes, chapters:[{id,t,s,e}]}`，s/e 为每章正文 UTF-8 字节区间，行界切片）；`gen-builtin-meta.mjs` 独立生成，77 部书全量。
+- **运行时**：按章 `RNFS.read(path, e-s, s, 'utf8')` 切片读（毫秒级），水合/填充/FTS 三链路全部零整读；meta 缺失/损坏/sizeBytes 指纹不符整体回退旧整读慢路径。
+- **对齐铁律**：meta 章序必须与 parseTxtBook 逐条一致——`builtinMetaIndex.test.ts` 77 部书全量对拍守卫（每章切片独立解析与全本逐段相等）。
+- **真机目标**：点大书 ready 从 ~11.5s → <1s。
+
+### ② 滚动模式首屏预算收紧（`computeScrollInitialRows` v2）
+- 去掉 `longRowThreshold:300` 早退（真机盲区：资治通鉴级从不触发收缩），无条件按 `charBudget` 逐行累计；
+- 默认 `charBudget` 3000 → **1200**（约 3~4 屏，论语级 750 字不受影响、道德经级单章短段不变，资治通鉴类 30 行收缩到 ~16-20 行）；
+- `readerScroll.test.ts` 同步改写为新语义断言。
+
+### ③ 打点基建（`[PERF]` 前缀）
+- JS 心跳探针（50ms 间隔，gap≥300 记 `jsBlocked`）；startupTasks ≥20ms 计时；loadAndRegisterAll 总耗时 + registerBuiltinMeta/materialize 分段；library tap / reader mount / firstContentH。
+
+### 真机回归点（r21）
+- 卸装重装 → 冷启动 → 点资治通鉴：`meta-fast ready` 毫秒级、无 ~11.5s 转圈；
+- 书架出现后立刻点卡片不被吞（启动期 jsBlocked 块消除或大幅缩短）；
+- 首屏 `firstContentH` 大幅提前，滚动模式翻页/切章/锚点补偿不回归（既有红线）。

@@ -1387,6 +1387,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const maybeDropHeadRef = useRef<() => void>(() => undefined);
   /** 滚动模式列表引用（定位段落 + 向前拼接后的偏移补偿） */
   const listRef = useRef<FlatList<ReaderRow>>(null);
+  // 【PERF】诊断打点：组件挂载时刻 + 首次内容布局标记（一次性）
+  const readerMountT0Ref = useRef(Date.now());
+  const firstContentSizeLoggedRef = useRef(false);
   /** 打开时一次性定位到目标段落：行 id + 是否已完成 */
   const pendingScroll = useRef({ target: '', done: false });
   /** 「打开时定位」的超时放弃计时器（同一时刻至多一个，见 LOCATE_TIMEOUT_MS） */
@@ -1580,6 +1583,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       return;
     }
     let cancelled = false;
+    const hydrateT0 = Date.now();
+    console.info(`[PERF][reader] mount book=${bookId} ch=${chapterId ?? '-'}`);
     setBuiltinHydrating(true);
     setBuiltinHydrateFailed(false);
     UserBookService.ensureBookReady(bookId, { priorityChapterId: chapterId })
@@ -1587,6 +1592,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         if (cancelled) {
           return;
         }
+        console.info(
+          `[PERF][reader] hydrated ok=${res.success} +${
+            Date.now() - hydrateT0
+          }ms`,
+        );
         setBuiltinHydrating(false);
         setBuiltinHydrateFailed(!res.success);
         if (res.success) {
@@ -3725,6 +3735,15 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             onStartReached={handleStartReached}
             onStartReachedThreshold={CONTIGUOUS_PRELOAD_SCREENS}
             onContentSizeChange={(_w, h) => {
+              // 【PERF】首帧内容量高：水合后正文首次完成布局的时间点
+              if (!firstContentSizeLoggedRef.current && h > 0) {
+                firstContentSizeLoggedRef.current = true;
+                console.info(
+                  `[PERF][reader] firstContentH=${Math.round(h)} +${
+                    Date.now() - readerMountT0Ref.current
+                  }ms`,
+                );
+              }
               // 锚点兜底补偿（MVCP_ENABLED=false 时的手写回退路径；MVCP 开启时
               // 锚点不登记，本块天然空转）：锚点行若移出渲染窗口，onLayout
               // 永不触发，此时用 contentSize 增量（首次变化恰为插入高度）做

@@ -47,11 +47,18 @@ export function scheduleStartupTasks(
       return;
     }
     const task = tasks[index];
+    const t0 = Date.now();
     try {
       task.run();
     } catch (e) {
       // 单个任务失败不阻断后续任务：启动期功能降级优于整条延后链中断
       console.warn(`[startup] 延后任务「${task.key}」执行失败：`, e);
+    }
+    // 【PERF】延后任务耗时观测：异步任务只含同步首段（promise 触发即返回），
+    // 同步重任务（如词库 parse）会在此显形
+    const costMs = Date.now() - t0;
+    if (costMs >= 20) {
+      console.info(`[PERF][startup] ${task.key} sync=${costMs}ms`);
     }
     if (index + 1 < tasks.length) {
       schedule(() => runTask(index + 1));
