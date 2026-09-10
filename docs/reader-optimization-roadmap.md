@@ -76,3 +76,19 @@
 - 卸装重装 → 冷启动 → 点资治通鉴：`meta-fast ready` 毫秒级、无 ~11.5s 转圈；
 - 书架出现后立刻点卡片不被吞（启动期 jsBlocked 块消除或大幅缩短）；
 - 首屏 `firstContentH` 大幅提前，滚动模式翻页/切章/锚点补偿不回归（既有红线）。
+
+## 七、P0.6（r22，本轮实施）：重启点击无响应根治
+
+### 真机归因（r21b 实测，tap 注入 32.3s → JS 处理 36.18s）
+- **6.7s 单块真身**：warmPhrasePinyin 的 4.9MB 整文件 `readFileAssets`（native→JS 大字符串跨桥，与资治通鉴 9.4MB 整读 11.2s 同根因家族）+ `JSON.parse` + `Object.entries` + `Map` 构建——三段连续同步仅微任务间隔，单块 jsBlocked=6729ms；书架点击事件在 JS 队列排队 ~3.9s，被感知为「点卡片无响应」。
+- **装载双跑**：App 启动 effect 与 LibraryScreen mount effect 各调一次 `loadBooks`，两轮 loadAndRegisterAll 并发（materialize 1.7s×2 交叠，无防重入）。
+
+### 修复（commit e00aee9）
+1. **词组数据分片化**：`build-phrase-pinyin.mjs` 改产 `data/phrase-pinyin/part-NNN.json`（~128KB/片 ×38 片，条目边界切分、裸对象格式）；APK 移除 4.9MB 整 json（减重）。运行时逐片读+parse+merge、片间 macrotask 让出（单块 <300ms）；全部完成后整体替换 phraseMapCache——晚到失效语义不变；分片缺失回退整文件路径（测试注入 loader 兼容，jest 无分片资产自动走回退）。
+2. **loadAndRegisterAll 防重入单例**：in-flight 期间后续调用并入同一 promise。
+3. **materializeBuiltins 8 并发分批**：77 部串行 bridge 往返 1.7s → ~0.3s 量级。
+
+### 真机回归点（r22）
+- 重启后 2 秒即点书卡：即时打开（tap 处理延迟 3.9s → ~1s 内含同步窗口，ready +1.4s）；
+- 最大 jsBlocked 6729ms → **521ms**（38 片每片均 <300ms，`phrase mode=sharded count=179406`）；
+- 注音正确性不回归（金标 125 条 + 词组层覆盖实测）。
