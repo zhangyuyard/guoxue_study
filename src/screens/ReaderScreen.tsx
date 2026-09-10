@@ -1621,15 +1621,36 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // useLayoutEffect：水合标记必须在首帧绘制前置位——否则「元数据章（正文空）」
   // 会先渲染一帧空内容，effect 落地后才切换到加载中（闪一帧空白）。
   useLayoutEffect(() => {
-    if (
-      !bookId ||
-      TextLibraryService.isUserBook(bookId) ||
-      TextLibraryService.isBookHydrated(bookId)
-    ) {
+    if (!bookId || TextLibraryService.isUserBook(bookId)) {
       setBuiltinHydrating(false);
       return;
     }
     let cancelled = false;
+    // 空壳目标章按需补装：ensureBookReady 对 early-hydrated 书直接返回当前
+    // 书体（不补装新优先章），跳章/续读落到后台填充尚未推进到的章时，该章
+    // 保持空壳 → loading 只能等按书序填充慢慢推进（大部头分钟级）。这里用
+    // meta 字节切片毫秒级单章装配兜底；完成时经进度订阅驱动 hydrateTick
+    // 重算自动解除 loading。幂等（已有正文的章直接 true），与后台填充并发
+    // 安全（双方写入内容一致）。
+    const fillShellTargetIfNeeded = () => {
+      if (!chapterId) {
+        return;
+      }
+      const cur = TextLibraryService.getBook(bookId);
+      const ch =
+        cur.success && cur.data
+          ? cur.data.chapters.find((c) => c.id === chapterId)
+          : null;
+      if (ch && ch.segments.length === 0) {
+        void UserBookService.fillBuiltinChapterNow(bookId, chapterId);
+      }
+    };
+    if (TextLibraryService.isBookHydrated(bookId)) {
+      // 已水合（含早期部分水合）：跳章重跑的常态路径——补装空壳目标章
+      setBuiltinHydrating(false);
+      fillShellTargetIfNeeded();
+      return;
+    }
     const hydrateT0 = Date.now();
     console.info(`[PERF][reader] mount book=${bookId} ch=${chapterId ?? '-'}`);
     setBuiltinHydrating(true);
@@ -1648,6 +1669,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         setBuiltinHydrateFailed(!res.success);
         if (res.success) {
           setHydrateTick((t) => t + 1);
+          // 竞争窗口兜底：mount 水合进行中用户已跳章 → ensureBookReady
+          // 命中旧优先章的 in-flight promise，新优先章未被装配
+          fillShellTargetIfNeeded();
         }
       })
       .catch(() => {

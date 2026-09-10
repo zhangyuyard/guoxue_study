@@ -142,3 +142,38 @@
 - prepend 重挂新表头 initialNumToRender 行（注音行重）单块 JS 阻塞 1-5s
   （短暂停顿，位置不丢）→ 候选：拼接章首批行轻量化渲染（先无注音后补）；
 - 资治通鉴级（294 卷）的填充批次合并/FTS upsert 阻塞比庄子级更重，待观察。
+
+## P0.9 未打开书籍跳章「一直 loading」（r30）
+
+### 现象
+打开一本未读过的内置书后直接目录跳章（尤其大部头远端章节），目标章
+loading 转圈极久（大部头可达分钟级），用户感知「内容无法加载出来」。
+
+### 根因（真机日志 + 代码实锤）
+- ensureBookReady 对 early-hydrated 书（mount 水合完成后）的后续调用在
+  `TextLibraryService.isBookHydrated` 处**早退**，直接返回当前书体——
+  不补装新的 priorityChapterId（UserBookService.ts）。
+- hydrate effect（ReaderScreen）依赖 chapterId 重跑时命中同一早退分支，
+  同样不补装 → 跳到的空壳章无人装配。
+- 唯一救援是后台 fillRemainingBuiltinChapters **按书序**（第 1 章起 30 章/批）
+  推进到目标章：玉台新咏 390 章 fill 全程 92s、每 1-1.5s 一次 jsBlocked
+  1-2s；跳到 fill 未到达处就要等完整推进——「一直 loading」。
+- 复现时序注：r30 之前真机三轮盲测（荀子 c32 / 玉台新咏 c140 / 汉书 c114）
+  均未踩中，因目录交互耗时 > fill 剩余时长，目标章恰好已被按书序填充覆盖。
+
+### 修复（r30）
+hydrate effect（ReaderScreen）：
+- 抽出 `fillShellTargetIfNeeded()`：目标章在库中为空壳（segments.length===0）
+  时调用 `fillBuiltinChapterNow`（meta 字节切片毫秒级单章装配，r27 引入，
+  幂等 + in-flight 去重 + 完成后经进度订阅驱动 hydrateTick 自动解除 loading）。
+- 两处调用：① isBookHydrated 早退分支（跳章重跑的常态路径）；
+  ② mount 水合 promise resolve 后（竞争窗口：水合 in-flight 命中旧优先章时
+  用户已跳章，新优先章未被装配）。
+
+### 附带发现（独立问题，待修）
+- **houhanshu.txt 资产损坏**：131 个 @@CH@@ 标记中前 130 个全为空标题骨架
+  （目录堆叠），全书正文（11128 行）堆在最后一个错标「卷一上·光武帝纪第一·上」
+  的章后 → 阅读器只有 1 章且为 2.7MB 巨章（mount hydrate 3.5s、正文渲染异常）。
+  需重查 build-builtin-assets.mjs 对后汉书源文本的处理并重生成资产+meta。
+- 大部头 fill 期间的持续性 jsBlocked（每批合并 hydrateBook 阻塞 1-2s）伤体验，
+  候选：批次时间片内让出粒度优化。

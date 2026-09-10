@@ -356,3 +356,24 @@ describe('跳章后连滚多章 / 下拉一次翻多章回归防护（attempt �
     expect(source).toMatch(/const APPEND_COALESCE_MS = 100;/);
   });
 });
+
+describe('未打开书跳章 loading 回归防护（early-hydrated 书空壳目标章按需补装）', () => {
+  test('hydrate effect 对已水合书跳章必须补装空壳目标章（fillShellTargetIfNeeded）', () => {
+    // ensureBookReady 对 early-hydrated 书直接返回当前书体、不补装新优先章，
+    // 跳章落到后台按书序填充尚未推进到的章 → 空壳 → loading 分钟级（大部头）
+    expect(source).toMatch(/const fillShellTargetIfNeeded = \(\) => \{/);
+    expect(source).toMatch(
+      /if \(TextLibraryService\.isBookHydrated\(bookId\)\) \{[\s\S]*?setBuiltinHydrating\(false\);[\s\S]*?fillShellTargetIfNeeded\(\);/,
+    );
+    // mount 水合竞争窗口兜底：in-flight 命中旧优先章时新优先章未被装配
+    expect(source).toMatch(
+      /setHydrateTick\(\(t\) => t \+ 1\);[\s\S]*?fillShellTargetIfNeeded\(\);/,
+    );
+  });
+
+  test('补装仅在目标章为空壳时触发（幂等，不重复装配）', () => {
+    expect(source).toMatch(
+      /if \(ch && ch\.segments\.length === 0\) \{[\s\S]*?fillBuiltinChapterNow\(bookId, chapterId\);/,
+    );
+  });
+});
