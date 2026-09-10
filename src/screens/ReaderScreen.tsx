@@ -1861,6 +1861,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       // 序列现状、落回该章章首。jumpSeq 每次刷新使两个重置 effect 在
       // 同章重复跳转时也会重新执行（否则 navigate 参数相同不触发任何效果）。
       explicitChapterJumpRef.current = true;
+      console.info(`[PERF][jump] goToChapter -> ${cid}`);
       navigation?.navigate('Reader', {
         bookId,
         chapterId: cid,
@@ -2313,8 +2314,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    * 拼进 continuousChapters，使用户随后立即向下 / 向上滚动时无需等待拼接。
    * 复用既有追加函数（防重入口不另起炉灶）：loadingNext / loadingPrev 并发守卫、
    * 二次去重、滑动窗口上限、锚点互斥全部在同一入口内生效。
-   * 顺序约束：先 append 后 prepend——prepend 会登记 prependAnchor，锚点存活期
-   * 内 append 被互斥守卫阻塞，顺序颠倒会导致本轮只预取到上一章。
+ * 顺序约束：先 append 后 prepend——prepend 会登记 prependAnchor，锚点存活期
+ * 内 append 被互斥守卫阻塞，顺序颠倒会导致本轮只预取到上一章。
+ * 【BugFix】prepend 为条件执行（视口滚出半屏且非章首驻留期）：跳章落位在
+ * offset=0 时 Android MVCP 对头部插入的补偿不可靠，会把视口回推上一章
+ * （「跳章后自动前滚一章」根因）；章首向上拼接由滚动路径按需兜底。
    * 静默性：两个追加函数本身不展示 loading；NEIGHBOR_PREFETCH_DELAY_MS 宏任务
    * 延时让出线程，不与切章过渡渲染争抢 JS。
    * 一轮语义（防抖）：按「模式:章 id」记账，每章只预取一轮；若计时器触发时
@@ -2357,7 +2361,15 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         const beforeFirstId = continuousRef.current[0]?.id ?? null;
         const beforeLen = continuousRef.current.length;
         appendNextChapter();
-        prependPreviousChapter();
+        // 【BugFix：跳章后自动前滚一章】视口在列表顶部（offset 未滚出半屏）时
+        // 跳过预取 prepend：① Android MVCP 对 offset=0 的头部插入补偿不可靠
+        // （真机实测：跳章落位 ~7s 后视口被回推到上一章，底部进度从 24 章 8%
+        // 变 23 章 8%）；② 用户刚落到章首没有向上阅读意图——真正向上滚时
+        // requestAutoPrepend 滚动路径即时拼接（offset>0 时 MVCP 补偿正常），
+        // 预取收益为零、风险全在。驻留期（chapterHeadDwellRef）内同样跳过。
+        if (!chapterHeadDwellRef.current && scrollOffset.current > viewH.current * 0.5) {
+          prependPreviousChapter();
+        }
         // 重试条件 = 本轮【零进展】（拼接被 pendingScroll / 锚点占用等暂时挡住）。
         // 勿改成「上一章未就位就重试」：每次成功 prepend 一章后，新首章的
         // 上一章天然未加载（预取语义只拼一章），该条件恒真 → 空转重试，
@@ -2704,6 +2716,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       }
       const rowSegmentId = row.segment.id;
       if (row.chapterId !== activeChapterIdRef.current) {
+        console.info(
+          `[PERF][jump] visible chapter -> ${row.chapterId} (first visible seg=${rowSegmentId})`,
+        );
         activeChapterIdRef.current = row.chapterId;
         setActiveChapterId(row.chapterId);
         // 用户向前进（当前章前移）：检查滑动窗口丢头。此前因「当前章位于头部
@@ -2884,6 +2899,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     // 【4】目录显式跳章：落章首，不恢复该章上次阅读段落（见 explicitChapterJumpRef）
     const explicitJump = explicitChapterJumpRef.current;
     explicitChapterJumpRef.current = false;
+    console.info(
+      `[PERF][jump] switch effect chapterId=${chapterId ?? 'null'} explicit=${explicitJump} seg=${segmentId ?? 'null'}`,
+    );
     // 【5】显式跳章进入「章首驻留期」：落章首后用户尚未读出超过阈值屏高之前，
     // 拦截 offset > 0 的手势自动拼接（只留 offset ≤ 0 的章首回弹 endDrag 路径）。
     // 跳章落点 offset = 0 时立即上滑会同时满足手势窗口 + 预载窗口 + 朝顶方向，
