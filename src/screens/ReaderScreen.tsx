@@ -176,7 +176,14 @@ const ANCHOR_TIMEOUT_MS = 2000;
  * 超时后放弃定位（落回章首属可接受的降级），避免 pendingScroll 守卫
  * 长期阻塞向前拼接。
  */
-const LOCATE_TIMEOUT_MS = 1500;
+/**
+ * 定位放弃超时。真机实测（华为 ALT-AL10）：meta 水合 ~0.6s + 首屏布局 ~2.3s，
+ * 旧值 1500ms 在「水合→布局」期间就到期把 pending 置 done——目标行随后
+ * onLayout 时定位已被放弃，视口停在章首（续读恢复失败的根因之一，即使
+ * 目标行在初始窗口内也会失败）。超时只兜底「目标段不存在/永不布局」的
+ * 异常态，放宽到 8s 不影响正常路径（正常路径秒级落位后 done 即置位）。
+ */
+const LOCATE_TIMEOUT_MS = 8000;
 
 /**
  * 拆分块二轮再切的容差（px）：块高超出页预算不超过该值时不再细分，
@@ -1452,6 +1459,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const armScrollLocate = useCallback(
     (target: string) => {
       pendingScroll.current = { target, done: false };
+      console.info(`[PERF][locate] arm target=${target || '(empty)'}`);
       if (locateGiveUpTimer.current) {
         clearTimeout(locateGiveUpTimer.current);
       }
@@ -1987,6 +1995,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const chapterReady = !!chapter && chapter.segments.length > 0;
   const chapterRef = useRef<Chapter | null>(chapter);
   chapterRef.current = chapter;
+  /** 定位目标行超出初始渲染窗口时的 scrollToIndex 拉窗（实现在 scrollInitialRows 之后） */
+  const locatePendingRowRef = useRef<() => void>(() => undefined);
   useEffect(() => {
     const ch = chapterRef.current;
     const seeded: Chapter[] = ch ? [ch] : [];
@@ -2008,6 +2018,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     setContinuousChapters(seeded);
     // 记录种子章（见 continuousSeedChapterId / effectiveChapters 注释）
     setContinuousSeedChapterId(ch?.id ?? null);
+    // 数据（重）就位后检查定位目标是否超初始窗口：超窗则拉渲染窗口过去
+    locatePendingRowRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapterId, chapterReady, jumpSeq, rowOffsets]);
 
@@ -2444,6 +2456,54 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     return computeScrollInitialRows(counts);
   }, [chapter]);
 
+  /**
+   * 【BugFix：续读深段落定位失败落章首】初始渲染窗口按字符预算收缩后（v2），
+   * 续读/跳章的定位目标段可能超出初始窗口——FlatList 窗口化下窗口外行不挂载、
+   * onLayout 永不触发，LOCATE_TIMEOUT_MS 超时后视口停在章首（真机实测：
+   * 庄子·在宥恢复 s8 失败；旧版行长阈值早退使内置书整章渲染故无此问题）。
+   * 目标行在窗口外时 scrollToIndex 把渲染窗口拉过去（行高不均导致的估算偏差
+   * 由 onScrollToIndexFailed 的平均行高近似修正），此后定位即完成——不再等待
+   * 目标行 onLayout 精调（窗口跳跃挂载的行首次 y 为窗口相对值 0，修正会拽回
+   * 章首，见 scrollToIndex 处注释），超时兜底不变。
+   */
+  locatePendingRowRef.current = () => {
+    const pending = pendingScroll.current;
+    if (pending.done || !pending.target) {
+      return;
+    }
+    const ch = chapterRef.current;
+    if (!ch || ch.segments.length === 0) {
+      return;
+    }
+    const segIdx = ch.segments.findIndex((s) => s.id === pending.target);
+    const rowIndex = segIdx >= 0 ? segIdx + 1 : -1; // +1 标题行
+    if (rowIndex < 0 || rowIndex < scrollInitialRows) {
+      return; // 窗口内：等 onLayout 精调即可
+    }
+    console.info(
+      `[PERF][jump] locate target row=${rowIndex} beyond initialRows=${scrollInitialRows}, scrollToIndex`,
+    );
+    // 时序：本调用可能发生在 setContinuousChapters 的同一轮 effect 内，
+    // FlatList 的 data 还是旧值——同步 scrollToIndex 会按旧 data 判越界
+    // （onScrollToIndexFailed 按旧测量估算，滚不到目标）。等新 data 提交
+    // 再滚（双 rAF：一帧 commit + 一帧布局）。
+    const locateTarget = pending.target;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        // 就地标记 done，禁掉 handleRowLayout 的 onLayout 精调：真机实测
+        // （华为 ALT-AL10，r24）窗口跳跃挂载的目标行首次 onLayout 上报的
+        // y 是窗口相对值（=0），按 y-24 修正会把视口拽回章首（日志
+        // 「pending hit y=0 -> offset=0」，续读恢复前功尽弃）。落位精度
+        // 由 scrollToIndex(viewPosition:0) + onScrollToIndexFailed 近似保障。
+        const ps = pendingScroll.current;
+        if (!ps.done && ps.target === locateTarget) {
+          ps.done = true;
+        }
+        listRef.current?.scrollToIndex({ index: rowIndex, animated: false, viewPosition: 0 });
+      });
+    });
+  };
+
   /** 连续滚动涉及的全部段落（供选词码点基准覆盖后续章节） */
   const continuousSegments = useMemo<TextSegment[]>(() => {
     const list: TextSegment[] = [];
@@ -2613,6 +2673,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       if (!pending.done && pending.target === rowId) {
         const targetOffset = Math.max(0, y - 24);
         pending.done = true;
+        console.info(
+          `[PERF][locate] pending hit row=${rowId} y=${Math.round(y)} -> offset=${Math.round(targetOffset)}`,
+        );
         listRef.current?.scrollToOffset({ offset: targetOffset, animated: false });
         // 定位落点贴近顶部时主动触发一次向前拼接：续读打开在章首附近的场景下，
         // onContentSizeChange 的首次兜底可能被 pendingScroll 未完成的守卫挡掉，
@@ -2735,6 +2798,21 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     },
   ).current;
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
+
+  /**
+   * scrollToIndex 落在未测量区域时的估算修正（VirtualizedList onScrollToIndexFailed）：
+   * 行高不均（注音段落行差异大）时 VirtualizedList 的偏移估算可能失败——按
+   * 平均行高近似落位，把目标行附近拉进渲染窗口；目标行挂载后的精确落位由
+   * handleRowLayout 的 pendingScroll 路径完成（scrollToIndex 不再重试，避免
+   * 估算-失败-重试循环；最坏情况由 LOCATE_TIMEOUT_MS 超时兜底落章首）。
+   */
+  const handleScrollToIndexFailed = useCallback(
+    (info: { index: number; averageItemLength: number }) => {
+      const approx = Math.max(0, info.averageItemLength * info.index - 24);
+      listRef.current?.scrollToOffset({ offset: approx, animated: false });
+    },
+    [listRef],
+  );
 
   /**
    * 滚动时更新「当前章内」进度（用于底部进度条），并在接近末尾时预加载下一章。
@@ -2922,6 +3000,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     setLocateTarget(segmentId ?? (explicitJump ? null : restoreSegmentId) ?? null);
     activeChapterIdRef.current = chapterId;
     setActiveChapterId(chapterId);
+    // 章已就位（无壳→全文过渡、seed effect 不会再跑）时也要检查目标行是否超窗
+    locatePendingRowRef.current();
     // 依赖不含 restoreSegmentId：它仅随 chapterId / segmentId 变化（二者已在依赖中），
     // 变化触发的新一轮渲染闭包中即取到最新值，无需纳入依赖
     // jumpSeq：同章重复跳转（goToChapter 当前章）时参数其余字段不变，
@@ -3752,6 +3832,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             onEndReachedThreshold={CONTIGUOUS_PRELOAD_SCREENS}
             onStartReached={handleStartReached}
             onStartReachedThreshold={CONTIGUOUS_PRELOAD_SCREENS}
+            onScrollToIndexFailed={handleScrollToIndexFailed}
             onContentSizeChange={(_w, h) => {
               // 【PERF】首帧内容量高：水合后正文首次完成布局的时间点
               if (!firstContentSizeLoggedRef.current && h > 0) {
