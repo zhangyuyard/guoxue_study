@@ -141,15 +141,23 @@ const YITI_GROUPS = yitiData.groups as unknown as YitiGroup[];
 // 「2~8 字纯汉字且含至少一个多音字」的词组（约 18 万条）。
 //
 // 【P0 性能】数据不再静态 import：4.9MB JSON 在 bundle 执行期整块 parse 会拖慢
-// 冷启动首帧。现下沉为 Android assets（data/phrase-pinyin.json），运行时经
-// RNFS.readFileAssets 异步载入（ensurePhrasePinyinData），App 启动延后任务预热；
-// 载入完成前 getPhraseMap 返回空 Map（词组层缺席 → 仲裁链由规则库 / pinyin-pro
-// 兜底，行为等同无词库），载入完成后由 PinyinText 晚到失效机制触发重注音。
-// 测试环境经 setPhrasePinyinSyncProvider 注入同步 provider（jestSetupFile 惰性
-// 读盘），与旧「首次 annotate 时懒建 Map」语义逐字节等价。
+// 冷启动首帧。现下沉为 Android assets，运行时异步载入（ensurePhrasePinyinData），
+// App 启动延后任务预热；载入完成前 getPhraseMap 返回空 Map（词组层缺席 → 仲裁链
+// 由规则库 / pinyin-pro 兜底，行为等同无词库），载入完成后由 PinyinText 晚到失效
+// 机制触发重注音。测试环境经 setPhrasePinyinSyncProvider 注入同步 provider
+// （jestSetupFile 惰性读盘），与旧「首次 annotate 时懒建 Map」语义逐字节等价。
+//
+// 【P0.5 分片载入】真机实测（r21b）：4.9MB 整文件 readFileAssets（native→JS 大
+// 字符串跨桥）+ JSON.parse + Object.entries + Map 构建 = 启动期 ~6.7s 单块 JS
+// 饱和，书卡点击被吞（与资治通鉴 9.4MB 整读 11.2s 同根因家族）。现改为
+// data/phrase-pinyin/part-NNN.json 有序分片（构建脚本 ~128KB/片、条目边界切分），
+// 运行时逐片读+parse+merge、片间 macrotask 让出——单块 <200ms，触摸可穿插；
+// 全部完成后整体替换 phraseMapCache（晚到语义不变）。分片缺失时回退整文件
+// data/phrase-pinyin.json（测试注入 loader 也走此路径，与旧语义兼容）。
 const PHRASE_SOURCE_LABEL = 'phrase-pinyin-data（汉典/CC-CEDICT 合并词库）';
 const PHRASE_MAX_LEN = 8;
 const PHRASE_ASSET_PATH = 'data/phrase-pinyin.json';
+const PHRASE_PART_DIR = 'data/phrase-pinyin';
 
 /** phrase-pinyin.json 载荷结构（build-phrase-pinyin.mjs 输出） */
 interface PhrasePinyinPayload {
@@ -208,6 +216,49 @@ function defaultPhraseAssetLoader(): Promise<string> {
   return Promise.reject(new Error('phrase-pinyin assets unavailable'));
 }
 
+/** macrotask 让出（片间穿插触摸/渲染；微任务达不到让出效果） */
+function phraseYield(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
+/**
+ * 分片载入：逐片 readFileAssets → parse → merge，片间 macrotask 让出。
+ * 每片 ~128KB（native→JS 跨桥 + parse 单块均 <200ms，真机实测口径）。
+ * part-000 读不到 = 无分片资产（返回 'missing'，调用方回退整文件）；
+ * part-N（N>0）读不到 = 分片序号尽头（构建保证连续序号，返回 'ok'）。
+ */
+async function loadShardedPhraseParts(
+  target: Map<string, string>,
+): Promise<'ok' | 'missing'> {
+  const fs = RNFS as unknown as {
+    readFileAssets?: (path: string, encoding: string) => Promise<string>;
+  };
+  if (typeof fs.readFileAssets !== 'function') {
+    return 'missing';
+  }
+  for (let i = 0; ; i += 1) {
+    const path = `${PHRASE_PART_DIR}/part-${String(i).padStart(3, '0')}.json`;
+    let text: string;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      text = await fs.readFileAssets(path, 'utf8');
+    } catch {
+      if (i === 0) {
+        return 'missing';
+      }
+      return 'ok'; // 序号尽头（分片连续性由构建脚本保证）
+    }
+    const part = JSON.parse(text) as Record<string, string>;
+    for (const key of Object.keys(part)) {
+      target.set(key, part[key]);
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await phraseYield();
+  }
+}
+
 /**
  * 确保词组数据就绪（幂等单例）。resolve true = 词组层可用；false = 载入失败
  * （降级为无词库，规则库 / pinyin-pro 兜底；可再次调用重试）。
@@ -222,18 +273,31 @@ export function ensurePhrasePinyinData(): Promise<boolean> {
   }
   if (!phraseReadyPromise) {
     const loader = phraseAsyncLoader ?? defaultPhraseAssetLoader;
-    phraseReadyPromise = loader()
-      .then((text) => {
+    phraseReadyPromise = (async () => {
+      const t0 = Date.now();
+      const merged = new Map<string, string>();
+      const sharded = await loadShardedPhraseParts(merged);
+      if (sharded === 'missing') {
+        // 回退整文件（真机 APK 已分片化不触发；测试注入 loader 走此路径）
+        const text = await loader();
         const payload = JSON.parse(text) as PhrasePinyinPayload;
-        phraseMapCache = new Map(Object.entries(payload.phrases));
-        return phraseMapCache.size > 0;
-      })
-      .catch(() => {
-        // 载入失败：清空 promise 允许下次调用重试；期间词组层缺席（空 Map）
-        phraseMapCache = phraseMapCache ?? new Map();
-        phraseReadyPromise = null;
-        return false;
-      });
+        for (const key of Object.keys(payload.phrases)) {
+          merged.set(key, payload.phrases[key]);
+        }
+      }
+      // 整体替换（此前 getPhraseMap 返回的空 Map 引用不变，晚到失效机制
+      // 依赖 isPhrasePinyinDataLoaded 翻转触发重注音）
+      phraseMapCache = merged;
+      console.info(
+        `[PERF][phrase] loaded mode=${sharded === 'ok' ? 'sharded' : 'whole'} count=${merged.size} +${Date.now() - t0}ms`,
+      );
+      return merged.size > 0;
+    })().catch(() => {
+      // 载入失败：清空 promise 允许下次调用重试；期间词组层缺席（空 Map）
+      phraseMapCache = phraseMapCache ?? new Map();
+      phraseReadyPromise = null;
+      return false;
+    });
   }
   return phraseReadyPromise;
 }

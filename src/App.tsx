@@ -102,9 +102,10 @@ function App(): React.JSX.Element {
     // 卸载/effect 重跑时取消未执行任务，避免重复调度。
     const cancelTasks = scheduleStartupTasks([
       {
-        // 词组读音数据（phrase-pinyin，4.9MB assets）预热：P0 下沉后运行时
+        // 词组读音数据（phrase-pinyin，~4.5MB 分片资产）预热：P0 下沉后运行时
         // 首次注音前需异步载入；放在延后任务首位，用户点进阅读器前大概率
-        // 已就绪（readFileAssets + parse 约 200~500ms，独占 macrotask 不挡首帧）。
+        // 已就绪。P0.5 分片化后逐片读+parse（~128KB/片，片间 macrotask 让出），
+        // 单块 <200ms，不再出现旧整文件载入的启动期 ~6.7s JS 饱和块。
         // 幂等单例；失败由阅读器 PinyinText 晚到机制兜底重试。
         key: 'warmPhrasePinyin',
         run: () => {

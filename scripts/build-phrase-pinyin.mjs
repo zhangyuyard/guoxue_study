@@ -1,5 +1,5 @@
 /**
- * 构建 phrase-pinyin 词组读音数据（android/app/src/main/assets/data/phrase-pinyin.json）。
+ * 构建 phrase-pinyin 词组读音数据（android/app/src/main/assets/data/phrase-pinyin/part-*.json）。
  *
  * 数据来源：mozillazg/phrase-pinyin-data（MIT）large_pinyin.txt ——
  * 汉典词典 + 汉典成语词典 + CC-CEDICT + 手工纠正的合并词库（v0.19.0，41 万词组）。
@@ -12,14 +12,19 @@
  * 【P0】产物下沉为 Android assets（不再静态 import 进 JS bundle），
  * 运行时 PinyinService.ensurePhrasePinyinData() 经 readFileAssets 异步载入。
  *
- * 输出格式：{ meta: {source, version, count}, phrases: { "词组": "pīn yīn", ... } }
- * 用法：node scripts/build-phrase-pinyin.mjs [src] [out]
+ * 【P0.5 分片化】真机实测：4.9MB 整文件 readFileAssets（native→JS 大字符串跨桥）
+ * + JSON.parse + Object.entries + Map 构建 = 启动期 ~6.7s 单块 JS 饱和，
+ * 点击书卡被吞（与资治通鉴 9.4MB 整读 11.2s 同一根因家族）。
+ * 产物改为 part-000.json 起的有序分片（每片 ~128KB，条目边界切分、裸对象格式），
+ * 运行时逐片读+parse+merge，片间 macrotask 让出——单块 <200ms，触摸可穿插。
+ * 格式：每片裸 JSON 对象 {"词组":"pīn yīn", ...}（无包裹键，省字节）。
+ * 用法：node scripts/build-phrase-pinyin.mjs [src] [outDir]
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
 const SRC = process.argv[2] ?? '/tmp/ppd/large_pinyin.txt';
-const OUT =
-  process.argv[3] ?? 'android/app/src/main/assets/data/phrase-pinyin.json';
+const OUT_DIR =
+  process.argv[3] ?? 'android/app/src/main/assets/data/phrase-pinyin';
 
 const dict = JSON.parse(readFileSync('src/data/pinyin-dict.json', 'utf8'));
 const POLYPHONE = dict.polyphone;
@@ -71,20 +76,41 @@ for (const line of lines) {
   kept += 1;
 }
 
-const payload = {
-  meta: {
-    source: 'mozillazg/phrase-pinyin-data large_pinyin.txt v0.19.0（MIT；汉典词典+汉典成语+CC-CEDICT+手工纠正）',
-    generated: 'scripts/build-phrase-pinyin.mjs',
-    count: kept,
-    filter: '2~8 纯汉字词组，且含至少一个多音字（pinyin-dict polyphone 684 字）',
-  },
-  phrases,
-};
+// ---- 分片产出：条目边界 + 单片 UTF-8 字节预算 ----
+const PART_BUDGET_BYTES = 128 * 1024;
+const entriesJson = Object.entries(phrases).map(
+  ([phrase, pinyin]) => `${JSON.stringify(phrase)}:${JSON.stringify(pinyin)}`,
+);
 
-writeFileSync(OUT, JSON.stringify(payload, null, 0) + '\n');
-const sizeKb = Math.round(JSON.stringify(payload).length / 1024);
+rmSync(OUT_DIR, { recursive: true, force: true });
+mkdirSync(OUT_DIR, { recursive: true });
+
+let partIndex = 0;
+let buf = '';
+let bufBytes = 0;
+const flushPart = () => {
+  if (bufBytes === 0) return;
+  const name = `part-${String(partIndex).padStart(3, '0')}.json`;
+  writeFileSync(`${OUT_DIR}/${name}`, `{${buf}}\n`);
+  partIndex += 1;
+  buf = '';
+  bufBytes = 0;
+};
+for (const entry of entriesJson) {
+  const entryBytes = Buffer.byteLength(entry, 'utf8') + 1; // +1 逗号
+  if (bufBytes > 0 && bufBytes + entryBytes > PART_BUDGET_BYTES) {
+    flushPart();
+  }
+  buf += bufBytes > 0 ? `,${entry}` : entry;
+  bufBytes += entryBytes;
+}
+flushPart();
+
+const totalKb = Math.round(
+  entriesJson.reduce((acc, e) => acc + Buffer.byteLength(e, 'utf8'), 0) / 1024,
+);
 console.log(
   `[build-phrase-pinyin] 全量 ${total} → 保留 ${kept}（剔除：纯汉字外 ${skippedNonHan}，` +
-    `长度外 ${skippedShort}，无多音字 ${skippedNoPoly}）；产物 ${sizeKb} KB`,
+    `长度外 ${skippedShort}，无多音字 ${skippedNoPoly}）；产物 ${totalKb} KB → ${partIndex} 片（~${PART_BUDGET_BYTES / 1024}KB/片）`,
 );
-console.log(`[build-phrase-pinyin] 已生成 ${OUT}`);
+console.log(`[build-phrase-pinyin] 已生成 ${OUT_DIR}/part-000.json … part-${String(partIndex - 1).padStart(3, '0')}.json`);

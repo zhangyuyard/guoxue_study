@@ -1414,59 +1414,71 @@ export async function __splitChaptersBothWaysForTests(
  * 除非「恢复内置书籍」；单书复制失败只记录该 id（下轮重试），绝不影响
  * 其他书。返回复制失败的书籍 ID 列表（供诊断展示）。
  */
+/** 单部内置书物化：需要复制返回 'copied'（contentChanged 时记 changed）；失败记入 failures */
+async function materializeOneBuiltin(
+  spec: BuiltinBookSpec,
+  builtinDir: string,
+  failures: string[],
+  changedIds: string[],
+): Promise<void> {
+  const path = `${builtinDir}/${spec.id}.txt`;
+  try {
+    let needCopy = false;
+    let contentChanged = false;
+    if (!(await RNFS.exists(path))) {
+      needCopy = true;
+    } else if (typeof spec.sizeBytes === 'number' && spec.sizeBytes > 0) {
+      // 指纹比对：落盘文件与随包资产字节大小不一致即视为内容变更
+      try {
+        const st = await RNFS.stat(path);
+        const destSize = Number((st as { size?: number | string }).size ?? 0);
+        if (destSize !== spec.sizeBytes) {
+          needCopy = true;
+          contentChanged = true;
+        }
+      } catch {
+        // stat 失败按缺失处理（覆盖复制兜底）
+        needCopy = true;
+        contentChanged = true;
+      }
+    }
+    if (needCopy) {
+      await RNFS.copyFileAssets(`books/${spec.id}.txt`, path);
+      if (contentChanged) {
+        changedIds.push(spec.id);
+      }
+    }
+  } catch {
+    // copyFileAssets 失败（旧机型/异常路径）回落读资产+写文件
+    try {
+      const existed = await RNFS.exists(path);
+      const content = await RNFS.readFileAssets(`books/${spec.id}.txt`, 'utf8');
+      await RNFS.writeFile(path, content, 'utf8');
+      if (existed) {
+        changedIds.push(spec.id);
+      }
+    } catch {
+      // 单书自愈失败：记录诊断，下轮启动重试，不阻断其他书
+      failures.push(spec.id);
+    }
+  }
+}
+
 async function materializeBuiltins(): Promise<string[]> {
   const builtinDir = getBuiltinDirPath();
   const failures: string[] = [];
   const changedIds: string[] = [];
-  for (const spec of BUILTIN_CATALOG) {
-    if (hiddenBuiltins.has(spec.id)) {
-      continue;
-    }
-    const path = `${builtinDir}/${spec.id}.txt`;
-    try {
-      let needCopy = false;
-      let contentChanged = false;
-      if (!(await RNFS.exists(path))) {
-        needCopy = true;
-      } else if (typeof spec.sizeBytes === 'number' && spec.sizeBytes > 0) {
-        // 指纹比对：落盘文件与随包资产字节大小不一致即视为内容变更
-        try {
-          // eslint-disable-next-line no-await-in-loop
-          const st = await RNFS.stat(path);
-          const destSize = Number((st as { size?: number | string }).size ?? 0);
-          if (destSize !== spec.sizeBytes) {
-            needCopy = true;
-            contentChanged = true;
-          }
-        } catch {
-          // stat 失败按缺失处理（覆盖复制兜底）
-          needCopy = true;
-          contentChanged = true;
-        }
-      }
-      if (needCopy) {
-        // eslint-disable-next-line no-await-in-loop
-        await RNFS.copyFileAssets(`books/${spec.id}.txt`, path);
-        if (contentChanged) {
-          changedIds.push(spec.id);
-        }
-      }
-    } catch {
-      // copyFileAssets 失败（旧机型/异常路径）回落读资产+写文件
-      try {
-        const existed = await RNFS.exists(path);
-        // eslint-disable-next-line no-await-in-loop
-        const content = await RNFS.readFileAssets(`books/${spec.id}.txt`, 'utf8');
-        // eslint-disable-next-line no-await-in-loop
-        await RNFS.writeFile(path, content, 'utf8');
-        if (existed) {
-          changedIds.push(spec.id);
-        }
-      } catch {
-        // 单书自愈失败：记录诊断，下轮启动重试，不阻断其他书
-        failures.push(spec.id);
-      }
-    }
+  const specs = BUILTIN_CATALOG.filter((spec) => !hiddenBuiltins.has(spec.id));
+  // 分批并行（8 并发）：77 部串行 exists+stat 每次 bridge 往返 ~20ms，
+  // warm restart 实测串行 1.7s；分批并行收敛到 ~0.3s。批内失败互相隔离。
+  const BATCH = 8;
+  for (let i = 0; i < specs.length; i += BATCH) {
+    // eslint-disable-next-line no-await-in-loop
+    await Promise.all(
+      specs.slice(i, i + BATCH).map((spec) =>
+        materializeOneBuiltin(spec, builtinDir, failures, changedIds),
+      ),
+    );
   }
   // 内容变更的书失效解析缓存（user_books 为纯缓存表；不动其余表，
   // 背诵/收藏/笔记等用户数据保留，阅读进度按章号截断容错）
@@ -2241,7 +2253,26 @@ async function processOversizedBooks(
  * ensureBookLoaded 单本水合（LRU 上限内常驻）。内置书历史 db 解析
  * 缓存行顺带清理（正源在资产/文件，db 不再有 37MB JSON）。
  */
-export async function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSummary>> {
+/**
+ * 装载防重入单例：App 启动 effect 与 LibraryScreen mount effect 各调一次
+ * loadBooks → loadAndRegisterAll，两个调用几乎同时发出（真机 r21b 实测并发
+ * 两轮全量 materialize+扫描，materialize 1.7s × 2 交叠）。in-flight 期间
+ * 后续调用直接并入同一 promise（完成后清空，手动刷新仍会真实执行）。
+ */
+let librarySyncInFlight: Promise<ServiceResult<LibrarySyncSummary>> | null = null;
+
+export function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSummary>> {
+  if (librarySyncInFlight) {
+    console.info('[PERF][library-sync] dedup: join in-flight sync');
+    return librarySyncInFlight;
+  }
+  librarySyncInFlight = loadAndRegisterAllInternal().finally(() => {
+    librarySyncInFlight = null;
+  });
+  return librarySyncInFlight;
+}
+
+async function loadAndRegisterAllInternal(): Promise<ServiceResult<LibrarySyncSummary>> {
   const librarySyncPerfT0 = Date.now();
   // let：db 损坏自愈重建后需替换为新鲜连接（旧连接所有查询报 disk I/O error）
   let instance = getDb();
