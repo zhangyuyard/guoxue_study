@@ -300,7 +300,9 @@ describe('Bug 3：模式切换后定位到当前阅读位置', () => {
   });
 
   test('模式切换定位有超时放弃兜底（防止 pendingScroll 守卫卡死向前拼接）', () => {
-    expect(source).toMatch(/const LOCATE_TIMEOUT_MS = 1500;/);
+    // 8000：真机水合(~0.6s)+首屏布局(~2.3s) 超过旧值 1500，定位在布局完成前
+    // 就被超时放弃——续读恢复失败根因之一（r24 放宽，见 LOCATE_TIMEOUT_MS 注释）
+    expect(source).toMatch(/const LOCATE_TIMEOUT_MS = 8000;/);
     expect(source).toMatch(/if \(!pendingScroll\.current\.done\) \{\s*\n\s*pendingScroll\.current\.done = true;/);
   });
 });

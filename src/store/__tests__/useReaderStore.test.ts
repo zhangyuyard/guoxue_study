@@ -282,3 +282,78 @@ describe('restoreLastRead（备份恢复续读位置）', () => {
     expect(useReaderStore.getState().lastRead).toBeNull();
   });
 });
+
+describe('useReaderStore 章内滚动比例（offsetRatio，段内精确续读）', () => {
+  beforeEach(() => {
+    resetStore();
+  });
+
+  test('recordProgress 携带比例：lastRead 一并持久化 offsetRatio', () => {
+    useReaderStore.getState().openChapter('book-1', 'chap-1', 'seg-1');
+    useReaderStore.getState().recordProgress('seg-2', 0.42);
+
+    expect(useReaderStore.getState().lastRead).toEqual({
+      bookId: 'book-1',
+      chapterId: 'chap-1',
+      segmentId: 'seg-2',
+      offsetRatio: 0.42,
+    });
+  });
+
+  test('recordProgress 不传比例：清除陈旧比例（翻页模式语义）', () => {
+    useReaderStore.setState({
+      bookId: 'book-1',
+      chapterId: 'chap-1',
+      segmentId: 'seg-1',
+      lastRead: { bookId: 'book-1', chapterId: 'chap-1', segmentId: 'seg-1', offsetRatio: 0.42 },
+    });
+    useReaderStore.getState().recordProgress('seg-1');
+
+    const last = useReaderStore.getState().lastRead;
+    expect(last).toEqual({
+      bookId: 'book-1',
+      chapterId: 'chap-1',
+      segmentId: 'seg-1',
+    });
+    expect(last && 'offsetRatio' in last && last.offsetRatio !== undefined).toBe(false);
+  });
+
+  test('段落与比例均未变化：lastRead 引用保持稳定（幂等）', () => {
+    useReaderStore.getState().openChapter('book-1', 'chap-1', 'seg-1');
+    useReaderStore.getState().recordProgress('seg-1', 0.42);
+    const first = useReaderStore.getState().lastRead;
+
+    useReaderStore.getState().recordProgress('seg-1', 0.42);
+    expect(useReaderStore.getState().lastRead).toBe(first);
+  });
+
+  test('同段不同比例：视为变化，更新 lastRead（防抖期内位置推进可记录）', () => {
+    useReaderStore.getState().openChapter('book-1', 'chap-1', 'seg-1');
+    useReaderStore.getState().recordProgress('seg-1', 0.42);
+    useReaderStore.getState().recordProgress('seg-1', 0.55);
+
+    expect(useReaderStore.getState().lastRead).toMatchObject({
+      segmentId: 'seg-1',
+      offsetRatio: 0.55,
+    });
+  });
+
+  test('openChapter 携带比例：写入 lastRead，重复调用幂等', () => {
+    useReaderStore.getState().openChapter('book-1', 'chap-1', 'seg-1', 0.3);
+    const first = useReaderStore.getState().lastRead;
+    expect(first).toMatchObject({ segmentId: 'seg-1', offsetRatio: 0.3 });
+
+    useReaderStore.getState().openChapter('book-1', 'chap-1', 'seg-1', 0.3);
+    expect(useReaderStore.getState().lastRead).toBe(first);
+
+    // 比例变化 → 非幂等，更新
+    useReaderStore.getState().openChapter('book-1', 'chap-1', 'seg-1', 0.6);
+    expect(useReaderStore.getState().lastRead).toMatchObject({ offsetRatio: 0.6 });
+  });
+
+  test('openChapter 无 segmentId：不写入比例（回章首语义不受比例污染）', () => {
+    useReaderStore.getState().openChapter('book-1', 'chap-1', undefined, 0.5);
+    const last = useReaderStore.getState().lastRead;
+    expect(last).toEqual({ bookId: 'book-1', chapterId: 'chap-1' });
+  });
+});

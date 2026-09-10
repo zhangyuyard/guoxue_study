@@ -29,6 +29,14 @@ interface ReaderPersist {
      * 旧版本持久化数据可能缺失该字段（undefined），续读时行为同现状（回章首）。
      */
     segmentId?: string;
+    /**
+     * 章内滚动比例（0~1，滚动模式专用；段内精确续读）。
+     * 记录「退出时视口在章内的相对位置」（以章标题行为起点、下一章标题行/
+     * 章末为终点）。段级恢复只能落到 segment 起点——短章/大段书（如道德经
+     * 单章单段）的中段位置会退化为章首；比例恢复在其上做一次精修落点。
+     * 字体/注音设置变更后为近似值；缺失（旧数据/翻页模式）= 不精修。
+     */
+    offsetRatio?: number;
   } | null;
   /**
    * 每本书最近一次打开/阅读的时间戳（bookId -> epoch ms）。
@@ -51,15 +59,16 @@ interface ReaderState extends ReaderPersist {
   /** 注音缓存：segmentId -> PinyinAnnotation[] */
   annotationCache: Record<string, PinyinAnnotation[]>;
 
-  /** 打开章节（可指定初始段落） */
-  openChapter: (bookId: string, chapterId: string, segmentId?: string) => void;
+  /** 打开章节（可指定初始段落与章内滚动比例） */
+  openChapter: (bookId: string, chapterId: string, segmentId?: string, offsetRatio?: number) => void;
   /** 切换当前段落 */
   setSegment: (segmentId: string) => void;
   /**
    * 记录当前阅读段落（P1-17）：滚动停止（防抖 300ms）/ 翻页换页时提交，
-   * 同时同步 lastRead.segmentId 供续读恢复。
+   * 同时同步 lastRead.segmentId 供续读恢复；滚动模式附带章内滚动比例
+   * （offsetRatio，段内精确续读），翻页模式不传（清除陈旧比例）。
    */
-  recordProgress: (segmentId: string) => void;
+  recordProgress: (segmentId: string, offsetRatio?: number) => void;
   /** 对某段文本执行注音并缓存（按设置里的注音模式） */
   annotateSegment: (segmentId: string, text: string) => void;
   /** 读取某段缓存注音 */
@@ -91,11 +100,13 @@ export const useReaderStore = create<ReaderState>()(
       segmentId: null,
       annotationCache: {},
 
-      openChapter: (bookId, chapterId, segmentId) => {
+      openChapter: (bookId, chapterId, segmentId, offsetRatio) => {
         const nextSegmentId = segmentId ?? null;
         const state = get();
         // 幂等：位置未变化时不写入，避免 lastRead 生成新引用、
         // 触发阅读记录订阅方级联重渲染
+        const nextRatio =
+          nextSegmentId && typeof offsetRatio === 'number' ? offsetRatio : undefined;
         if (
           state.bookId === bookId &&
           state.chapterId === chapterId &&
@@ -103,7 +114,8 @@ export const useReaderStore = create<ReaderState>()(
           state.lastRead !== null &&
           state.lastRead.bookId === bookId &&
           state.lastRead.chapterId === chapterId &&
-          state.lastRead.segmentId === (nextSegmentId ?? undefined)
+          state.lastRead.segmentId === (nextSegmentId ?? undefined) &&
+          state.lastRead.offsetRatio === nextRatio
         ) {
           return;
         }
@@ -114,7 +126,12 @@ export const useReaderStore = create<ReaderState>()(
           // 段落级进度：携带 segmentId 时持久化；未携带则不写入该字段
           // （与旧版持久化数据形态一致，续读语义为回章首）
           lastRead: nextSegmentId
-            ? { bookId, chapterId, segmentId: nextSegmentId }
+            ? {
+                bookId,
+                chapterId,
+                segmentId: nextSegmentId,
+                ...(nextRatio !== undefined ? { offsetRatio: nextRatio } : null),
+              }
             : { bookId, chapterId },
           // 最近阅读记录：书架「最近」分类按此时间倒序。写入时同步裁剪，
           // 防止长期使用无限膨胀（旧记录时间戳不变，按时间淘汰最旧的）
@@ -140,19 +157,26 @@ export const useReaderStore = create<ReaderState>()(
 
       setSegment: (segmentId) => set({ segmentId }),
 
-      recordProgress: (segmentId) => {
+      recordProgress: (segmentId, offsetRatio) => {
         const state = get();
         const last = state.lastRead;
         // 仅当 lastRead 属于当前阅读的书 + 章时才同步段落（跨章由 openChapter 负责）；
-        // 段落未变化时保持 lastRead 原引用（幂等，防高频滚动产生冗余通知）
-        const nextLastRead =
+        // 段落与比例均未变化时保持 lastRead 原引用（幂等，防高频滚动产生冗余通知）
+        const nextRatio = typeof offsetRatio === 'number' ? offsetRatio : undefined;
+        let nextLastRead = last;
+        if (
           last !== null &&
           last.bookId === state.bookId &&
           last.chapterId === state.chapterId
-            ? last.segmentId === segmentId
-              ? last
-              : { ...last, segmentId }
-            : last;
+        ) {
+          if (last.segmentId !== segmentId || last.offsetRatio !== nextRatio) {
+            nextLastRead = {
+              ...last,
+              segmentId,
+              ...(nextRatio !== undefined ? { offsetRatio: nextRatio } : { offsetRatio: undefined }),
+            };
+          }
+        }
         if (state.segmentId === segmentId && nextLastRead === last) {
           return;
         }

@@ -53,6 +53,8 @@ export interface BackupLastRead {
   chapterId: string;
   /** 上次阅读到的段落（段落级续读；缺失 = 回章首） */
   segmentId?: string;
+  /** 章内滚动比例 0~1（滚动模式段内精确续读；缺失 = 只恢复到段落起点） */
+  offsetRatio?: number;
 }
 
 /** buildBackup 的输入（与 BackupData 同构；由 UI 层从各 store 采集） */
@@ -254,6 +256,15 @@ export function parseBackup(text: string): ParsedBackup {
     }
     if (data.lastRead.segmentId !== undefined && typeof data.lastRead.segmentId !== 'string') {
       throw new Error('备份文件格式错误：data.lastRead.segmentId 应为字符串');
+    }
+    if (
+      data.lastRead.offsetRatio !== undefined &&
+      (typeof data.lastRead.offsetRatio !== 'number' ||
+        !Number.isFinite(data.lastRead.offsetRatio) ||
+        data.lastRead.offsetRatio < 0 ||
+        data.lastRead.offsetRatio > 1)
+    ) {
+      throw new Error('备份文件格式错误：data.lastRead.offsetRatio 应为 0~1 的数字');
     }
   }
 

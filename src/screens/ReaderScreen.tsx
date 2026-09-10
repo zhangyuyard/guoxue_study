@@ -42,6 +42,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import type { CellRendererProps } from '@react-native/virtualized-lists';
 import type {
   Book,
   Bookmark,
@@ -1402,6 +1403,20 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   /** 「打开时定位」的超时放弃计时器（同一时刻至多一个，见 LOCATE_TIMEOUT_MS） */
   const locateGiveUpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
+   * 段内精确续读（滚动模式）：lastRead.offsetRatio 恢复态。
+   * 段级定位只能落到 segment 起点——短章/大段书（如道德经单章单段）的章节
+   * 中段位置会退化为章首；此处在段级定位完成后，按「段顶 + 比例 × 段高」
+   * 做一次精修落位。anchorOffset 为定位完成时刻的视口偏移，用于检测用户
+   * 是否已抢先手动滚动（是则放弃，避免与手势争夺视口）。
+   */
+  const ratioRefineRef = useRef<{ segmentId: string; ratio: number; anchorOffset: number } | null>(
+    null,
+  );
+  /** 比例精修轮询计时器（定位完成后 300ms 间隔探测段高收敛，见 startRatioRefinePollRef） */
+  const ratioRefineTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** 比例精修轮询入口（实现体在 scrollInitialRows 之后按需赋值，同 locatePendingRowRef 模式） */
+  const startRatioRefinePollRef = useRef<(segmentId: string) => void>(() => undefined);
+  /**
    * 注音切换等「行高整体变化」场景的视口锚点（滚动模式防跳动）。
    * 注音开启/关闭会使正文行高成倍变化（PinyinText 逐字两行 ↔ HighlightText 单行），
    * 视口上方全部内容的高度随之改变，而滚动 offset 数值不变 → 视口内的内容直接
@@ -1470,6 +1485,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       locateGiveUpTimer.current = setTimeout(() => {
         if (!pendingScroll.current.done) {
           pendingScroll.current.done = true;
+          // 超时放弃段级精调（落回估算位/章首）：比例精修仍可继续探测——
+          // 目标行此后挂载时按比例重建位置，好于放任不管
+          if (pendingScroll.current.target) {
+            startRatioRefinePollRef.current(pendingScroll.current.target);
+          }
         }
       }, LOCATE_TIMEOUT_MS);
     },
@@ -1724,6 +1744,22 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       last.chapterId === chapterId
       ? last.segmentId ?? null
       : null;
+  }, [segmentId, bookId, chapterId]);
+
+  /**
+   * 段内精确续读：章内滚动比例（滚动模式）。与 restoreSegmentId 同守卫，
+   * 另要求比例在开区间 (0.001, 0.999) 内——0/1 意味着章首/章尾，段级定位
+   * 已覆盖，无需精修（章尾比例也可能因记录时内容高度不足而虚高，宁可保守）。
+   */
+  const restoreOffsetRatio = useMemo<number | null>(() => {
+    if (segmentId || !bookId || !chapterId) {
+      return null;
+    }
+    const last = useReaderStore.getState().lastRead;
+    const ratio = last !== null && last.bookId === bookId && last.chapterId === chapterId
+      ? last.offsetRatio
+      : undefined;
+    return typeof ratio === 'number' && ratio > 0.001 && ratio < 0.999 ? ratio : null;
   }, [segmentId, bookId, chapterId]);
 
   /**
@@ -2462,9 +2498,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    * onLayout 永不触发，LOCATE_TIMEOUT_MS 超时后视口停在章首（真机实测：
    * 庄子·在宥恢复 s8 失败；旧版行长阈值早退使内置书整章渲染故无此问题）。
    * 目标行在窗口外时 scrollToIndex 把渲染窗口拉过去（行高不均导致的估算偏差
-   * 由 onScrollToIndexFailed 的平均行高近似修正），此后定位即完成——不再等待
-   * 目标行 onLayout 精调（窗口跳跃挂载的行首次 y 为窗口相对值 0，修正会拽回
-   * 章首，见 scrollToIndex 处注释），超时兜底不变。
+   * 由 onScrollToIndexFailed 的平均行高近似修正），目标行进入窗口挂载后由
+   * handleRowLayout 的 pendingScroll 路径按 cell 级真实 y 精调（y-24），
+   * 超时兜底不变。
    */
   locatePendingRowRef.current = () => {
     const pending = pendingScroll.current;
@@ -2486,22 +2522,79 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     // 时序：本调用可能发生在 setContinuousChapters 的同一轮 effect 内，
     // FlatList 的 data 还是旧值——同步 scrollToIndex 会按旧 data 判越界
     // （onScrollToIndexFailed 按旧测量估算，滚不到目标）。等新 data 提交
-    // 再滚（双 rAF：一帧 commit + 一帧布局）。
-    const locateTarget = pending.target;
+    // 再滚（双 rAF：一帧 commit + 一帧布局）。落位后目标行挂载，仍由
+    // handleRowLayout 的 pendingScroll 路径按 cell 级真实 y 精调（y-24）；
+    // 测量异常（脏 y≤0）由该路径的防护跳过，不会拽回章首。
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        // 就地标记 done，禁掉 handleRowLayout 的 onLayout 精调：真机实测
-        // （华为 ALT-AL10，r24）窗口跳跃挂载的目标行首次 onLayout 上报的
-        // y 是窗口相对值（=0），按 y-24 修正会把视口拽回章首（日志
-        // 「pending hit y=0 -> offset=0」，续读恢复前功尽弃）。落位精度
-        // 由 scrollToIndex(viewPosition:0) + onScrollToIndexFailed 近似保障。
-        const ps = pendingScroll.current;
-        if (!ps.done && ps.target === locateTarget) {
-          ps.done = true;
-        }
         listRef.current?.scrollToIndex({ index: rowIndex, animated: false, viewPosition: 0 });
       });
     });
+  };
+
+  /**
+   * 段内精确续读轮询（比例精修）：段级定位完成后启动，300ms 间隔探测
+   * 「目标段已挂载且段高收敛」，随后按「段顶 − 24 + ratio × 段高」一次落位。
+   * 放弃条件：探测超 12 tick（~3.6s）/ 用户已手动滚动（偏离锚点 > 120px，
+   * 首个 tick 宽免）/ 恢复态被清（切章）。定位是程序化滚动，用户在打开后
+   * 立即抢滚的场景极少；宁可少滚不可抢滚。
+   */
+  startRatioRefinePollRef.current = (segmentId: string) => {
+    const refine = ratioRefineRef.current;
+    if (!refine || refine.segmentId !== segmentId || ratioRefineTimerRef.current) {
+      return;
+    }
+    let ticks = 0;
+    ratioRefineTimerRef.current = setInterval(() => {
+      ticks += 1;
+      const cur = ratioRefineRef.current;
+      const timer = ratioRefineTimerRef.current;
+      if (!cur || cur.segmentId !== segmentId || !timer || ticks > 12) {
+        if (timer) {
+          clearInterval(timer);
+        }
+        ratioRefineTimerRef.current = null;
+        return;
+      }
+      if (ticks > 1 && Math.abs(scrollOffset.current - cur.anchorOffset) > 120) {
+        // 用户已手动滚动：放弃精修，绝不与手势争夺视口
+        clearInterval(timer);
+        ratioRefineTimerRef.current = null;
+        ratioRefineRef.current = null;
+        return;
+      }
+      const ch = chapterRef.current;
+      if (!ch || ch.segments.length === 0) {
+        return;
+      }
+      const segY = rowOffsets.current.get(segmentId);
+      if (typeof segY !== 'number' || segY <= 0) {
+        return; // 目标行未挂载/未完成 cell 级测量
+      }
+      const segIdx = ch.segments.findIndex((s) => s.id === segmentId);
+      const nextSegId = segIdx >= 0 ? ch.segments[segIdx + 1]?.id : undefined;
+      const chIdx = continuousRef.current.findIndex((c) => c.id === ch.id);
+      const nextChapterId = continuousRef.current[chIdx + 1]?.id;
+      const nextY =
+        (nextSegId ? rowOffsets.current.get(nextSegId) : undefined) ??
+        (nextChapterId ? rowOffsets.current.get(`${TITLE_ROW_PREFIX}${nextChapterId}`) : undefined) ??
+        contentH.current;
+      const segH = nextY - segY;
+      if (segH <= 1) {
+        return; // 段高未收敛（下一行未布局）
+      }
+      const maxOffset = Math.max(0, contentH.current - viewH.current);
+      const target = Math.min(maxOffset, Math.max(0, segY - 24 + cur.ratio * segH));
+      clearInterval(timer);
+      ratioRefineTimerRef.current = null;
+      ratioRefineRef.current = null;
+      // 同步补偿基准：onScroll 到达顺序不保证（同 pending hit 路径）
+      scrollOffset.current = target;
+      listRef.current?.scrollToOffset({ offset: target, animated: false });
+      console.info(
+        `[PERF][locate] ratio refine seg=${segmentId} ratio=${cur.ratio.toFixed(3)} -> offset=${Math.round(target)}`,
+      );
+    }, 300);
   };
 
   /** 连续滚动涉及的全部段落（供选词码点基准覆盖后续章节） */
@@ -2671,22 +2764,37 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       }
       const pending = pendingScroll.current;
       if (!pending.done && pending.target === rowId) {
-        const targetOffset = Math.max(0, y - 24);
         pending.done = true;
-        console.info(
-          `[PERF][locate] pending hit row=${rowId} y=${Math.round(y)} -> offset=${Math.round(targetOffset)}`,
-        );
-        listRef.current?.scrollToOffset({ offset: targetOffset, animated: false });
-        // 定位落点贴近顶部时主动触发一次向前拼接：续读打开在章首附近的场景下，
-        // onContentSizeChange 的首次兜底可能被 pendingScroll 未完成的守卫挡掉，
-        // 而停在 offset≈0 处不会再产生滚动事件，用户必须「来回滚动」才能触发。
-        // 【4】统一走 shouldAutoPrepend：定位落位属程序化滚动（非手势窗口），
-        // 正常情况下不会触发；仅当用户恰在此刻手势滚动且朝顶部时才拼接。
-        // 【5】经 requestAutoPrepend 统一执行：手势进行中只记意图，待手势
-        // 完全结束后再插入 + 补偿，避免与拖拽/惯性争夺视口。
-        if (shouldAutoPrepend(targetOffset)) {
-          requestAutoPrepend(targetOffset);
+        if (y <= 0) {
+          // 脏 y 防护：cell 级 y 应恒为内容绝对值（>0，目标行前至少有标题行）。
+          // 若仍收到 0/负值（测量基准异常），放弃修正并标记完成——宁可停在
+          // scrollToIndex 的估算落位，也不能按 y-24=0 把视口拽回章首（r24 踩坑）。
+          console.info(
+            `[PERF][locate] pending hit row=${rowId} dirty y=${Math.round(y)}, skip refine`,
+          );
+        } else {
+          const targetOffset = Math.max(0, y - 24);
+          console.info(
+            `[PERF][locate] pending hit row=${rowId} y=${Math.round(y)} -> offset=${Math.round(targetOffset)}`,
+          );
+          listRef.current?.scrollToOffset({ offset: targetOffset, animated: false });
+          // 定位落点贴近顶部时主动触发一次向前拼接：续读打开在章首附近的场景下，
+          // onContentSizeChange 的首次兜底可能被 pendingScroll 未完成的守卫挡掉，
+          // 而停在 offset≈0 处不会再产生滚动事件，用户必须「来回滚动」才能触发。
+          // 【4】统一走 shouldAutoPrepend：定位落位属程序化滚动（非手势窗口），
+          // 正常情况下不会触发；仅当用户恰在此刻手势滚动且朝顶部时才拼接。
+          // 【5】经 requestAutoPrepend 统一执行：手势进行中只记意图，待手势
+          // 完全结束后再插入 + 补偿，避免与拖拽/惯性争夺视口。
+          if (shouldAutoPrepend(targetOffset)) {
+            requestAutoPrepend(targetOffset);
+          }
         }
+        // 段级定位完成（无论是否精确修正）：进入比例精修探测
+        const refine = ratioRefineRef.current;
+        if (refine && refine.segmentId === rowId && refine.anchorOffset < 0) {
+          refine.anchorOffset = scrollOffset.current;
+        }
+        startRatioRefinePollRef.current(rowId);
       }
       const anchor = prependAnchor.current;
       if (anchor != null && rowId === anchor.firstRowId && y > 0) {
@@ -2712,6 +2820,68 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   );
 
   /**
+   * 滚动模式 cell 渲染器（BugFix：行高测量基准错误）。
+   * 此前行内 onLayout（segment/标题组件内部根 View）的 y 是相对 cell 容器的
+   * 恒 ≈0 值——rowOffsets 整个测量基准错误：pending 定位精调按 y-24=0 把视口
+   * 拽回章首（续读恢复失败根因之一）、prepend 锚点 y>0 条件永不成立、注音
+   * 视口锚点退化为 no-op（全靠 onContentSizeChange/兜底路径掩盖）。
+   * cell 根 View 的父节点即滚动内容容器，其 onLayout y = 内容绝对 y。
+   * 透传 onLayout 给 VirtualizedList 内部簿记（cellOffsets/填充率）不可省略。
+   */
+  const scrollCellRenderer = useCallback(
+    (props: CellRendererProps<ReaderRow>) => {
+      const { item, onLayout, style, children } = props;
+      return (
+        <View
+          style={style}
+          onLayout={(e) => {
+            onLayout?.(e);
+            handleRowLayout(item.id, e.nativeEvent.layout.y);
+          }}
+        >
+          {children}
+        </View>
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [handleRowLayout],
+  );
+
+  /** 行内布局上报 no-op：滚动模式行高测量已由 scrollCellRenderer 在 cell 层接管，
+   * 行内 View 的 y 相对 cell 容器恒 ≈0，上报会覆盖 cell 级真实值 */
+  const noopRowLayout = useCallback(() => undefined, []);
+
+  /**
+   * 章内滚动比例（0~1）：以「章标题行」为起点、「下一章标题行」（未拼接/
+   * 未挂载时用内容末尾）为终点，计算当前偏移在章内的相对位置。
+   * 与 handleScroll 的底部进度条同一口径（段内精确续读的记录端）。
+   * 依赖全为 ref（rowOffsets/contentH/viewH/scrollOffset/continuousRef），
+   * 可安全地在防抖回调里读取最新值。
+   */
+  const computeChapterScrollRatio = useCallback((chapterId: string): number => {
+    const contentHeight = contentH.current;
+    if (contentHeight <= 0) {
+      return 0;
+    }
+    let start = 0;
+    let end = Math.max(0, contentHeight - CONTENT_BOTTOM_PADDING);
+    const titleOffset = rowOffsets.current.get(`${TITLE_ROW_PREFIX}${chapterId}`);
+    if (typeof titleOffset === 'number' && titleOffset > 0) {
+      start = titleOffset;
+    }
+    const idx = continuousRef.current.findIndex((c) => c.id === chapterId);
+    const nextChapter = idx >= 0 ? continuousRef.current[idx + 1] : undefined;
+    if (nextChapter) {
+      const nextOffset = rowOffsets.current.get(`${TITLE_ROW_PREFIX}${nextChapter.id}`);
+      if (typeof nextOffset === 'number' && nextOffset > start) {
+        end = nextOffset;
+      }
+    }
+    const denom = Math.max(1, end - start);
+    return Math.min(1, Math.max(0, (scrollOffset.current - start) / denom));
+  }, []);
+
+  /**
    * P1-17 滚动进度防抖记录：滚动/视口变化时只暂存候选段落，滚动停止
    * 300ms 后才提交到 useReaderStore（recordProgress 同步 lastRead.segmentId），
    * 避免连续滚动期间高频写持久化。跨章切换仍由 openChapter 即时提交。
@@ -2733,7 +2903,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     }
     const store = useReaderStore.getState();
     if (pending.chapterId === store.chapterId) {
-      store.recordProgress(pending.segmentId);
+      // 附带章内滚动比例（段内精确续读的记录端，与底部进度条同一口径）
+      store.recordProgress(pending.segmentId, computeChapterScrollRatio(pending.chapterId));
     }
   }, []);
 
@@ -2749,12 +2920,16 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [flushSegmentRecord],
   );
 
-  // 卸载时清理防抖计时器，避免离屏后误写进度
+  // 卸载时清理防抖计时器与比例精修轮询，避免离屏后误写进度/误滚动
   useEffect(() => {
     return () => {
       if (segmentRecordTimer.current) {
         clearTimeout(segmentRecordTimer.current);
         segmentRecordTimer.current = null;
+      }
+      if (ratioRefineTimerRef.current) {
+        clearInterval(ratioRefineTimerRef.current);
+        ratioRefineTimerRef.current = null;
       }
     };
   }, []);
@@ -2789,8 +2964,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         maybeDropHeadRef.current();
         const currentBookId = useReaderStore.getState().bookId;
         if (currentBookId) {
-          // openChapter 会一并写入 segmentId，无需再单独 setSegment
-          useReaderStore.getState().openChapter(currentBookId, row.chapterId, rowSegmentId);
+          // openChapter 会一并写入 segmentId，无需再单独 setSegment；
+          // 比例传 0（跨章瞬间新章标题行可能尚未布局，测不到真实起点，
+          // 后续章内防抖记录会以真实口径覆盖）
+          useReaderStore
+            .getState()
+            .openChapter(currentBookId, row.chapterId, rowSegmentId, 0);
           return;
         }
       }
@@ -2995,6 +3174,19 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     // 目录显式跳章除外（显式导航语义 = 章首）
     if (!segmentId && !explicitJump && restoreSegmentId) {
       armScrollLocate(restoreSegmentId);
+      // 段内精确续读：滚动模式且有有效比例时武装精修（非恢复场景一律清除，
+      // 防止上一次打开的恢复态在切章/显式跳章后残留误触发）
+      if (readerMode === 'scroll' && restoreOffsetRatio != null) {
+        ratioRefineRef.current = {
+          segmentId: restoreSegmentId,
+          ratio: restoreOffsetRatio,
+          anchorOffset: -1,
+        };
+      } else {
+        ratioRefineRef.current = null;
+      }
+    } else {
+      ratioRefineRef.current = null;
     }
     // 翻页模式定位目标同步（无参数则从章首开始，保持既有行为）
     setLocateTarget(segmentId ?? (explicitJump ? null : restoreSegmentId) ?? null);
@@ -3577,7 +3769,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             onHighlightPress={handleHighlightPress}
             onLongPressIndex={handleLongPressIndex}
             onPressIndex={selectionVisible ? handleSelectionExtendPress : undefined}
-            onLayoutItem={handleRowLayout}
+            onLayoutItem={noopRowLayout}
             workId={item.chapterId}
             bookId={bookId ?? undefined}
           />
@@ -3590,7 +3782,6 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           conversionMode={conversionMode}
           workId={item.chapterId}
           bookId={bookId ?? undefined}
-          onLayout={(e) => handleRowLayout(item.id, e.nativeEvent.layout.y)}
         />
       );
     },
@@ -3808,6 +3999,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             data={continuousRows}
             keyExtractor={(item) => item.id}
             renderItem={renderRow}
+            // cell 层布局上报：行内 onLayout 的 y 相对 cell 容器恒 ≈0，
+            // 必须在 cell 根 View（父节点=滚动内容容器）测量内容绝对 y
+            CellRendererComponent={scrollCellRenderer}
             // 目标段落定位：一次性渲染足够多的段落以保证 onLayout 触发。
             // 行数按打开章内容量预算计算（scrollInitialRows）：内置书仍为 30 行，
             // 导入书大段落按字符预算收缩，避免首帧逐字注音渲染压死 JS 线程。
