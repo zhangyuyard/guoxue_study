@@ -2533,68 +2533,87 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   };
 
   /**
-   * 段内精确续读轮询（比例精修）：段级定位完成后启动，300ms 间隔探测
-   * 「目标段已挂载且段高收敛」，随后按「段顶 − 24 + ratio × 段高」一次落位。
-   * 放弃条件：探测超 12 tick（~3.6s）/ 用户已手动滚动（偏离锚点 > 120px，
-   * 首个 tick 宽免）/ 恢复态被清（切章）。定位是程序化滚动，用户在打开后
-   * 立即抢滚的场景极少；宁可少滚不可抢滚。
+   * 段内精确续读（比例精修）：段级定位完成后启动。
+   * 【即时优先】先同步尝试一次精修——pending hit 同一批布局里目标段的下一行
+   * 通常已完成 cell 级测量（rowOffsets 已有真实 y），当场即可算出
+   * 「段顶 − 24 + ratio × 段高」一次落位，与段级定位合并为一次可见滚动，
+   * 消除旧版「先落段首、~300-600ms 后再跳到精确位置」的二次延迟。
+   * 同帧拿不到下一行（远跳跃窗口刚拉过来、下方行未布局）时退回轮询兜底：
+   * 150ms 间隔探测，超 20 tick（~3s）放弃。放弃条件还有：用户已手动滚动
+   * （偏离锚点 > 120px，锚定后的首个即时尝试宽免）/ 恢复态被清（切章）。
+   * 定位是程序化滚动，用户在打开后立即抢滚的场景极少；宁可少滚不可抢滚。
    */
   startRatioRefinePollRef.current = (segmentId: string) => {
     const refine = ratioRefineRef.current;
     if (!refine || refine.segmentId !== segmentId || ratioRefineTimerRef.current) {
       return;
     }
-    let ticks = 0;
-    ratioRefineTimerRef.current = setInterval(() => {
-      ticks += 1;
+
+    /** 单次精修尝试；strict=只认真实测量的下一行 y（不退化为内容高度估算） */
+    const attemptRefine = (tick: number, strict: boolean): boolean => {
       const cur = ratioRefineRef.current;
-      const timer = ratioRefineTimerRef.current;
-      if (!cur || cur.segmentId !== segmentId || !timer || ticks > 12) {
-        if (timer) {
-          clearInterval(timer);
-        }
-        ratioRefineTimerRef.current = null;
-        return;
+      if (!cur || cur.segmentId !== segmentId) {
+        return true; // 恢复态被清：视为已结束
       }
-      if (ticks > 1 && Math.abs(scrollOffset.current - cur.anchorOffset) > 120) {
+      if (tick > 1 && Math.abs(scrollOffset.current - cur.anchorOffset) > 120) {
         // 用户已手动滚动：放弃精修，绝不与手势争夺视口
-        clearInterval(timer);
-        ratioRefineTimerRef.current = null;
         ratioRefineRef.current = null;
-        return;
+        return true;
       }
       const ch = chapterRef.current;
       if (!ch || ch.segments.length === 0) {
-        return;
+        return false;
       }
       const segY = rowOffsets.current.get(segmentId);
       if (typeof segY !== 'number' || segY <= 0) {
-        return; // 目标行未挂载/未完成 cell 级测量
+        return false; // 目标行未挂载/未完成 cell 级测量
       }
       const segIdx = ch.segments.findIndex((s) => s.id === segmentId);
       const nextSegId = segIdx >= 0 ? ch.segments[segIdx + 1]?.id : undefined;
       const chIdx = continuousRef.current.findIndex((c) => c.id === ch.id);
       const nextChapterId = continuousRef.current[chIdx + 1]?.id;
-      const nextY =
+      const nextMeasuredY =
         (nextSegId ? rowOffsets.current.get(nextSegId) : undefined) ??
-        (nextChapterId ? rowOffsets.current.get(`${TITLE_ROW_PREFIX}${nextChapterId}`) : undefined) ??
-        contentH.current;
+        (nextChapterId
+          ? rowOffsets.current.get(`${TITLE_ROW_PREFIX}${nextChapterId}`)
+          : undefined);
+      const nextY = nextMeasuredY ?? (strict ? undefined : contentH.current);
+      if (typeof nextY !== 'number') {
+        return false; // 下一行未布局且不允许估算
+      }
       const segH = nextY - segY;
       if (segH <= 1) {
-        return; // 段高未收敛（下一行未布局）
+        return false; // 段高未收敛
       }
       const maxOffset = Math.max(0, contentH.current - viewH.current);
       const target = Math.min(maxOffset, Math.max(0, segY - 24 + cur.ratio * segH));
-      clearInterval(timer);
-      ratioRefineTimerRef.current = null;
       ratioRefineRef.current = null;
       // 同步补偿基准：onScroll 到达顺序不保证（同 pending hit 路径）
       scrollOffset.current = target;
       listRef.current?.scrollToOffset({ offset: target, animated: false });
       console.info(
-        `[PERF][locate] ratio refine seg=${segmentId} ratio=${cur.ratio.toFixed(3)} -> offset=${Math.round(target)}`,
+        `[PERF][locate] ratio refine seg=${segmentId} ratio=${cur.ratio.toFixed(3)} -> offset=${Math.round(target)} (tick=${tick})`,
       );
-    }, 300);
+      return true;
+    };
+
+    // 即时首试（strict）：与 pending hit 同帧，通常已具备全部测量
+    if (attemptRefine(0, true)) {
+      return;
+    }
+    // 轮询兜底：前 4 tick 仍 strict（同帧未就绪多为远跳跃场景，宁缺毋滥），
+    // 之后允许内容高度估算兜底（有比例数据总比停在段首好）
+    let ticks = 0;
+    ratioRefineTimerRef.current = setInterval(() => {
+      ticks += 1;
+      const timer = ratioRefineTimerRef.current;
+      if (!timer || ticks > 20 || attemptRefine(ticks, ticks <= 4)) {
+        if (timer) {
+          clearInterval(timer);
+        }
+        ratioRefineTimerRef.current = null;
+      }
+    }, 150);
   };
 
   /** 连续滚动涉及的全部段落（供选词码点基准覆盖后续章节） */
