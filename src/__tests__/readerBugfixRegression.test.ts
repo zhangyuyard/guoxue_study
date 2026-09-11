@@ -25,6 +25,7 @@ function readSrc(relPath: string): string {
 }
 
 const source = readSrc('screens/ReaderScreen.tsx');
+const usSource = readSrc('services/UserBookService.ts');
 
 describe('Bug 1：pageReady 必须双向门控且要求拆分决策收敛', () => {
   test('pageReady 以 ready 双向赋值（不再只置 true）', () => {
@@ -375,5 +376,37 @@ describe('未打开书跳章 loading 回归防护（early-hydrated 书空壳目�
     expect(source).toMatch(
       /if \(ch && ch\.segments\.length === 0\) \{[\s\S]*?fillBuiltinChapterNow\(bookId, chapterId\);/,
     );
+  });
+});
+
+describe('大部头填充期卡顿回归防护（流式装配 + 节流合并 + viewDirty tick）', () => {
+  test('meta 壳填充必须走流式装配（字节分批 + 行级时间片），禁止整章一次装配', () => {
+    // 巨章（史记表章级几十万字）单章一次 read+toParagraphs 单块可达 1s+，
+    // 时间片「粒度=整章」对其失效；流式后单块上限 ≈ 单行切分（毫秒级）
+    expect(usSource).toMatch(/FILL_READ_CHUNK_BYTES = 64 \* 1024/);
+    expect(usSource).toMatch(/shell\.fillCursor \?\?= \{/);
+    expect(usSource).toMatch(/cur\.pendingLines = lines;/);
+    // 批尾无换行必须整批留 carry（半行产出会造成段落切分错误）
+    expect(usSource).toMatch(
+      /else \{\s*\n\s*cur\.carry = chunk;\s*\n\s*chunk = '';\s*\n\s*\}/,
+    );
+  });
+
+  test('填充让出必须 ≥1 帧且合并+通知节流（防 JS 饱和）', () => {
+    // setTimeout(0) 仅让出 1-4ms，填充占空比 ~75%；16ms 让出 + 1.5s 节流
+    expect(usSource).toMatch(/const FILL_YIELD_MS = 16;/);
+    expect(usSource).toMatch(/const FILL_NOTIFY_THROTTLE_MS = 1500;/);
+    expect(usSource).toMatch(
+      /setTimeout\(resolve, FILL_YIELD_MS\)/,
+    );
+  });
+
+  test('填充通知回调 hydrateTick 必须 viewDirty 条件化（禁无条件整树重渲染）', () => {
+    // 填充按书序推进，绝大多数批次与当前视口无关；无条件 tick 使每次
+    // 通知都同步整树重渲染（真机采样 fill-cb heavy 546-3851ms 的主因）
+    expect(source).toMatch(/const viewDirty = changed \|\| \(curFilled && !lastCurFilledRef\.current\);/);
+    expect(source).toMatch(/if \(viewDirty\) \{\s*\n\s*setHydrateTick\(\(t\) => t \+ 1\);/);
+    // 切章重置边沿基准（新章空壳填充完成必须能解除 loading）
+    expect(source).toMatch(/lastCurFilledRef\.current = false;/);
   });
 });

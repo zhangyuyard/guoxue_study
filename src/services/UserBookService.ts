@@ -1174,6 +1174,22 @@ interface BuiltinShell {
   chapter: Book['chapters'][number];
   bodyLines: string[];
   range: { s: number; e: number } | null;
+  /**
+   * 巨章流式装配游标（fill 进程内临时态，不持久化）。meta 壳的章按
+   * 「字节分批读 + 逐行产出段落」增量装配：旧实现一次 read 整章 +
+   * 一次 toParagraphs——史记的表章（几十万字）单章同步块可达 1s+，
+   * 时间片机制（粒度=整章）对其失效。segments 增量 push：首段产出后
+   * chapterPending（segments.length===0）即解除，部分内容先渲染，
+   * 其余批次继续追加（id 连续 cN-s1..sM，与一次性装配结果一致）。
+   */
+  fillCursor?: {
+    bytePos: number; // 已读字节（相对 range.s）
+    carry: string; // 跨批残行（批尾无换行的未完结行）
+    pendingLines: string[] | null; // 时间片中断时批内未消费行
+    lineIdx: number; // pendingLines 的消费游标
+    segCount: number; // 已产出段数
+    done: boolean;
+  };
 }
 
 async function buildBuiltinChapterShells(
@@ -1253,53 +1269,164 @@ async function fillRemainingBuiltinChapters(
     //（首屏只含目标章解析），填充绝不与首屏渲染争抢同一拍
     // eslint-disable-next-line no-await-in-loop
     await yieldToJs();
-    // 时间片驱动（替代固定 30 章/批）：每装配完一章检查耗时，超过
-    // FILL_TIME_BUDGET_MS 即让出 JS 并 hydrate+通知。原 30 章/批对
-    // 资治通鉴级（章均 1.5 万字）单片可达数秒，是「点卡片后长时间
-    // 无法操作」的第四大块；时间片最坏块 = 单章 toParagraphs（约 10-30ms）。
+    // 时间片驱动（替代固定 30 章/批）：每批装配后检查耗时，超过
+    // FILL_TIME_BUDGET_MS 即让出 JS 并 hydrate+通知。meta 壳走「流式
+    // 装配」：字节分批读（FILL_READ_CHUNK_BYTES）+ 逐行产出段落，
+    // 行级时间检查——巨章（史记表章级几十万字）单章一次装配可达 1s+，
+    // 「粒度=整章」的旧时间片对其失效；流式后单块上限 ≈ 单行切分（毫秒级）。
+    // 慢路径壳（bodyLines，整读扫描产物）保持一次性装配。
     let sliceFilled = 0;
     let sliceStart = Date.now();
     let lastNotifyAt = 0;
-    for (let i = 0; i < shells.length; i += 1) {
+    // 片内分解计时（诊断填充期 jsBlocked 的连续饱和块来源）
+    let sliceChapterMs = 0;
+    let sliceHeaviestChapterMs = 0;
+    let i = 0;
+    while (i < shells.length) {
       const shell = shells[i];
-      if (shell.chapter.segments.length > 0) {
-        continue; // 目标章已在首屏装配，跳过
+      // 完成判定：首屏目标章/一次性装配章（segments 非空且无流式游标）、
+      // 流式已完成章 → 前进；流式进行中（cursor 存在且未 done）→ 继续
+      if (shell.chapter.segments.length > 0 && !shell.fillCursor) {
+        i += 1;
+        continue;
+      }
+      if (shell.fillCursor?.done) {
+        i += 1;
+        continue;
       }
       // 填充期间压住 FTS 队列（片间检查点生效），完成后留 10s 收尾缓冲
       ftsQueuePausedUntil = Math.max(
         ftsQueuePausedUntil,
         Date.now() + FTS_PAUSE_ON_HYDRATE_MS,
       );
-      // 正文双轨：meta 壳按章切片读（毫秒级），慢路径壳用内存 bodyLines
-      let bodyText: string;
+      const chapterT0 = Date.now();
       if (shell.range) {
-        const slice = await readBuiltinChapterSlice(
-          spec,
-          shell.range.s,
-          shell.range.e,
-        );
-        if (slice === null) {
-          // 切片读失败：跳过该章（空壳保留，重进重水合兜底）
-          continue;
+        // —— meta 壳：流式装配 ——
+        const cur = (shell.fillCursor ??= {
+          bytePos: 0,
+          carry: '',
+          pendingLines: null,
+          lineIdx: 0,
+          segCount: 0,
+          done: false,
+        });
+        const totalBytes = shell.range.e - shell.range.s;
+        // ① 取本批行集合：中断余量 → 上批续；否则读新批（≤64KB，
+        //    RNFS 大切片 native→JS ~1MB/s，整章一次读是巨章的第二大块）
+        let lines: string[];
+        if (cur.pendingLines) {
+          lines = cur.pendingLines;
+          cur.pendingLines = null; // lineIdx 保留续用
+        } else {
+          if (cur.bytePos >= totalBytes && !cur.carry) {
+            cur.done = true;
+            i += 1;
+            continue;
+          }
+          const want = Math.min(FILL_READ_CHUNK_BYTES, totalBytes - cur.bytePos);
+          let slice = '';
+          if (want > 0) {
+            const r = await readBuiltinChapterSlice(
+              spec,
+              shell.range.s + cur.bytePos,
+              shell.range.s + cur.bytePos + want,
+            );
+            if (r === null) {
+              // 切片读失败：按已产出保留（空壳/部分内容），重进重水合兜底
+              cur.done = true;
+              i += 1;
+              continue;
+            }
+            slice = r;
+            cur.bytePos += want;
+          }
+          let chunk = cur.carry + slice;
+          cur.carry = '';
+          if (cur.bytePos < totalBytes) {
+            // 批尾未完结行留到下批（行跨批截断防护）：整批无换行时
+            // 全部留 carry——半行当段落产出会造成内容切分错误
+            const lastNl = chunk.lastIndexOf('\n');
+            if (lastNl >= 0) {
+              cur.carry = chunk.slice(lastNl + 1);
+              chunk = chunk.slice(0, lastNl + 1);
+            } else {
+              cur.carry = chunk;
+              chunk = '';
+            }
+          }
+          lines = chunk.split('\n');
+          cur.lineIdx = 0;
         }
-        bodyText = slice;
+        // ② 逐行产出段落：资产格式段落以 \n\n 分隔、段内无换行，
+        // 「非空行=段落」与 toParagraphs 对该格式完全等价；行级时间检查
+        // 保证单块 ≤ 一行的切分耗时（毫秒级）
+        const segs = shell.chapter.segments;
+        const batchT0 = Date.now();
+        let exhausted = true;
+        for (; cur.lineIdx < lines.length; cur.lineIdx += 1) {
+          const t = lines[cur.lineIdx].trim();
+          if (!t) {
+            continue; // 空行 = 段落分隔
+          }
+          for (const p of splitLongParagraph(t, MAX_SEGMENT_CHARS)) {
+            cur.segCount += 1;
+            segs.push({
+              id: `${shell.chapter.id}-s${cur.segCount}`,
+              chapterId: shell.chapter.id,
+              order: cur.segCount,
+              text: p,
+            });
+          }
+          if (Date.now() - batchT0 >= FILL_TIME_BUDGET_MS) {
+            // 行级时间片：余行留在 pendingLines 下批续处理
+            exhausted = false;
+            cur.lineIdx += 1; // 当前行已产出，指针前进
+            cur.pendingLines = lines;
+            break;
+          }
+        }
+        if (exhausted) {
+          cur.lineIdx = 0;
+          if (cur.bytePos >= totalBytes && !cur.carry) {
+            cur.done = true;
+            i += 1;
+          }
+        }
       } else {
-        bodyText = shell.bodyLines.join('\n');
+        // —— 慢路径壳（整读扫描产物，历史路径保持一次性装配）——
+        const bodyText = shell.bodyLines.join('\n');
+        const paras = toParagraphs(bodyText);
+        shell.chapter.segments = paras.map((p, idx) => ({
+          id: `${shell.chapter.id}-s${idx + 1}`,
+          chapterId: shell.chapter.id,
+          order: idx + 1,
+          text: p,
+        }));
+        i += 1;
       }
-      const paras = toParagraphs(bodyText);
-      shell.chapter.segments = paras.map((p, idx) => ({
-        id: `${shell.chapter.id}-s${idx + 1}`,
-        chapterId: shell.chapter.id,
-        order: idx + 1,
-        text: p,
-      }));
+      const chapterMs = Date.now() - chapterT0;
+      sliceChapterMs += chapterMs;
+      sliceHeaviestChapterMs = Math.max(sliceHeaviestChapterMs, chapterMs);
       sliceFilled += 1;
       if (Date.now() - sliceStart >= FILL_TIME_BUDGET_MS) {
-        // 片间让出一拍：tap/触摸/渲染可插队；让出后合并 + 节流通知
-        //（阅读器 hydrateTick 按章引用 diff，粒度越细重算越轻）
+        // 片间让出一帧：tap/触摸/渲染/GC 获得真正可用的执行窗口
+        //（setTimeout(0) 仅 1-4ms，填充近乎连续占用 JS——见 FILL_YIELD_MS）
         // eslint-disable-next-line no-await-in-loop
-        await yieldToJs();
-        if (sliceFilled > 0 && typeof hydrate === 'function') {
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, FILL_YIELD_MS),
+        );
+        const now = Date.now();
+        // 合并 + 通知一起节流：assemble/hydrate（垃圾 + 三级缓存置空）
+        // 与通知（阅读器整树重渲染）都是频率的线性成本；尾片必达。
+        // 跳章到「已装配未通知」的章由 segments 直查 + fillBuiltinChapterNow
+        // 链路兜底，不受节流影响。
+        if (
+          sliceFilled > 0 &&
+          typeof hydrate === 'function' &&
+          now - lastNotifyAt >= FILL_NOTIFY_THROTTLE_MS
+        ) {
+          lastNotifyAt = now;
+          const mergeT0 = Date.now();
           const merged = assembleBuiltinBook(
             spec,
             shells.map((s) => s.chapter),
@@ -1309,19 +1436,22 @@ async function fillRemainingBuiltinChapters(
           } catch {
             // 单片合并失败不中止（空壳保留，下次进入重水合）
           }
-          const now = Date.now();
-          if (now - lastNotifyAt >= FILL_NOTIFY_THROTTLE_MS) {
-            lastNotifyAt = now;
-            builtinFillListeners.forEach((cb) => {
-              try {
-                cb(spec.id);
-              } catch {
-                // 单个订阅者异常不影响其余订阅者与填充流程
-              }
-            });
-          }
+          builtinFillListeners.forEach((cb) => {
+            try {
+              cb(spec.id);
+            } catch {
+              // 单个订阅者异常不影响其余订阅者与填充流程
+            }
+          });
+          console.info(
+            `[PERF][fill-slice] ${spec.id} chapters=${sliceFilled} ` +
+              `chaptersMs=${sliceChapterMs} heaviestChapter=${sliceHeaviestChapterMs} ` +
+              `mergeNotify=${Date.now() - mergeT0}ms`,
+          );
         }
         sliceFilled = 0;
+        sliceChapterMs = 0;
+        sliceHeaviestChapterMs = 0;
         sliceStart = Date.now();
       }
     }
@@ -1815,8 +1945,31 @@ const PARSE_CHUNK_CHAPTERS = 30;
  * 30 章/批（对大书单片可达数秒，点卡片后长时间无法操作的第四大块）。
  */
 const FILL_TIME_BUDGET_MS = 12;
-/** 填充进度订阅者通知节流（每片合并廉价、通知触发阅读器重渲染，节流防抖） */
-const FILL_NOTIFY_THROTTLE_MS = 400;
+/**
+ * 流式装配的单批读取字节量：巨章按此分批走 RNFS 切片读。RNFS 大字符串
+ * native→JS 约 1MB/s——史记表章级（几十万字节）整章一次读是第二大同步块，
+ * 64KB/批单次 ~60-70ms 且批内行级时间片可再中断。
+ */
+const FILL_READ_CHUNK_BYTES = 64 * 1024;
+/**
+ * 片间让出时长（ms）：填充是最低优先级后台任务，片间必须留出一帧让
+ * tap/渲染/GC 真正执行。旧 setTimeout(0) 在 RN/Hermes 上仅让出 1-4ms，
+ * 填充对 JS 线程的占空比高达 ~75%——触摸响应延迟、心跳探针连续报
+ * jsBlocked、动画掉帧（真机采样：填充期每 ~0.75s 一次 600-850ms 饱和块）。
+ */
+const FILL_YIELD_MS = 16;
+/**
+ * 填充进度「合并+通知」节流：两者都是通知频率的线性成本——
+ * ① assemble/hydrate 让旧 Book 壳变垃圾 + 置空 TextLibraryService 三级
+ *   缓存（booksCache/chapterIndex/segmentIndex，下次访问全量重建，已水合
+ *   大部头下单次重建可达数百 ms）；
+ * ② 通知触发 ReaderScreen 整树重渲染（hydrateTick 依赖扩散）。
+ * 真机采样（史记 130 章）：每片 chaptersMs 仅 17-76ms，但回调同步块
+ * 546-817ms（GC + 索引重建计入），400ms 节流下持续饱和。1.5s 节流将
+ * 成本降一个量级；跳章到「已填充但未通知」的章由 fillBuiltinChapterNow
+ * 链路（segments 直查 + hydrateTick）兜底，不受节流影响。
+ */
+const FILL_NOTIFY_THROTTLE_MS = 1500;
 
 /**
  * 逐行扫描切出 [章节标题, 标题下正文] 序列与标题前正文（同步纯函数）。

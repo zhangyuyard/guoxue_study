@@ -191,3 +191,37 @@ hydrate effect（ReaderScreen）：
 - 顺带修正脚本生成 builtinCatalog.ts 的 toc 漂移：catalog 条目应为 {id,title}
   （运行时 buildBuiltinMetaBooks 消费 title；字节区间 s/e 属 <id>.meta.json
   专责，bundle 内不重复携带）。重跑全量构建其余 76 部资产/meta 幂等无变化。
+
+## P1.0 大部头填充期持续卡顿根治（r34）
+
+### 真机采样定位（r32 探针包，史记 130 章填充期）
+- 每片装配仅 17-76ms（时间片本身工作正常），但每 ~0.75s 一次
+  `fill-cb heavy=546-817ms` + `jsBlocked 600-850ms`——JS 线程持续饱和；
+- 三个真因：① 填充通知回调**无条件 setHydrateTick** → 每次通知同步
+  整树重渲染（填充推进的绝大多数批次与当前视口无关）；② 巨章（史记
+  表章级几十万字）单章一次 read+toParagraphs 单块 930-1067ms——时间片
+  「粒度=整章」失效；③ setTimeout(0) 让出仅 1-4ms，填充对 JS 占空比
+  ~75%；通知还触发 assemble/hydrate（垃圾 + TextLibraryService 三级
+  缓存置空 → 下次访问全量重建索引）。
+
+### 修复（r34）
+1. **通知回调 viewDirty 条件化**（ReaderScreen）：hydrateTick 仅在
+   `changed`（拼接序列章被替换）或「当前章空→非空」边沿时递增；
+   chapterRef 与库内章同引用（fill mutate 即时可见），边沿检测免渲染；
+   切章 effect 重置边沿基准。
+2. **meta 壳流式装配**（UserBookService）：字节分批读（64KB/批，
+   RNFS 大切片 ~1MB/s 是巨章第二大块）+ 逐行产出段落（资产格式段落
+   以 \n\n 分隔、段内无换行 ⇒「非空行=段落」与 toParagraphs 完全等价，
+   7 类文本形态 × 5 种批大小对拍一致）+ 行级时间检查（单块上限 ≈ 单行
+   切分毫秒级）；segments 增量 push（首段产出即解除 chapterPending，
+   部分内容先渲染）；批尾无换行整批留 carry（行跨批截断防护，半行产出
+   是对拍抓出的真 bug）。慢路径壳（bodyLines）保持一次性装配。
+3. **片间让出 16ms + 合并/通知节流 1500ms**：填充退居真正的后台任务，
+   成本（GC + 缓存重建 + 整树渲染）降一个量级；跳章兜底走
+   fillBuiltinChapterNow（segments 直查）不受节流影响。
+
+### 效果（真机复测，同场景对比）
+- 修复前：每 ~0.75s 一次 600-850ms 饱和块（JS 持续 100% 占用）+ 巨章
+  单块 1s+ + 通知块最高 5.1s；
+- 修复后：稳态每 1.5s 一次装配 14-39ms、mergeNotify=0ms、
+  采样期后段零 jank（无 ≥300ms 块）——填充期 UI 恢复流畅。

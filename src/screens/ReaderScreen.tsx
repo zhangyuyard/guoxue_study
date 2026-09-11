@@ -1618,6 +1618,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const [hydrateTick, setHydrateTick] = useState(0);
   const [builtinHydrating, setBuiltinHydrating] = useState(false);
   const [builtinHydrateFailed, setBuiltinHydrateFailed] = useState(false);
+  // 填充通知的「当前章空→满」边沿基准（见 onBuiltinFillProgress 回调注释）
+  const lastCurFilledRef = useRef(false);
   // useLayoutEffect：水合标记必须在首帧绘制前置位——否则「元数据章（正文空）」
   // 会先渲染一帧空内容，effect 落地后才切换到加载中（闪一帧空白）。
   useLayoutEffect(() => {
@@ -1697,7 +1699,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       if (filledBookId !== bookId) {
         return;
       }
-      setHydrateTick((t) => t + 1);
+      const cbT0 = Date.now();
       const fresh = TextLibraryService.getBook(filledBookId);
       if (fresh.success && fresh.data) {
         const byId = new Map(fresh.data.chapters.map((c) => [c.id, c]));
@@ -1711,9 +1713,24 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           }
           return c;
         });
+        // hydrateTick（强制 book/chapter useMemo 重算 → 整树重渲染）仅在
+        // 「视图真的受影响」时递增：填充按书序推进，绝大多数批次更新的
+        // 是与当前视口无关的远端章——旧实现无条件 tick 使每次通知都全树
+        // 重渲染（真机采样：每片同步块 500-800ms，填充期 UI 持续饱和）。
+        // 需要渲染的两种情形：
+        // ① changed：拼接序列内的章被填充替换（滚动模式内容更新）；
+        // ② 当前章「空壳→非空」边沿：页面模式/跳章兜底场景，章对象与库内
+        //    同引用（fill mutate 即时可见），仅需一次 render 解除 loading。
+        const curCh = chapterRef.current;
+        const curFilled = !!curCh && curCh.segments.length > 0;
+        const viewDirty = changed || (curFilled && !lastCurFilledRef.current);
+        lastCurFilledRef.current = curFilled;
         if (changed) {
           continuousRef.current = merged;
           setContinuousChapters(merged);
+        }
+        if (viewDirty) {
+          setHydrateTick((t) => t + 1);
         }
         // 空壳章待填的向前拼接重试：上一章按需填充完成后，用户若仍在
         // 顶部附近（意图未消失）则自动补拼；已滚走则丢弃意图
@@ -1733,8 +1750,18 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           }
         }
       }
+      const cbMs = Date.now() - cbT0;
+      if (cbMs >= 50) {
+        console.info(`[PERF][fill-cb] heavy=${cbMs}ms`);
+      }
     });
   }, [bookId, readerMode]);
+
+  // 切章时重置「当前章已填充」边沿基准：新章（空壳）填充完成时必须触发
+  // viewDirty=true 解除 loading，不能沿用上一章的 true 基准（会吞掉 tick）
+  useEffect(() => {
+    lastCurFilledRef.current = false;
+  }, [chapterId]);
 
   // 文本数据：随路由参数【同步派生】（BugFix：切章时旧章内容多渲染一帧的闪烁）。
   // 旧实现经 init effect 异步 setState 加载：点「下一章」后参数已变、章节状态仍是
