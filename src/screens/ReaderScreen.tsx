@@ -1746,18 +1746,39 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         if (viewDirty) {
           setHydrateTick((t) => t + 1);
         }
-        // 空壳章待填的向前拼接重试：上一章按需填充完成后，用户若仍在
-        // 顶部附近（意图未消失）则自动补拼；已滚走则丢弃意图
+        // 空壳章待填的向前拼接重试：上一章按需填充完成后，用户仍在
+        // 顶部附近（意图未消失）则自动补拼；已滚走则丢弃意图。
+        // 【r36】重试必须走统一的手势防护：填充完成时刻用户极可能仍在
+        // 压顶下拉（跳远章后连续下拉的真实场景），直接插入 + scrollToIndex
+        // 对齐会与进行中的原生拖拽/回弹争夺视口——程序化滚动被手势覆盖，
+        // offset 停在 0 = 视口显示新 row 0 =「直接跳到前一章章首」（真机
+        // 复现根因；MVCP 对 offset=0 头部插入不可靠，无原生兜底）。手势中
+        // 置延迟意图，手势完全结束后由 consumeDeferredPrepend 统一执行。
+        // 意图（pendingPrevPrependRef）保留到 prepend 真正执行（成功路径
+        // 自清）或 30s 过期：先清后调会把「pendingScroll 未完成等守卫
+        // 早退」变成意图永久丢失，用户必须再拉一次才补拼。
         const pending = pendingPrevPrependRef.current;
         if (pending) {
           const filled = fresh.data.chapters.find((c) => c.id === pending.chapterId);
           if (filled && filled.segments.length > 0) {
-            pendingPrevPrependRef.current = null;
+            const gestureActive =
+              dragActiveRef.current || userScrollActiveRef.current;
+            const offset = scrollOffset.current;
             if (
               readerMode === 'scroll' &&
-              scrollOffset.current <= viewH.current * CONTIGUOUS_PRELOAD_SCREENS
+              offset <= viewH.current * CONTIGUOUS_PRELOAD_SCREENS
             ) {
-              prependPrevRef.current();
+              if (gestureActive) {
+                console.info(
+                  `[PERF][prepend-retry] deferred (gesture) ch=${pending.chapterId} offset=${Math.round(offset)}`,
+                );
+                deferredPrependIntentRef.current = true;
+              } else {
+                console.info(
+                  `[PERF][prepend-retry] run ch=${pending.chapterId} offset=${Math.round(offset)}`,
+                );
+                prependPrevRef.current();
+              }
             }
           } else if (Date.now() - pending.requestedAt > 30000) {
             pendingPrevPrependRef.current = null; // 兜底过期，防永久挂起
@@ -2431,14 +2452,61 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         createdAt: Date.now(),
         done: false,
       };
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
+      // 对齐自校验重试（r36）：单发 scrollToIndex 不可靠——①大章 K 行远超
+      // 已测量窗口时 VirtualizedList 自身不滚，转交 onScrollToIndexFailed
+      // 估算兜底（估算落点还要等 topAlignRef 精修）；②补拼若恰逢手势/原生
+      // 布局未收敛，程序化滚动会被吞掉，视口停在 offset 0 =「跳到前一章
+      // 章首」。改为每帧复查：offset 仍贴顶（≤4px，对齐未生效也未获 MVCP
+      // 补偿）且未被 topAlignRef 精确修正、未超时/超次数，则重发
+      // scrollToIndex；视口一旦离开顶部即停（交 onLayout 精修）。拖拽中
+      // 不与原生争夺视口，仅继续观察，松手瞬间补齐。
+      const ALIGN_TITLE_ROW = `${TITLE_ROW_PREFIX}${firstId}`;
+      const ALIGN_MAX_TICKS = 30;
+      const ALIGN_MAX_MS = 2000;
+      const ALIGN_EPSILON_PX = 4;
+      let alignTicks = 0;
+      const tryAlign = (): void => {
+        const topAlign = topAlignRef.current;
+        // 已精确对齐 / 被消费 / 被新一轮 prepend 接管：停止重试
+        if (!topAlign || topAlign.done || topAlign.rowId !== ALIGN_TITLE_ROW) {
+          return;
+        }
+        alignTicks += 1;
+        if (
+          alignTicks > ALIGN_MAX_TICKS ||
+          Date.now() - topAlign.createdAt > ALIGN_MAX_MS
+        ) {
+          console.info(
+            `[PERF][prepend] top align retries exhausted ticks=${alignTicks} offset=${Math.round(scrollOffset.current)}`,
+          );
+          return;
+        }
+        if (scrollOffset.current > ALIGN_EPSILON_PX) {
+          // 视口已离开顶部：对齐生效（或 MVCP 已补偿），等 onLayout 精修
+          return;
+        }
+        if (dragActiveRef.current) {
+          // 手指按住拖拽中：不发 scrollTo，下一帧复查（松手即补齐）
+          requestAnimationFrame(tryAlign);
+          return;
+        }
+        try {
           listRef.current?.scrollToIndex({
             index: insertedRows,
             viewPosition: 0,
             animated: false,
           });
-        });
+        } catch (err) {
+          // scrollToIndex 对未提交 data 的越界 invariant：等下一帧数据提交后重试
+          console.info(
+            `[PERF][prepend] scrollToIndex threw (data not committed?) tick=${alignTicks}`,
+          );
+        }
+        requestAnimationFrame(tryAlign);
+      };
+      // 首帧等数据提交（setContinuousChapters 同步触发重渲染），双 rAF 后开始
+      requestAnimationFrame(() => {
+        requestAnimationFrame(tryAlign);
       });
     }
     const merged = [prevChapter, ...continuousRef.current];
@@ -3186,6 +3254,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const handleScrollToIndexFailed = useCallback(
     (info: { index: number; averageItemLength: number }) => {
       const approx = Math.max(0, info.averageItemLength * info.index - 24);
+      // r36 探针：prepend 顶端对齐走此兜底时（目标行超出已测量窗口）记录
+      // 估算落点，与 top align 精修日志对照定位「对齐失败停在章首」问题
+      console.info(
+        `[PERF][prepend] scrollToIndex failed -> approx offset=${Math.round(approx)} index=${info.index} avg=${Math.round(info.averageItemLength)}`,
+      );
       listRef.current?.scrollToOffset({ offset: approx, animated: false });
     },
     [listRef],

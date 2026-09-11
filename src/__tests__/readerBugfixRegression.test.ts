@@ -410,3 +410,38 @@ describe('大部头填充期卡顿回归防护（流式装配 + 节流合并 + v
     expect(source).toMatch(/lastCurFilledRef\.current = false;/);
   });
 });
+
+describe('跳远章上滚补拼回归防护（重试走手势防护 + 顶端对齐自校验重试）', () => {
+  test('填充进度订阅重试禁止绕过手势防护直接插入（压顶下拉时补拼被手势覆盖 → 跳前一章章首）', () => {
+    // 真机复现（史记跳远章连续下拉）：填充完成时刻用户仍在拖拽/回弹中，
+    // 旧实现直接 prependPrevRef() → 插入 + scrollToIndex 与原生手势争夺
+    // 视口 → 程序化滚动被覆盖，offset 停 0 = 视口显示新 row 0（前一章章首）。
+    // 修复：手势中置 deferredPrependIntentRef（consumeDeferredPrepend 于
+    // 手势完全结束后统一执行），空闲才直接执行。
+    expect(source).toMatch(
+      /dragActiveRef\.current \|\| userScrollActiveRef\.current;[\s\S]*?deferredPrependIntentRef\.current = true;[\s\S]*?prependPrevRef\.current\(\);/,
+    );
+    // 重试不得先清意图再调用：prepend 因 pendingScroll 未完成等守卫早退时
+    // 意图会永久丢失（用户必须再拉一次）；成功路径在 prepend 尾部自清
+    expect(source).not.toMatch(
+      /pendingPrevPrependRef\.current = null;[\s\S]{0,300}prependPrevRef\.current\(\);/,
+    );
+  });
+
+  test('offset≈0 顶端对齐必须自校验重试（单发 scrollToIndex 被吞即停在章首）', () => {
+    // 大章 K 行远超已测量窗口时 VirtualizedList.scrollToIndex 自身不滚
+    //（转交 onScrollToIndexFailed 估算），且补拼若逢手势/原生布局未收敛，
+    // 首发滚动会被吞——必须每帧复查重发，视口离顶（对齐生效）即停
+    expect(source).toMatch(/const tryAlign = \(\): void => \{/);
+    expect(source).toMatch(/alignTicks > ALIGN_MAX_TICKS/);
+    expect(source).toMatch(/scrollOffset\.current > ALIGN_EPSILON_PX/);
+    // 拖拽中不发 scrollTo（不与原生争夺视口，松手瞬间补齐）
+    expect(source).toMatch(
+      /if \(dragActiveRef\.current\) \{[\s\S]*?requestAnimationFrame\(tryAlign\);/,
+    );
+    // scrollToIndex 对未提交 data 的越界 invariant 防护：try/catch 后重试而非崩溃
+    expect(source).toMatch(
+      /listRef\.current\?\.scrollToIndex\(\{[\s\S]*?animated: false,\s*\n\s*\}\);[\s\S]*?\} catch \(err\) \{/,
+    );
+  });
+});

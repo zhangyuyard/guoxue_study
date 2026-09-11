@@ -251,3 +251,39 @@ hydrate effect（ReaderScreen）：
 - 目录 tap 后即时完整弹出，自动定位并高亮当前卷（287）；
 - 跳 c282 → 2.5s 内完整渲染；立即上滚三屏无缝进入 c281（预热范围内，
   零空白零等待）；继续上滚 c280 内容连续。
+
+## P1.2 跳远章上滚补拼「跳到前一章章首」修复（r36）
+
+### 用户反馈
+史记跳转到远章后立即向上滚动，未立即开始滚动；继续下拉多次后，前一章
+加载完成后视口直接跳到前一章章首（不符合「保持视口原位」预期）。
+
+### 根因（代码链路 + RN 源码定位，三个缺陷叠加）
+1. **填充重试绕过手势防护（主因）**：fillBuiltinChapterNow 完成后由进度
+   订阅直接调 prependPrevRef()——不经 requestAutoPrepend 的手势判定。
+   用户「继续下拉」时填充完成 → 插入 + scrollToIndex 对齐与进行中的原生
+   拖拽/回弹争夺视口 → 程序化滚动被手势覆盖 → offset 停 0 = 视口显示
+   新 row 0（前一章标题）。MVCP 对 offset=0 头部插入不可靠（r23、
+   prefetch BugFix 两次真机踩坑），原生无兜底。
+2. **意图丢失**：订阅重试先清 pendingPrevPrependRef 再调 prepend——
+   若 prepend 因 pendingScroll 未完成等守卫早退，重试机会永久丢失。
+3. **对齐单发无自校验**：offset≈0 对齐只发一次 scrollToIndex（双 rAF）。
+   RN VirtualizedList.scrollToIndex 源码（0.74）：无 getItemLayout 且
+   目标 index > 已测量最大 index 时自身不滚，转交 onScrollToIndexFailed
+   估算兜底——大章 K 行远超已测量窗口，估算链任一环被吞即停在章首。
+
+### 修复
+1. **重试统一走手势防护**：手势中（dragActive/userScrollActive）置
+   deferredPrependIntentRef，手势完全结束后 consumeDeferredPrepend 统一
+   执行（插入 + 对齐不再与手势争夺视口）；空闲直接执行。
+   pendingPrevPrependRef 保留至 prepend 真正执行（成功自清）或 30s 过期。
+2. **对齐自校验重试循环**（tryAlign）：双 rAF 起每帧复查——offset 仍贴顶
+   （≤4px，对齐未生效）且未被 topAlignRef 精修、未超 30 帧/2s、非拖拽中
+   → 重发 scrollToIndex（try/catch 防 data 未提交 invariant）；视口离顶
+   即停，精确落位仍交 topAlignRef（handleRowLayout onLayout 修正）。
+3. **探针日志**：prepend-retry（deferred/run 决策）、align retries
+   exhausted、scrollToIndexFailed 估算落点——真机可对照定位残留问题。
+
+### 回归防护
+readerBugfixRegression.test.ts 新增 2 test：重试禁绕手势防护 + 禁先清
+意图再调用；tryAlign 自校验重试（超限/贴顶判定/拖拽让路/invariant 防护）。
