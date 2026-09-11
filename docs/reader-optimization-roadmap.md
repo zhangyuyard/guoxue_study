@@ -177,3 +177,17 @@ hydrate effect（ReaderScreen）：
   需重查 build-builtin-assets.mjs 对后汉书源文本的处理并重生成资产+meta。
 - 大部头 fill 期间的持续性 jsBlocked（每批合并 hydrateBook 阻塞 1-2s）伤体验，
   候选：批次时间片内让出粒度优化。
+
+### 附带修复：houhanshu.txt 资产损坏（r31）
+- 根因：源文本（dzbook/houhanshu.txt）文件前部有 130 行目录（「卷X 标题」），
+  正文标题则带书名前缀（「后汉书卷X …」「后汉书志第X …」）。houhanshu 配置
+  缺 tocGuard 且 chapterPattern 不识别前缀标题 → 130 个目录行全被判为章标题
+  （各章零正文=空壳），全书正文堆进末尾唯一的无前缀标题章（2.7MB 巨章）。
+- 修复：buildDaizhigeBook 新增 stripHeadingPrefix（剥标题行书名前缀，前瞻限定
+  后随卷/志编号，正文段行不受影响）+ houhanshu 启用 tocGuard（剥前缀后目录
+  题名与正文标题规范化文本一致，repeats 判定可靠丢弃目录骨架）。
+- 结果：129 章（目录 130 卷中卷四十六的正文标题行在源文本中缺失，其正文并入
+  相邻章，无内容损失）；meta 字节区间与文本切片对拍一致。
+- 顺带修正脚本生成 builtinCatalog.ts 的 toc 漂移：catalog 条目应为 {id,title}
+  （运行时 buildBuiltinMetaBooks 消费 title；字节区间 s/e 属 <id>.meta.json
+  专责，bundle 内不重复携带）。重跑全量构建其余 76 部资产/meta 幂等无变化。

@@ -10368,11 +10368,523 @@ export const BUILTIN_CATALOG: BuiltinBookSpec[] = [
     "category": "shi",
     "description": "纪传体东汉史一百二十卷，与《史记》《汉书》《三国志》并称前四史。全本。",
     "dynasty": "南朝宋",
-    "sizeBytes": 2720699,
+    "sizeBytes": 2714450,
     "toc": [
       {
         "id": "houhanshu-c1",
         "title": "卷一上·光武帝纪第一·上"
+      },
+      {
+        "id": "houhanshu-c2",
+        "title": "卷一下·光武帝纪第一·下"
+      },
+      {
+        "id": "houhanshu-c3",
+        "title": "卷二·显宗孝明帝纪·第二"
+      },
+      {
+        "id": "houhanshu-c4",
+        "title": "卷三·肃宗孝章帝纪·第三"
+      },
+      {
+        "id": "houhanshu-c5",
+        "title": "卷四·孝和孝殇帝纪·第四"
+      },
+      {
+        "id": "houhanshu-c6",
+        "title": "卷五·孝安帝纪·第五"
+      },
+      {
+        "id": "houhanshu-c7",
+        "title": "卷六·孝顺孝冲孝质帝纪·第六"
+      },
+      {
+        "id": "houhanshu-c8",
+        "title": "卷七·孝桓帝纪·第七"
+      },
+      {
+        "id": "houhanshu-c9",
+        "title": "卷八·孝灵帝纪·第八"
+      },
+      {
+        "id": "houhanshu-c10",
+        "title": "卷九·孝献帝纪·第九"
+      },
+      {
+        "id": "houhanshu-c11",
+        "title": "卷十上·皇后纪·第十上"
+      },
+      {
+        "id": "houhanshu-c12",
+        "title": "卷十下·皇后纪·第十下"
+      },
+      {
+        "id": "houhanshu-c13",
+        "title": "卷十一·刘玄刘盆子列传·第一"
+      },
+      {
+        "id": "houhanshu-c14",
+        "title": "卷十二·王刘张李彭卢列传·第二"
+      },
+      {
+        "id": "houhanshu-c15",
+        "title": "卷十三·隗嚣公孙述列传·第三"
+      },
+      {
+        "id": "houhanshu-c16",
+        "title": "卷十四·宗室四王三侯列传·第四"
+      },
+      {
+        "id": "houhanshu-c17",
+        "title": "卷十五·李王邓来列传·第五"
+      },
+      {
+        "id": "houhanshu-c18",
+        "title": "卷十六·邓寇列传·第六"
+      },
+      {
+        "id": "houhanshu-c19",
+        "title": "卷十七·冯岑贾列传·第七"
+      },
+      {
+        "id": "houhanshu-c20",
+        "title": "卷十八·吴盖陈臧列传·第八"
+      },
+      {
+        "id": "houhanshu-c21",
+        "title": "卷十九·耿弇列传·第九"
+      },
+      {
+        "id": "houhanshu-c22",
+        "title": "卷二十·铫期王霸祭遵列传·第十"
+      },
+      {
+        "id": "houhanshu-c23",
+        "title": "卷二十一·任李万邳刘耿列传·第十一"
+      },
+      {
+        "id": "houhanshu-c24",
+        "title": "卷二十二·朱景王杜马刘傅坚马列传·第十二"
+      },
+      {
+        "id": "houhanshu-c25",
+        "title": "卷二十三·窦融列传·第十三"
+      },
+      {
+        "id": "houhanshu-c26",
+        "title": "卷二十四·马援列传·第十四"
+      },
+      {
+        "id": "houhanshu-c27",
+        "title": "卷二十五·卓鲁魏刘列传·第十五"
+      },
+      {
+        "id": "houhanshu-c28",
+        "title": "卷二十六·伏侯宋蔡冯赵牟韦列传·第十六"
+      },
+      {
+        "id": "houhanshu-c29",
+        "title": "卷二十七·宣张二王杜郭吴承郑赵列传·第十七"
+      },
+      {
+        "id": "houhanshu-c30",
+        "title": "卷二十八上·桓谭冯衍列传·第十八上"
+      },
+      {
+        "id": "houhanshu-c31",
+        "title": "卷二十八下·冯衍传·第十八下"
+      },
+      {
+        "id": "houhanshu-c32",
+        "title": "卷二十九·申屠刚鲍永郅恽列传·第十九"
+      },
+      {
+        "id": "houhanshu-c33",
+        "title": "卷三十上·苏竟杨厚列传·第二十上"
+      },
+      {
+        "id": "houhanshu-c34",
+        "title": "卷三十下·郎𫖮襄楷列传·第二十下"
+      },
+      {
+        "id": "houhanshu-c35",
+        "title": "卷三十一·郭杜孔张廉王苏羊贾陆列传·第二十一"
+      },
+      {
+        "id": "houhanshu-c36",
+        "title": "卷三十二·樊宏阴识列传·第二十二"
+      },
+      {
+        "id": "houhanshu-c37",
+        "title": "卷三十三·朱冯虞郑周列传·第二十三"
+      },
+      {
+        "id": "houhanshu-c38",
+        "title": "卷三十四·梁统列传·第二十四"
+      },
+      {
+        "id": "houhanshu-c39",
+        "title": "卷三十五·张曹郑列传·第二十五"
+      },
+      {
+        "id": "houhanshu-c40",
+        "title": "卷三十六·郑范陈贾张列传·第二十六"
+      },
+      {
+        "id": "houhanshu-c41",
+        "title": "卷三十七·桓荣丁鸿列传·第二十七"
+      },
+      {
+        "id": "houhanshu-c42",
+        "title": "卷三十八·张法滕冯度杨列传·第二十八"
+      },
+      {
+        "id": "houhanshu-c43",
+        "title": "卷三十九·刘赵淳于江刘周赵列传·第二十九"
+      },
+      {
+        "id": "houhanshu-c44",
+        "title": "卷四十上·班彪列传·第三十上"
+      },
+      {
+        "id": "houhanshu-c45",
+        "title": "卷四十下·班彪列传·第三十下"
+      },
+      {
+        "id": "houhanshu-c46",
+        "title": "卷四十一·第五钟离宋寒列传·第三十一"
+      },
+      {
+        "id": "houhanshu-c47",
+        "title": "卷四十二·光武十王列传·第三十二"
+      },
+      {
+        "id": "houhanshu-c48",
+        "title": "卷四十三·朱乐何列传·第三十三"
+      },
+      {
+        "id": "houhanshu-c49",
+        "title": "卷四十四·邓张徐张胡列传·第三十四"
+      },
+      {
+        "id": "houhanshu-c50",
+        "title": "卷四十五·袁张韩周列传·第三十五"
+      },
+      {
+        "id": "houhanshu-c51",
+        "title": "卷四十七·班梁列传·第三十七"
+      },
+      {
+        "id": "houhanshu-c52",
+        "title": "卷四十八·杨李翟应霍爰徐列传·第三十八"
+      },
+      {
+        "id": "houhanshu-c53",
+        "title": "卷四十九·王充王符仲长统列传·第三十九"
+      },
+      {
+        "id": "houhanshu-c54",
+        "title": "卷五十·孝明八王列传·第四十"
+      },
+      {
+        "id": "houhanshu-c55",
+        "title": "卷五十一·李陈庞陈桥列传·第四十一"
+      },
+      {
+        "id": "houhanshu-c56",
+        "title": "卷五十二·崔骃列传·第四十二"
+      },
+      {
+        "id": "houhanshu-c57",
+        "title": "卷五十三·周黄徐姜申屠列传·第四十三"
+      },
+      {
+        "id": "houhanshu-c58",
+        "title": "卷五十四·杨震列传·第四十四"
+      },
+      {
+        "id": "houhanshu-c59",
+        "title": "卷五十五·章帝八王传·第四十五"
+      },
+      {
+        "id": "houhanshu-c60",
+        "title": "卷五十六·张王种陈列传·第四十六"
+      },
+      {
+        "id": "houhanshu-c61",
+        "title": "卷五十七·杜栾刘李刘谢列传·第四十七"
+      },
+      {
+        "id": "houhanshu-c62",
+        "title": "卷五十八·虞傅盖臧列传·第四十八"
+      },
+      {
+        "id": "houhanshu-c63",
+        "title": "卷五十九·张衡列传·第四十九"
+      },
+      {
+        "id": "houhanshu-c64",
+        "title": "卷六十上·马融列传·第五十上"
+      },
+      {
+        "id": "houhanshu-c65",
+        "title": "卷六十下·蔡邕列传·第五十下"
+      },
+      {
+        "id": "houhanshu-c66",
+        "title": "卷六十一·左周黄列传·第五十一"
+      },
+      {
+        "id": "houhanshu-c67",
+        "title": "卷六十二·荀韩钟陈列传·第五十二"
+      },
+      {
+        "id": "houhanshu-c68",
+        "title": "卷六十三·李杜列传·第五十三"
+      },
+      {
+        "id": "houhanshu-c69",
+        "title": "卷六十四·吴延史卢赵列传·第五十四"
+      },
+      {
+        "id": "houhanshu-c70",
+        "title": "卷六十五·皇甫张段列传·第五十五"
+      },
+      {
+        "id": "houhanshu-c71",
+        "title": "卷六十六·陈王列传·第五十六"
+      },
+      {
+        "id": "houhanshu-c72",
+        "title": "卷六十七·党锢列传·第五十七"
+      },
+      {
+        "id": "houhanshu-c73",
+        "title": "卷六十八·郭符许列传·第五十八"
+      },
+      {
+        "id": "houhanshu-c74",
+        "title": "卷六十九·窦何列传·第五十九"
+      },
+      {
+        "id": "houhanshu-c75",
+        "title": "卷七十·郑孔荀列传·第六十"
+      },
+      {
+        "id": "houhanshu-c76",
+        "title": "卷七十一·皇甫嵩朱鉨列传·第六十一"
+      },
+      {
+        "id": "houhanshu-c77",
+        "title": "卷七十二·董卓列传·第六十二"
+      },
+      {
+        "id": "houhanshu-c78",
+        "title": "卷七十三·刘虞公孙瓒陶谦列传·第六十三"
+      },
+      {
+        "id": "houhanshu-c79",
+        "title": "卷七十四上·袁绍刘表列传·第六十四上"
+      },
+      {
+        "id": "houhanshu-c80",
+        "title": "卷七十四下·袁绍刘表列传·第六十四下"
+      },
+      {
+        "id": "houhanshu-c81",
+        "title": "卷七十五·刘焉袁术吕布列传·第六十五"
+      },
+      {
+        "id": "houhanshu-c82",
+        "title": "卷七十六·循吏列传·第六十六"
+      },
+      {
+        "id": "houhanshu-c83",
+        "title": "卷七十七·酷吏列传·第六十七"
+      },
+      {
+        "id": "houhanshu-c84",
+        "title": "卷七十八·宦者列传·第六十八"
+      },
+      {
+        "id": "houhanshu-c85",
+        "title": "卷七十九上·儒林列传·第六十九上"
+      },
+      {
+        "id": "houhanshu-c86",
+        "title": "卷七十九下·儒林列传·第六十九下"
+      },
+      {
+        "id": "houhanshu-c87",
+        "title": "卷八十上·文苑列传·第七十上"
+      },
+      {
+        "id": "houhanshu-c88",
+        "title": "卷八十下·文苑列传·第七十下"
+      },
+      {
+        "id": "houhanshu-c89",
+        "title": "卷八十一·独行列传·第七十一"
+      },
+      {
+        "id": "houhanshu-c90",
+        "title": "卷八十二上·方术列传·第七十二上"
+      },
+      {
+        "id": "houhanshu-c91",
+        "title": "卷八十二下·方术列传·第七十二下"
+      },
+      {
+        "id": "houhanshu-c92",
+        "title": "卷八十三·逸民列传·第七十三"
+      },
+      {
+        "id": "houhanshu-c93",
+        "title": "卷八十四·列女传·第七十四"
+      },
+      {
+        "id": "houhanshu-c94",
+        "title": "卷八十五·东夷列传·第七十五"
+      },
+      {
+        "id": "houhanshu-c95",
+        "title": "卷八十六·南蛮西南夷列传·第七十六"
+      },
+      {
+        "id": "houhanshu-c96",
+        "title": "卷八十七·西羌传·第七十七"
+      },
+      {
+        "id": "houhanshu-c97",
+        "title": "卷八十八·西域传·第七十八"
+      },
+      {
+        "id": "houhanshu-c98",
+        "title": "卷八十九·南匈奴列传·第七十九"
+      },
+      {
+        "id": "houhanshu-c99",
+        "title": "卷九十·乌桓鲜卑列传·第八十"
+      },
+      {
+        "id": "houhanshu-c100",
+        "title": "志第一·律历上·律准候气"
+      },
+      {
+        "id": "houhanshu-c101",
+        "title": "志第二·律历中·贾逵论历永元论历延光论历汉安论历熹平论历论月食"
+      },
+      {
+        "id": "houhanshu-c102",
+        "title": "志第三·律历下·历法"
+      },
+      {
+        "id": "houhanshu-c103",
+        "title": "志第四·礼仪上·合朔立春五供上陵冠夕牲耕高禖养老先蚕祓禊"
+      },
+      {
+        "id": "houhanshu-c104",
+        "title": "志第五·礼仪中·立夏请雨拜皇太子拜王公桃印黄郊立秋䝙刘案户祠星"
+      },
+      {
+        "id": "houhanshu-c105",
+        "title": "志第六·礼仪下·大丧诸侯王列侯始封贵人公主薨"
+      },
+      {
+        "id": "houhanshu-c106",
+        "title": "志第七·祭祀上·光武即位告天郊封禅"
+      },
+      {
+        "id": "houhanshu-c107",
+        "title": "志第八·祭祀中·北郊明堂辟雍灵台迎气增祀六宗老子"
+      },
+      {
+        "id": "houhanshu-c108",
+        "title": "志第九·祭祀下·宗庙社稷灵星先农迎春"
+      },
+      {
+        "id": "houhanshu-c109",
+        "title": "志第十·天文上·王莽三光武十二"
+      },
+      {
+        "id": "houhanshu-c110",
+        "title": "志第十一·天文中·明十二章五和三十三殇一安四十六顺二十三质三"
+      },
+      {
+        "id": "houhanshu-c111",
+        "title": "志第十二·天文下·桓三十八灵二十献九陨石"
+      },
+      {
+        "id": "houhanshu-c112",
+        "title": "志第十三·五行一·貌不恭淫雨服妖鸡祸青眚屋自坏讹言旱谣狼食人"
+      },
+      {
+        "id": "houhanshu-c113",
+        "title": "志第十四·五行二·灾火草妖羽虫孽羊祸"
+      },
+      {
+        "id": "houhanshu-c114",
+        "title": "志第十五·五行三·大水水变色大寒雹冬雷山鸣鱼孽蝗"
+      },
+      {
+        "id": "houhanshu-c115",
+        "title": "志第十六·五行四·地震山崩地陷大风拔树螟牛疫"
+      },
+      {
+        "id": "houhanshu-c116",
+        "title": "志第十七·五行五·射妖龙蛇孽马祸人疴人化死复生疫投蜺"
+      },
+      {
+        "id": "houhanshu-c117",
+        "title": "志第十八·五行六·日蚀日抱日赤无光日黄珥日中黑虹贯日月蚀非其月"
+      },
+      {
+        "id": "houhanshu-c118",
+        "title": "志第十九·郡国一·河南河内河东弘农京兆冯翊扶风右司隶"
+      },
+      {
+        "id": "houhanshu-c119",
+        "title": "志第二十·郡国二·颍川汝南梁国沛国陈国鲁国右豫州魏郡钜鹿常山中山安"
+      },
+      {
+        "id": "houhanshu-c120",
+        "title": "志第二十一·郡国三·陈留东郡东平任城泰山济北山阳济阴右兖州东海"
+      },
+      {
+        "id": "houhanshu-c121",
+        "title": "志第二十二·郡国四·济南平原乐安北海东莱齐国右青州南阳南郡江夏"
+      },
+      {
+        "id": "houhanshu-c122",
+        "title": "志第二十三·郡国五·汉中巴郡广汉蜀郡犍为牂牁越巂益州永昌广汉属"
+      },
+      {
+        "id": "houhanshu-c123",
+        "title": "志第二十四·百官一·太傅太尉司徒司空将军"
+      },
+      {
+        "id": "houhanshu-c124",
+        "title": "志第二十五·百官二·太常光禄勋韂尉太仆廷尉大鸿胪"
+      },
+      {
+        "id": "houhanshu-c125",
+        "title": "志第二十六·百官三·宗正大司农少府"
+      },
+      {
+        "id": "houhanshu-c126",
+        "title": "志第二十七·百官四·执金吾太子太傅大长秋太子少傅将作大匠城门校"
+      },
+      {
+        "id": "houhanshu-c127",
+        "title": "志第二十八·百官五·州郡县乡亭里匈奴中郎将乌桓校尉护羌校尉王国"
+      },
+      {
+        "id": "houhanshu-c128",
+        "title": "志第二十九·舆服上·玉辂乘舆金根安车立车耕车戎车猎车軿车青盖车"
+      },
+      {
+        "id": "houhanshu-c129",
+        "title": "志第三十·舆服下·冕冠长冠委貌冠皮弁冠爵弁冠通天冠远游冠高山冠"
       }
     ]
   },

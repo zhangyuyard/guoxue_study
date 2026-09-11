@@ -437,7 +437,16 @@ function buildLiweng() {
 function buildDaizhigeBook(file, opts = {}) {
   const raw = toSimplified(readTxt(`dzbook/${file}.txt`));
   const dropLines = [/^经名：/, /^目录#/, /目录原缺/, /^#\d/, ...(opts.dropLines || [])];
-  const texts = raw.split(/\r?\n/).map((l) => l.replace(/^[\s　]+/, '').replace(/[\s　]+$/, ''));
+  // stripHeadingPrefix：剥标题行书名前缀（如后汉书正文标题「后汉书卷X…」→「卷X…」）。
+  // 前瞻限定后随「卷<数字>」或「志第?<数字>」，正文段行不受影响；剥前缀后
+  // 正文标题与文件前部目录行规范化文本一致 → tocGuard 的 repeats 判定可
+  // 可靠区分目录（目录题名在正文重现）与正文标题，目录骨架不会误判成章。
+  const stripRe = opts.stripHeadingPrefix || null;
+  const texts = raw.split(/\r?\n/).map((l) => {
+    let t = l.replace(/^[\s　]+/, '').replace(/[\s　]+$/, '');
+    if (stripRe) t = t.replace(stripRe, '');
+    return t;
+  });
   const isDropped = (t) => dropLines.some((re) => re.test(t));
   const isHeading = (t) => {
     if (!opts.chapterPattern || !t || t.length > 44) return false;
@@ -908,6 +917,11 @@ const DZ_BOOKS = [
     id: 'houhanshu', title: '后汉书', category: 'shi', dynasty: '南朝宋',
     build: () => buildDaizhigeBook('houhanshu', {
       chapterPattern: new RegExp(`^(卷${NUM}(上|下)?[　 \\t]|志第?${NUM})`),
+      // 源文本正文标题带书名前缀（「后汉书卷一下 …」「后汉书志第一 …」），
+      // 不剥前缀则 chapterPattern 只能命中文件前部的 130 行目录 →
+      // 目录全成空壳章、全书正文堆进末尾一个错标章（r30 真机踩坑）
+      stripHeadingPrefix: new RegExp(`^后汉书(?=卷${NUM}|志第?${NUM})`),
+      tocGuard: true,
       chapterTitle: (t) => t.replace(/[　\\t ]+/g, '·'),
       author: '南朝宋·范晔 撰（梁·刘昭 补志）',
       description: '纪传体东汉史一百二十卷，与《史记》《汉书》《三国志》并称前四史。全本。',
@@ -1180,9 +1194,11 @@ for (const spec of BOOKS) {
     // 不一致（升级换资产/复制中断半截文件）则覆盖复制并失效该书的
     // 解析缓存，内置书内容更新可随包静默完成。
     sizeBytes,
-    // 章节目录（id+title，无正文）：启动只注册元数据书的目录，
-    // 全文由 ensureBookLoaded 按书惰性水合（按需装载架构）。
-    toc,
+    // 章节目录（id+title，无正文）：启动只注册元数据书的目录，全文由
+    // ensureBookLoaded 按书惰性水合。目录条目仅 {id,title}——字节区间
+    // [s,e) 属 assets/books/<id>.meta.json 专责（切片装载用），bundle
+    // 内不重复携带（77 部 3000+ 章省体积）。
+    toc: toc.map(({ id: cid, t: ct }) => ({ id: cid, title: ct })),
   });
   console.log(`${spec.id.padEnd(16)} ${String(chapters.length).padStart(4)} 章 ${String(paraCount).padStart(6)} 段 ${String(charCount).padStart(8)} 字 ${String(kb).padStart(6)} KB`);
 }
