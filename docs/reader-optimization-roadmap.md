@@ -225,3 +225,29 @@ hydrate effect（ReaderScreen）：
   单块 1s+ + 通知块最高 5.1s；
 - 修复后：稳态每 1.5s 一次装配 14-39ms、mergeNotify=0ms、
   采样期后段零 jank（无 ≥300ms 块）——填充期 UI 恢复流畅。
+
+## P1.1 目录交互体验 + 跳章邻章预热（r35）
+
+### 用户反馈
+1. 打开大部头后点开目录响应慢、无按压交互效果；
+2. 目录弹出后未立即加载全部章节、点章节无交互且响应慢；
+3. 跳远章后往上滚动前一章节不能及时加载——要求跳转落点前后多章即热。
+
+### 修复
+1. **目录即时开 + 按压反馈**：Modal animationType fade→none（fade ~200ms
+   被感知为「点了没反应」）；headerTitles（目录入口）与 tocItem 加
+   pressed opacity + android_ripple（native 波纹不依赖 JS，填充期同样即时）。
+2. **目录列表性能与定位**：固定行高（tocItemText lineHeight 21 +
+   padding 24 = TOC_ITEM_HEIGHT 45）→ getItemLayout 免测量直出；
+   initialNumToRender 24 / maxToRenderPerBatch 40 / windowSize 15；
+   onShow 自动 scrollToIndex 定位「实际正在阅读的章」（viewPosition 0.5，
+   高亮同源 progressChapterId）——几百项目录不再从第一项翻找。
+3. **跳章邻章预热**：UserBookService.prefillBuiltinNeighbors——跳转落点
+   前后各 3 章串行 fillBuiltinChapterNow（上滚方向优先；幂等，已就绪章
+   零成本跳过；与后台填充并发安全）；挂在 fillShellTargetIfNeeded（目录
+   跳章/续读/翻页跨章全路径覆盖）。
+
+### 真机验证（资治通鉴 294 卷）
+- 目录 tap 后即时完整弹出，自动定位并高亮当前卷（287）；
+- 跳 c282 → 2.5s 内完整渲染；立即上滚三屏无缝进入 c281（预热范围内，
+  零空白零等待）；继续上滚 c280 内容连续。

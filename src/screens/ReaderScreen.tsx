@@ -130,6 +130,14 @@ const EMPTY_HIGHLIGHTS: Highlight[] = [];
 const TITLE_ROW_PREFIX = '__title__:';
 
 /**
+ * 目录项行高（px）：tocItem paddingVertical 12×2 + tocItemText
+ * lineHeight 21（numberOfLines=1 恒定单行）。固定行高是 getItemLayout
+ * 免测量直出与 scrollToIndex 精准定位的前提，改 tocItem/tocItemText
+ * 样式必须同步此处。
+ */
+const TOC_ITEM_HEIGHT = 45;
+
+/**
  * 注音模式循环切换顺序（右上角「音」按钮，沿用原底部注音切换条的模式定义与顺序）：
  * 全文注音 → 仅生僻字 → 关闭 → 全文注音 …
  */
@@ -1620,6 +1628,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const [builtinHydrateFailed, setBuiltinHydrateFailed] = useState(false);
   // 填充通知的「当前章空→满」边沿基准（见 onBuiltinFillProgress 回调注释）
   const lastCurFilledRef = useRef(false);
+  // 目录列表 ref：打开时定位当前章（onShow）
+  const tocListRef = useRef<FlatList<Chapter> | null>(null);
   // useLayoutEffect：水合标记必须在首帧绘制前置位——否则「元数据章（正文空）」
   // 会先渲染一帧空内容，effect 落地后才切换到加载中（闪一帧空白）。
   useLayoutEffect(() => {
@@ -1646,6 +1656,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       if (ch && ch.segments.length === 0) {
         void UserBookService.fillBuiltinChapterNow(bookId, chapterId);
       }
+      // 邻章预热（幂等，已就绪章零成本跳过）：跳章落点前后各 3 章即热，
+      // 上滚拼接/翻页不再等待按需装配——否则用户跳远章后往上滚会持续
+      // 出现「前一章未加载」的空白
+      void UserBookService.prefillBuiltinNeighbors(bookId, chapterId);
     };
     if (TextLibraryService.isBookHydrated(bookId)) {
       // 已水合（含早期部分水合）：跳章重跑的常态路径——补装空壳目标章
@@ -4031,7 +4045,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           <Text style={[styles.backButton, { color: colors.primary }]}>{'‹ 返回'}</Text>
         </Pressable>
         <Pressable
-          style={styles.headerTitles}
+          style={({ pressed }) => [styles.headerTitles, pressed && { opacity: 0.55 }]}
           onPress={() => setTocVisible(true)}
           hitSlop={8}
           accessibilityRole="button"
@@ -4780,12 +4794,28 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         </Pressable>
       </Modal>
 
-      {/* 目录抽屉（点击顶部书名 / 章节打开） */}
+      {/* 目录抽屉（点击顶部书名 / 章节打开）。animationType=none：fade 的
+          ~200ms 过渡在大部头场景被感知为「点了没反应」，即时显示 + 列表
+          android_ripple 即时按压反馈的体验更佳 */}
       <Modal
         visible={tocVisible}
         transparent
-        animationType="fade"
+        animationType="none"
         onRequestClose={() => setTocVisible(false)}
+        onShow={() => {
+          // 打开即定位「实际正在阅读的章」：大部头几百项目录从第一项开始
+          // 找当前位置是明确的体验负担
+          const idx = (book?.chapters ?? []).findIndex(
+            (c) => c.id === progressChapterId,
+          );
+          if (idx > 0 && tocListRef.current) {
+            tocListRef.current.scrollToIndex({
+              index: idx,
+              viewPosition: 0.5,
+              animated: false,
+            });
+          }
+        }}
       >
         <Pressable style={styles.tocOverlay} onPress={() => setTocVisible(false)}>
           <View
@@ -4793,16 +4823,29 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           >
             <Text style={[styles.tocTitle, { color: colors.text }]}>{displayBookTitle}</Text>
             <FlatList
+              ref={tocListRef}
               data={book?.chapters ?? []}
               keyExtractor={(item) => item.id}
+              // 行高恒定（numberOfLines=1 + 固定 lineHeight）→ getItemLayout
+              // 免测量直出：目录秒级可滚 + scrollToIndex 精准无 fallback
+              getItemLayout={(_, index) => ({
+                length: TOC_ITEM_HEIGHT,
+                offset: TOC_ITEM_HEIGHT * index,
+                index,
+              })}
+              initialNumToRender={24}
+              maxToRenderPerBatch={40}
+              windowSize={15}
               renderItem={({ item, index }) => (
                 <Pressable
-                  style={[
+                  style={({ pressed }) => [
                     styles.tocItem,
                     // 【4】高亮跟随「实际正在阅读的章」（滚动模式连续拼接后路由章
                     // 停留在入口章，高亮路由章会误导用户对当前位置的判断）
                     item.id === progressChapterId && { backgroundColor: colors.primarySoft },
+                    pressed && { opacity: 0.55 },
                   ]}
+                  android_ripple={{ color: colors.primarySoft }}
                   onPress={() => {
                     setTocVisible(false);
                     goToChapter(item.id);
@@ -5127,6 +5170,8 @@ const styles = StyleSheet.create({
   },
   tocItemText: {
     fontSize: 15,
+    // 固定行高：numberOfLines=1 下行高恒定 = TOC_ITEM_HEIGHT 的依据
+    lineHeight: 21,
   },
   // 正文区域容器：包裹正文 + 底部进度条 + 选区浮动层，
   // 使选区浮动层可相对于该区域绝对定位（不遮挡顶部栏，停靠进度条上方）

@@ -931,6 +931,52 @@ export async function fillBuiltinChapterNow(
 }
 
 /**
+ * 跳章邻章预热：跳转目标章就绪后，立即按需填充其前后各 count 章
+ * （上滚方向优先——用户跳到远章后最高频的下一步是往上翻看前文，
+ * 旧链路要等上滚触发 prepend 时才按需装配，追赶不上滚动节奏）。
+ * 串行执行（避免并发 IO 风暴）；fillBuiltinChapterNow 幂等（已有正文
+ * 直接 true）且与后台填充并发安全，已就绪章零成本跳过。
+ */
+export async function prefillBuiltinNeighbors(
+  bookId: string,
+  chapterId: string,
+  count = 3,
+): Promise<void> {
+  const spec = getBuiltinSpec(bookId);
+  if (!spec || hiddenBuiltins.has(bookId)) {
+    return;
+  }
+  const bookRes = TextLibraryService.getBook(bookId);
+  if (!bookRes.success || !bookRes.data) {
+    return;
+  }
+  const chapters = bookRes.data.chapters;
+  const idx = chapters.findIndex((c) => c.id === chapterId);
+  if (idx < 0) {
+    return;
+  }
+  const order: string[] = [];
+  for (let k = 1; k <= count; k += 1) {
+    if (idx - k >= 0) {
+      order.push(chapters[idx - k].id);
+    }
+  }
+  for (let k = 1; k <= count; k += 1) {
+    if (idx + k < chapters.length) {
+      order.push(chapters[idx + k].id);
+    }
+  }
+  for (const cid of order) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await fillBuiltinChapterNow(bookId, cid);
+    } catch {
+      // 单章预热失败不阻塞其余邻章
+    }
+  }
+}
+
+/**
  * meta 快路径：构建全量章节壳（仅目录级，正文空），并按字节区间切片
  * 装配目标章（优先章/第一章），hydrate 上屏。全文零整读。
  * 任一环节失败返回 false（调用方回退整读扫描慢路径）。
@@ -3328,6 +3374,7 @@ export const UserBookService = {
   ensureBookLoaded,
   ensureBookReady,
   fillBuiltinChapterNow,
+  prefillBuiltinNeighbors,
   onBuiltinFillProgress,
   scheduleBuiltinFtsIndexBuild,
   isUserBook,
