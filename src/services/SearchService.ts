@@ -58,7 +58,25 @@ function searchInSqlite(kw: string): SearchResult[] | null {
       [kw],
     );
     const rawRows = (res.rows?._array ?? []) as Record<string, unknown>[];
-    return rawRows.map((row) => {
+    // 【#16】按 segment_id 去重（**安全网**，不是修复本体）：`ORDER BY rowid ASC`
+    // 下同段保留首行。存在理由——修复前的写入路径在真实 FTS5 上退化为普通
+    // INSERT（无唯一约束 ⇒ `INSERT OR REPLACE` 不触发 REPLACE），历史库里可能
+    // 残留同段多行，会让用户在同一结果里看到重复条目。写路径现已改为
+    // 「显式稳定 rowid + INSERT OR REPLACE」真幂等（`StorageService.insertFtsRows`
+    // + `segment_fts_rowid` 映射表），
+    // 该守卫只负责「历史残留永不透出」；写路径回归由 fts5RealSqliteSemantics
+    // （真实 SQLite + 源码逐字抽取语句）在 CI 层拦截，不依赖本守卫。
+    const deduped: Record<string, unknown>[] = [];
+    const seenSegments = new Set<string>();
+    for (const row of rawRows) {
+      const segId = String(row.segment_id);
+      if (seenSegments.has(segId)) {
+        continue;
+      }
+      seenSegments.add(segId);
+      deduped.push(row);
+    }
+    return deduped.map((row) => {
       const text = String(row.text);
       const count = text.split(kw).length - 1;
       return {

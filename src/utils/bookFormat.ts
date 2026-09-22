@@ -133,7 +133,14 @@ function xmlAttr(tag: string, name: string): string | undefined {
  *   章节标题优先取 toc.ncx 的 navLabel，回退文档 h1-h3，再回退 <title>；
  *   全部缺失且多文档时补「第N章」。
  */
-export function epubExtractText(bytes: Uint8Array): StructuredText {
+/** 每提取 N 个文档让出一次 JS：数百 MB epub 的解压＋逐文档 htmlToText＋拼接
+ * 若一次性同步跑会把 JS 线程占死数十秒（书架冻结真凶之一）。yieldFn 缺省时不让出。 */
+const EPUB_YIELD_EVERY = 100;
+
+export async function epubExtractText(
+  bytes: Uint8Array,
+  yieldFn?: () => Promise<void>,
+): Promise<StructuredText> {
   const entries = listZipEntries(bytes);
   const byName = new Map(entries.map((e) => [e.name, e] as const));
   const readEntryText = (name: string): string | null => {
@@ -250,6 +257,13 @@ export function epubExtractText(bytes: Uint8Array): StructuredText {
     if (idx >= 5000) {
       break;
     }
+    // 【T23b】逐文档让出：超大 epub 数千文档的 htmlToText＋拼接若一次性同步跑，
+    // 会把 JS 线程占死数十秒（真机 jsBlocked≈32s）；每 100 文档让出一次，
+    // 书架/点击在批次间保持可响应。yieldFn 缺省时不让出（保持老调用语义）。
+    if (yieldFn && idx % EPUB_YIELD_EVERY === 0) {
+      // eslint-disable-next-line no-await-in-loop
+      await yieldFn();
+    }
   }
   return { title, author, text: normalizeTail(parts.join('\n\n')) };
 }
@@ -332,9 +346,12 @@ export function odtExtractText(bytes: Uint8Array): StructuredText {
 // ============ 通用 ZIP（打包的文本/EPUB） ============
 
 /** ZIP → 纯文本：优先按 EPUB 解析；否则收集包内文本条目，按文件名切章 */
-export function zipExtractText(bytes: Uint8Array): StructuredText {
+export async function zipExtractText(
+  bytes: Uint8Array,
+  yieldFn?: () => Promise<void>,
+): Promise<StructuredText> {
   try {
-    const epub = epubExtractText(bytes);
+    const epub = await epubExtractText(bytes, yieldFn);
     if (epub.text.trim()) {
       return epub;
     }
@@ -358,7 +375,7 @@ export function zipExtractText(bytes: Uint8Array): StructuredText {
     const ext = e.name.split('.').pop()?.toLowerCase() ?? 'txt';
     let converted: StructuredText;
     try {
-      converted = convertBookBytes(ext, raw);
+      converted = await convertBookBytes(ext, raw, yieldFn);
     } catch {
       continue;
     }
@@ -433,16 +450,20 @@ export const LARGE_BOOK_EXTENSIONS = ['epub', 'docx', 'odt', 'zip', 'mobi', 'prc
  * 统一转换入口：字节 → 章节标记文本。
  * txt 直接走编码检测；其余格式按类型转换（epub/docx/odt/zip/mobi 从 zip/二进制直接提取）。
  */
-export function convertBookBytes(ext: string, bytes: Uint8Array): StructuredText {
+export async function convertBookBytes(
+  ext: string,
+  bytes: Uint8Array,
+  yieldFn?: () => Promise<void>,
+): Promise<StructuredText> {
   switch (ext) {
     case 'epub':
-      return epubExtractText(bytes);
+      return epubExtractText(bytes, yieldFn);
     case 'docx':
       return docxExtractText(bytes);
     case 'odt':
       return odtExtractText(bytes);
     case 'zip':
-      return zipExtractText(bytes);
+      return zipExtractText(bytes, yieldFn);
     case 'mobi':
     case 'prc':
     case 'azw':

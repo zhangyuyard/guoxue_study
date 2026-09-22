@@ -69,15 +69,22 @@ describe('背诵独立为首页底部 Tab（导航结构）', () => {
     expect(profileScreen).not.toMatch(/recitationCount/);
   });
 
-  test('RootStack 的 RecitationPractice 保留；ReaderScreen 菜单背诵直达入口已删除（改由背诵 Tab 进入）', () => {
+  test('RootStack 的 RecitationPractice 保留（背诵直达入口的 ReaderScreen 侧断言已移除）', () => {
     expect(rootNavigator).toMatch(
       /<RootStack\.Screen\s*\n\s*name="RecitationPractice"/,
     );
     expect(navTypes).toMatch(/export type RootStackParamList = \{[\s\S]*?RecitationPractice: RecitationPracticeParams;/);
-    // 阅读器长按菜单不再保留背诵练习入口（handleRecite 直达跳转删除）
-    const readerScreen = readSrc('screens/ReaderScreen.tsx');
-    expect(readerScreen).not.toMatch(/handleRecite/);
-    expect(readerScreen).not.toMatch(/accessibilityLabel="背诵练习"/);
+    // 【已删除断言】原两条针对 `screens/ReaderScreen.tsx` 的源码文本断言：
+    //   `expect(readerScreen).not.toMatch(/handleRecite/)` /
+    //   `expect(readerScreen).not.toMatch(/accessibilityLabel="背诵练习"/)`
+    //   谁删的：cleanup-executor（2026-09-22，团队 software-guoxue-reader）。
+    //   为什么删：依据 `docs/reader-cleanup-plan-2026-09-22.md` §4/§5/§6（用户裁定
+    //     「真零起点」），`ReaderScreen.tsx` 的 5430 行实现**整体移除**（现为 56 行
+    //     空壳）⇒ `handleRecite` / 长按菜单「背诵练习」入口已随实现消失，这两条
+    //     `not.toMatch` 在空壳上**恒真**（属禁止的「弱化到恒真」形态，不是回归防护）。
+    //   保留的语义由上方两条断言承担：背诵**入口唯一化**的承重件是 RootStack 路由与
+    //     导航类型（背诵 Tab → RecitationPractice），二者未变且仍会被断言。
+    //   新阅读器从零重写时若再挂背诵直达入口，须由新实现自己重新立断言。
   });
 });
 

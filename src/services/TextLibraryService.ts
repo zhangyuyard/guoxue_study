@@ -153,10 +153,41 @@ function registerBuiltinBooks(books: Book[]): ServiceResult<null> {
 }
 
 /**
+ * 【D3】书体正文被卸载时的释放回调登记（LRU 淘汰 + 显式 evictBook）。
+ *
+ * 存在的理由：`hydrateBook` 的 LRU 与 `evictBook` 通过「换掉 book.chapters
+ * 数组」回收正文——若上层（UserBookService 的流式游标登记 / 空闲扩散上下文）
+ * 仍持有壳与 `shell.chapter`，整本 chapters 数组就被钉住，回收实际不生效。
+ * 上层在此注册回调清引用；本模块**不反向依赖**上层（避免循环导入）。
+ * 回调异常不得影响书体卸载本身。
+ */
+const bookEvictListeners = new Set<(bookId: string) => void>();
+
+/** 注册「书体被淘汰/卸载」回调；返回取消注册函数 */
+function onBookEvicted(cb: (bookId: string) => void): () => void {
+  bookEvictListeners.add(cb);
+  return () => {
+    bookEvictListeners.delete(cb);
+  };
+}
+
+/** 通知所有回调（单个回调异常不影响其余回调与卸载流程） */
+function notifyBookEvicted(bookId: string): void {
+  bookEvictListeners.forEach((cb) => {
+    try {
+      cb(bookId);
+    } catch {
+      // 释放失败不影响书体卸载（下轮 LRU 会再次触发）
+    }
+  });
+}
+
+/**
  * 水合内置书：用「含全文」的书体替换同 id 的元数据书（章节对象整体
  * 换新，引用类数据无迁移问题）。记录 LRU，超限时淘汰最久未用且非本次
  * 水合的书（其章节重置回目录态——目录仍在，仅正文不可读，再次进入时
  * 由 ensureBookLoaded 重新水合）。用户书不走此路径（始终全量注册）。
+ * 淘汰后触发 onBookEvicted 回调（D3：上层释放壳/章引用）。
  */
 function hydrateBook(book: Book): ServiceResult<null> {
   try {
@@ -192,6 +223,8 @@ function hydrateBook(book: Book): ServiceResult<null> {
           ...builtinBooks[evIdx],
           chapters: builtinMetaChapters.get(evictId)!,
         };
+        // 【D3】通知上层释放壳/章引用：否则被淘汰的 chapters 数组仍被钉住
+        notifyBookEvicted(evictId);
       }
       hydratedOrder.shift();
     }
@@ -219,6 +252,8 @@ function evictBook(bookId: string): ServiceResult<null> {
     const idx = builtinBooks.findIndex((b) => b.id === bookId);
     if (idx >= 0 && meta) {
       builtinBooks[idx] = { ...builtinBooks[idx], chapters: meta };
+      // 【D3】通知上层释放壳/章引用（与 LRU 淘汰同口径）
+      notifyBookEvicted(bookId);
     }
     hydratedOrder.splice(pos, 1);
     booksCache = null;
@@ -379,6 +414,12 @@ export const TextLibraryService = {
 
   /** 卸载内置书全文（重置回目录态）；后台索引等批量场景用完即走 */
   evictBook,
+
+  /**
+   * 【D3】注册「书体被 LRU 淘汰 / 显式卸载」回调（上层释放壳与章引用）；
+   * 返回取消注册函数。上层注册前不会有任何行为变化。
+   */
+  onBookEvicted,
 
   /** 内置书全文是否已水合 */
   isBookHydrated,

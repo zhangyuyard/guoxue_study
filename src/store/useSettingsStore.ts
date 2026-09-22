@@ -14,6 +14,7 @@ import { useCallback } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
 import { MMKV } from 'react-native-mmkv';
+import { DeviceTierService, type DeviceTier } from '@/services/DeviceTierService';
 import type {
   PaperMode,
   PinyinMode,
@@ -61,6 +62,34 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   pinyinMode: 'full',
   conversionMode: 'simplified',
 };
+
+// ============ 性能档位（r38 T01：设备档位分级的设置页覆盖） ============
+
+/**
+ * 性能档位：'auto' = 按设备探测（机型表 + 微基准 + 自适应降档）；
+ * low/mid/high = 用户显式覆盖（写入即调 DeviceTierService.setOverride，
+ * 档位真源仍在 DeviceTierService，本字段只是 UI 镜像与持久化入口）。
+ */
+export type ReaderPerfTier = DeviceTier | 'auto';
+
+/** 默认性能档位（自动探测） */
+export const DEFAULT_READER_PERF_TIER: ReaderPerfTier = 'auto';
+
+/** 合法档位取值（设置页选项顺序：自动 → 低 → 中 → 高） */
+export const READER_PERF_TIER_OPTIONS: readonly ReaderPerfTier[] = [
+  'auto',
+  'low',
+  'mid',
+  'high',
+];
+
+/** 备份恢复/设置写入的档位校验（非法值返回 null → 保持现值） */
+function sanitizePerfTier(value: unknown): ReaderPerfTier | null {
+  return typeof value === 'string' &&
+    (READER_PERF_TIER_OPTIONS as readonly string[]).includes(value)
+    ? (value as ReaderPerfTier)
+    : null;
+}
 
 /** 背诵复习提醒设置（B4）：每日本地提醒开关与提醒时刻 */
 export interface RecitationReminderSettings {
@@ -167,6 +196,12 @@ interface SettingsState extends ReaderSettings {
   /** 正文朗读语速（P2-02）：0.5–2.0，默认 1.0 */
   speechRate: number;
   /**
+   * 性能档位（r38 T01）：'auto'（默认，设备探测）/ low / mid / high。
+   * 写入 setReaderPerfTier 时同步调用 DeviceTierService.setOverride()，
+   * 装配/缓存/注音等全部预算与窗口参数随之切换（读档位失败回落 mid）。
+   */
+  readerPerfTier: ReaderPerfTier;
+  /**
    * 书籍级设置覆盖（设置分层）：bookId -> 已覆盖键值。
    * 仅「阅读体验类」（PER_BOOK_SETTING_KEYS 白名单）；缺键 = 跟随全局默认。
    * 「我的-设置」写全局层（原有 setter），阅读页设置面板写本层，互不干扰。
@@ -189,6 +224,11 @@ interface SettingsState extends ReaderSettings {
   setLibraryLayout: (layout: 'grid' | 'list') => void;
   /** 更新朗读语速（P2-02，取值 0.5–2.0） */
   setSpeechRate: (rate: number) => void;
+  /**
+   * 更新性能档位（r38 T01）：写入即调 DeviceTierService.setOverride()
+   *（'auto' → null 恢复自动探测）；非法值静默回落 'auto'。
+   */
+  setReaderPerfTier: (tier: ReaderPerfTier) => void;
   /** 更新复习提醒设置（部分合并，B4） */
   setRecitationReminder: (patch: Partial<RecitationReminderSettings>) => void;
   /** 更新每日背诵目标开关（P1-09） */
@@ -224,6 +264,8 @@ export const useSettingsStore = create<SettingsState>()(
       bookmarkGroupedView: false,
       libraryLayout: 'grid',
       speechRate: 1.0,
+      // r38 T01 性能档位：默认自动探测（写入设置页时覆盖）
+      readerPerfTier: DEFAULT_READER_PERF_TIER,
       ...DEFAULT_REMINDER_SETTINGS,
       // P1-09 每日目标：默认开启、默认 5 段（常量统一定义在 utils/dailyGoal）
       dailyGoalEnabled: true,
@@ -258,6 +300,14 @@ export const useSettingsStore = create<SettingsState>()(
       setLibraryLayout: (libraryLayout) => set({ libraryLayout }),
 
       setSpeechRate: (speechRate) => set({ speechRate }),
+
+      // r38 T01 性能档位：设置页覆盖 → DeviceTierService 为档位真源，
+      // 本字段仅作 UI 镜像与跨会话持久化（非法值回落 'auto'）
+      setReaderPerfTier: (tier) => {
+        const next = sanitizePerfTier(tier) ?? DEFAULT_READER_PERF_TIER;
+        DeviceTierService.setOverride(next === 'auto' ? null : next);
+        set({ readerPerfTier: next });
+      },
 
       setRecitationReminder: (patch) =>
         set((state) => ({
@@ -321,17 +371,21 @@ export const useSettingsStore = create<SettingsState>()(
         });
       },
 
-      reset: () =>
+      reset: () => {
+        // 档位覆盖一并恢复自动（档位真源在 DeviceTierService）
+        DeviceTierService.setOverride(null);
         set({
           ...DEFAULT_SETTINGS,
           translation: { ...DEFAULT_TRANSLATION_SETTINGS },
           recitationHintGranularity: 'whole',
           bookmarkGroupedView: false,
           speechRate: 1.0,
+          readerPerfTier: DEFAULT_READER_PERF_TIER,
           ...DEFAULT_REMINDER_SETTINGS,
           dailyGoalEnabled: true,
           dailyGoalCount: DEFAULT_DAILY_GOAL,
-        }),
+        });
+      },
 
       restoreFromBackup: (data) => {
         if (!data || typeof data !== 'object' || Array.isArray(data)) {
@@ -346,8 +400,15 @@ export const useSettingsStore = create<SettingsState>()(
         const str = (v: unknown): string | undefined =>
           typeof v === 'string' ? v : undefined;
 
+        // 性能档位（r38 T01，v1 可选扩展字段）：校验通过才恢复，并同步档位真源
+        const perfTier = sanitizePerfTier(d.readerPerfTier);
+        if (perfTier !== null) {
+          DeviceTierService.setOverride(perfTier === 'auto' ? null : perfTier);
+        }
+
         set((state) => {
           const patch: Partial<SettingsState> = {};
+          if (perfTier !== null) patch.readerPerfTier = perfTier;
           const fontSize = num(d.fontSize);
           if (fontSize !== undefined) patch.fontSize = fontSize;
           const lineHeight = num(d.lineHeight);

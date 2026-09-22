@@ -25,3 +25,22 @@ node_modules/
 
 # TS 增量构建信息
 *.tsbuildinfo
+
+# ── 证据 / 过程产物区（默认全部忽略）─────────────────────────────
+# deliverables/ 是「验证证据 + 分析报告 + 轮次记录」的落地区，每轮都会新增，
+# 且含大体积 raw logcat 文本与打包产物（2026-09-17 实测：_archive-2026-09-17
+# 775 MB、verification-r50 66 MB）。仓库只保留**已纳入版本控制的文档区**。
+# 需要提交其中某一份时，显式 `git add -f <path>`。
+deliverables/*
+!deliverables/software-company/
+
+# 轮次过程记录与验证证据（显式列出以防白名单被误扩）
+deliverables/verification-r*/
+deliverables/arch-*/
+deliverables/_archive-*/
+deliverables/r*-*/
+
+# 分析报告与过程账本（随时间失效，不作为项目资产）
+deliverables/ARCH-*.md
+deliverables/TASK-LEDGER.md
+deliverables/*measurement-plan.md

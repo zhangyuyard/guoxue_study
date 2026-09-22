@@ -1,7 +1,12 @@
 /**
  * useSettingsStore.readerMode 单测：默认值与切换 action。
  */
-import { useSettingsStore } from '@/store/useSettingsStore';
+import {
+  DEFAULT_READER_PERF_TIER,
+  READER_PERF_TIER_OPTIONS,
+  useSettingsStore,
+} from '@/store/useSettingsStore';
+import { DeviceTierService } from '@/services/DeviceTierService';
 import { DEFAULT_TRANSLATION_SETTINGS } from '@/types/translation';
 
 describe('useSettingsStore.readerMode', () => {
@@ -122,5 +127,93 @@ describe('useSettingsStore.dailyGoal（P1-09）', () => {
     useSettingsStore.getState().reset();
     expect(useSettingsStore.getState().dailyGoalEnabled).toBe(true);
     expect(useSettingsStore.getState().dailyGoalCount).toBe(5);
+  });
+});
+
+/**
+ * r38 T01 性能档位（G6）：D5 设置页「性能档位」行的 store 行为与持久化。
+ * 覆盖：默认 auto / 写入镜像 + 档位真源同步 / 跨会话持久化保持 /
+ * 备份恢复（含旧版缺字段与非法值）。
+ */
+describe('useSettingsStore.readerPerfTier（r38 T01 / G6：档位入口行为与持久化）', () => {
+  let setOverrideSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    setOverrideSpy = jest
+      .spyOn(DeviceTierService, 'setOverride')
+      .mockImplementation(() => undefined);
+    useSettingsStore.getState().reset();
+  });
+
+  afterEach(() => {
+    setOverrideSpy.mockRestore();
+    useSettingsStore.getState().reset();
+  });
+
+  test('默认 auto；setReaderPerfTier 镜像到 state 并同步档位真源（auto → 清空覆盖）', () => {
+    expect(DEFAULT_READER_PERF_TIER).toBe('auto');
+    expect(useSettingsStore.getState().readerPerfTier).toBe('auto');
+    // 选项与设置页 SegmentedRow 顺序一致：自动 → 低 → 中 → 高
+    expect([...READER_PERF_TIER_OPTIONS]).toEqual(['auto', 'low', 'mid', 'high']);
+
+    useSettingsStore.getState().setReaderPerfTier('mid');
+    expect(useSettingsStore.getState().readerPerfTier).toBe('mid');
+    expect(setOverrideSpy).toHaveBeenLastCalledWith('mid');
+
+    useSettingsStore.getState().setReaderPerfTier('high');
+    expect(setOverrideSpy).toHaveBeenLastCalledWith('high');
+
+    // auto = 交还设备自动探测（清空档位覆盖）
+    useSettingsStore.getState().setReaderPerfTier('auto');
+    expect(useSettingsStore.getState().readerPerfTier).toBe('auto');
+    expect(setOverrideSpy).toHaveBeenLastCalledWith(null);
+  });
+
+  test('持久化：写盘载荷含档位，冷启动 rehydrate 后仍保持', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { MMKV } = require('react-native-mmkv') as {
+      MMKV: { prototype: { set: (key: string, value: string) => void } };
+    };
+    const setSpy = jest.spyOn(MMKV.prototype, 'set');
+
+    useSettingsStore.getState().setReaderPerfTier('low');
+
+    // 落盘载荷（persist name = guoxue-settings）必须含 readerPerfTier
+    const writes = setSpy.mock.calls.filter((c) => c[0] === 'guoxue-settings');
+    expect(writes.length).toBeGreaterThan(0);
+    const payload = JSON.parse(String(writes[writes.length - 1][1])) as {
+      state: { readerPerfTier?: string };
+    };
+    expect(payload.state.readerPerfTier).toBe('low');
+
+    // 重新读取（模拟冷启动 rehydrate）→ 档位不丢
+    await useSettingsStore.persist.rehydrate();
+    expect(useSettingsStore.getState().readerPerfTier).toBe('low');
+
+    setSpy.mockRestore();
+  });
+
+  test('restoreFromBackup：合法档位恢复并同步真源；旧版缺字段 / 非法值 → 保持现值且不崩', () => {
+    useSettingsStore.getState().restoreFromBackup({
+      readerPerfTier: 'high',
+      fontSize: 20,
+    });
+    expect(useSettingsStore.getState().readerPerfTier).toBe('high');
+    expect(useSettingsStore.getState().fontSize).toBe(20);
+    expect(setOverrideSpy).toHaveBeenLastCalledWith('high');
+
+    // 旧版备份（该字段为 v1 可选扩展）：缺字段不抛错、保持现值
+    useSettingsStore.getState().restoreFromBackup({ fontSize: 22 });
+    expect(useSettingsStore.getState().readerPerfTier).toBe('high');
+    expect(useSettingsStore.getState().fontSize).toBe(22);
+
+    // 非法档位值 → 校验拦下，保持现值（不被污染）
+    useSettingsStore.getState().restoreFromBackup({ readerPerfTier: 'ultra' });
+    expect(useSettingsStore.getState().readerPerfTier).toBe('high');
+
+    // reset 一并恢复自动并清空档位覆盖
+    useSettingsStore.getState().reset();
+    expect(useSettingsStore.getState().readerPerfTier).toBe('auto');
+    expect(setOverrideSpy).toHaveBeenLastCalledWith(null);
   });
 });

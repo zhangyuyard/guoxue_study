@@ -1,15 +1,30 @@
 /**
- * 阅读器选区交互重构的回归防护测试（源码结构断言）
- * 需求：优化长按选中方式——废 ± 逐字步进，改为「长按起点 + 点按扩展」自由选中；
- *       解析按实际选中内容（不再固定 4 字前缀、逐字回退）；长按菜单溢出修复。
- * 锁定点：
- *   1) 选区面板为阅读页内浮动层（box-none 允许点按穿透正文扩展选区），非全屏 Modal；
- *   2) ± 按钮 / adjustSelection 已删除，新增 handleSelectionExtendPress（点按扩展）；
- *   3) 两渲染模式（PinyinText / HighlightText）均支持 per-char 点按上报；
- *   4) 解析：多字按实际选中全串精确查词（lookupWordExact），全串未收录逐字解析列表，
- *      超长截断展示；「在字典中查看」目标词头 dictHeadword；
- *   5) 菜单三段式重构：内容区（选中文本独立限高滚动）+ hairline 分隔线 +
- *      固定操作栏（划线行 + flex:1 等宽按钮行），操作栏脱离滚动区永不截断。
+ * 阅读器选区交互的**保留组件**契约（清理后残留面）
+ *
+ * ── 本文件为何被大幅裁剪（书面理由，逐条对应）────────────────────────────
+ * 原始 327 行断言中，**绝大多数是对 `screens/ReaderScreen.tsx` 源码文本的结构
+ * 契约**（选区浮动层 / `handleSelectionExtendPress` / 三段式菜单 / `selectionSheet`
+ * 样式 / `activeSelection` 透传 / 长按初始选区 / 两步确认删划线 …）。
+ *
+ * 谁删的、何时、为什么：
+ *   · 执行者：cleanup-executor（2026-09-22，团队 software-guoxue-reader）
+ *   · 依据：`docs/reader-cleanup-plan-2026-09-22.md` §4/§5/§6 —— 用户裁定
+ *     「真零起点」：`ReaderScreen.tsx` 的 5430 行实现（含跳章 / 翻页 / 跨章拼接 /
+ *     定位落位 / 视口补偿 / 边缘手势，以及挂在其上的选区交互 UI）**整体移除**，
+ *     文件已替换为最小空壳（56 行，仅渲染占位文案）。
+ *   · 因此对 `reader` 变量的断言只有两种下场：**假红**（断言具体结构）或
+ *     **恒真**（`not.toMatch` 在空壳上必然通过）。二者都不构成回归防护
+ *     ⇒ 按 T7 规则「断言锁的是已删实现的形状 ⇒ 随族删除并写明理由」全部移除。
+ *   · 选区交互的**行为契约**（浮动层位置、点按扩展、收缩、两步确认删划线）不属于
+ *     本次保留范围，将在新阅读器从零重写时**由新实现自己重新立断言**。
+ *
+ * ── 保留了什么（这些断言锚定的文件**未在清理中改动**，且变异下会红）──────
+ *   · `components/reader/PinyinText.tsx` —— per-char 点按 + `selectionRange`
+ *   · `components/reader/HighlightText.tsx` —— per-char 点按 + `selectionRange`
+ *   · `components/reader/AnalysisPanel.tsx` —— 全串精确查词 / 逐字摘要 / 截断
+ *   · `services/DictionaryService.ts` —— `lookupWordExact`
+ *   · `theme/colors.ts` —— `withAlpha`
+ * 这些是**组件/服务层 API 契约**，与「谁来渲染阅读页」无关，故原样保留。
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -20,53 +35,10 @@ function readSrc(relPath: string): string {
   return readFileSync(join(SRC_ROOT, relPath), 'utf-8');
 }
 
-const reader = readSrc('screens/ReaderScreen.tsx');
 const pinyinText = readSrc('components/reader/PinyinText.tsx');
 const highlightText = readSrc('components/reader/HighlightText.tsx');
 const analysisPanel = readSrc('components/reader/AnalysisPanel.tsx');
 const dictService = readSrc('services/DictionaryService.ts');
-
-describe('① 选区自由化：浮动层 + 点按扩展（废 ± 步进）', () => {
-  test('± 按钮与 adjustSelection 已彻底删除（无死代码/死样式）', () => {
-    expect(reader).not.toMatch(/adjustSelection/);
-    expect(reader).not.toMatch(/起点后移|起点前移|终点后移|终点前移/);
-    expect(reader).not.toMatch(/styles\.selectionRow/);
-  });
-
-  test('选区面板不再是全屏 Modal，改为阅读页内浮动层（box-none 穿透正文）', () => {
-    expect(reader).toMatch(
-      /styles\.selectionDock} pointerEvents="box-none"/,
-    );
-    // 选区面板本体不再包在 <Modal> 内（Modal 仍用于语速/笔记/设置/目录弹窗）
-    expect(reader).not.toMatch(
-      /<Modal[^>]*>\s*\n\s*<Pressable style=\{styles\.overlay\}[^>]*>\s*\n\s*<Pressable\s*\n\s*style=\{\[styles\.sheet, \{ backgroundColor: colors\.background \}\]\}\s*\n\s*onPress=\{\(\) => undefined\}\s*\n\s*>\s*\n\s*\{\/\* 阅读进度已固定/,
-    );
-    expect(reader).toMatch(/selectionVisible && selection \? \(/);
-  });
-
-  test('存在点按扩展回调：终点之后向右扩 / 起点之前向左扩 / 跨段重开 1 字选区', () => {
-    expect(reader).toMatch(/const handleSelectionExtendPress = useCallback/);
-    expect(reader).toMatch(/if \(index >= prev\.end\) \{/);
-    expect(reader).toMatch(/if \(index < prev\.start\) \{/);
-    expect(reader).toMatch(/segmentId !== prev\?\.segmentId/);
-    expect(reader).toMatch(/const end = Math\.min\(start \+ 1, chars\.length\);/);
-  });
-
-  test('滚动/翻页两模式均传入点按扩展（仅选区打开时生效，回落划线点击）', () => {
-    expect(reader).toMatch(
-      /onPressIndex=\{selectionVisible \? handleSelectionExtendPress : undefined\}/,
-    );
-    expect(reader).toMatch(/onPressIndex\?: \(segmentId: string, index: number\) => void;/);
-  });
-
-  test('菜单含「取消」入口（放弃选区），提示语覆盖扩展/收缩/长按重选', () => {
-    expect(reader).toMatch(/const closeSelection = useCallback/);
-    expect(reader).toMatch(/accessibilityLabel="取消选区"/);
-    expect(reader).toMatch(
-      /点按字扩展选区 · 点选区内收缩（可缩至 1 字）· 长按重新选字/,
-    );
-  });
-});
 
 describe('① 两渲染模式的 per-char 点按支持', () => {
   test('PinyinText：字格支持 onPressChar（优先于划线点击），长按保留', () => {
@@ -80,12 +52,6 @@ describe('① 两渲染模式的 per-char 点按支持', () => {
     expect(highlightText).toMatch(/if \(onPressChar\) \{/);
     expect(highlightText).toMatch(/const globalIndex = seg\.start \+ i;/);
     expect(highlightText).toMatch(/onPress=\{\(\) => onPressChar\(globalIndex\)\}/);
-  });
-
-  test('SegmentItem：off 模式点按索引加 charRange 起点还原全局码点基准', () => {
-    expect(reader).toMatch(
-      /onPressIndex\?\.\(segmentId, localIndex \+ \(charRange\?\.\[0\] \?\? 0\)\);/,
-    );
   });
 });
 
@@ -119,94 +85,7 @@ describe('② 解析跟随实际选中内容', () => {
   });
 });
 
-describe('③ 菜单三段式重构：内容区可滚动 + 固定操作栏（根除截断）', () => {
-  test('面板底部停靠（paddingBottom 56 预留进度条），maxHeight 65% 外层保险保留', () => {
-    expect(reader).toMatch(/maxHeight: '65%'/);
-    // 面板底部预留进度条高度，避免遮挡
-    expect(reader).toMatch(/paddingBottom: 56/);
-  });
-
-  test('内容区：选中文本独立 ScrollView 固定数值限高（短选区自适应、超长内滚）', () => {
-    // 面板内首个 ScrollView 即选中文本滚动区（操作栏在 ScrollView 之外）
-    expect(reader).toMatch(
-      /selectionSheet[\s\S]*?<ScrollView\s*\n\s*nestedScrollEnabled/,
-    );
-    // 固定数值限高（勿用百分比——Android 上百分比 maxHeight 测量不稳导致裁切）
-    expect(reader).toMatch(/selectionContentScroll: \{\s*\n\s*maxHeight: 140,/);
-    // 选中文字完整换行，不 numberOfLines 截断
-    expect(reader).not.toMatch(/styles\.selectionText[^\n]*numberOfLines/);
-  });
-
-  test('分隔线：内容区与固定操作栏之间 hairline 线（colors.border）', () => {
-    expect(reader).toMatch(
-      /styles\.selectionDivider, \{ backgroundColor: colors\.border \}/,
-    );
-  });
-
-  test('划线行独立成行：左「划线」标签 + 三色圆点，不再与操作按钮同行挤爆', () => {
-    expect(reader).toMatch(/styles\.selectionHighlightRow/);
-    expect(reader).toMatch(/styles\.selectionHighlightDots/);
-    expect(reader).toMatch(/使用\$\{color\}颜色划线/);
-  });
-
-  test('操作栏固定：解析/翻译/笔记/取消 4 按钮 flex:1 等宽（flexBasis 0）永不压缩', () => {
-    expect(reader).toMatch(/selectionActionsRow: \{/);
-    expect(reader).toMatch(
-      /selectionActionButton: \{[\s\S]*?flex: 1,[\s\S]*?flexBasis: 0,/,
-    );
-    expect(reader).toMatch(/accessibilityLabel="取消选区"/);
-  });
-
-  test('旧整板 ScrollView 结构与死样式已删除：操作行必须位于 ScrollView 之外', () => {
-    // actionDivider 仅旧单行菜单使用，应删除（无死样式）
-    expect(reader).not.toMatch(/actionDivider/);
-    // 结构断言：selectionSheet 内的选中文本 ScrollView 先出现并闭合，
-    // 操作行（selectionActionsRow）位于其之后（滚动区外、固定底部）
-    const sheetStart = reader.indexOf(
-      'styles.selectionSheet, { backgroundColor: colors.background }',
-    );
-    expect(sheetStart).toBeGreaterThan(-1);
-    const scrollStart = reader.indexOf('<ScrollView', sheetStart);
-    const scrollEnd = reader.indexOf('</ScrollView>', scrollStart);
-    const actionsRow = reader.indexOf('styles.selectionActionsRow', scrollEnd);
-    expect(scrollStart).toBeGreaterThan(sheetStart);
-    expect(scrollEnd).toBeGreaterThan(scrollStart);
-    expect(actionsRow).toBeGreaterThan(scrollEnd);
-  });
-});
-
 describe('④ 活动选区视觉效果（selectionRange 透传链路）', () => {
-  test('ReaderScreen：菜单打开期间派生活动选区快照（activeSelection）', () => {
-    expect(reader).toMatch(
-      /selectionVisible && selection\s*\?\s*\{ segmentId: selection\.segmentId, start: selection\.start, end: selection\.end \}/,
-    );
-  });
-
-  test('ReaderScreen：滚动模式 renderRow 按段匹配下发 selectionRange', () => {
-    expect(reader).toMatch(
-      /activeSelection && activeSelection\.segmentId === item\.segment\.id\s*\?\s*\[activeSelection\.start, activeSelection\.end\]\s*:\s*undefined/,
-    );
-  });
-
-  test('ReaderScreen：翻页模式经 PageModeView → SegmentBlockItem 透传 activeSelection', () => {
-    expect(reader).toMatch(
-      /activeSelection\?: \{ segmentId: string; start: number; end: number \} \| null;/,
-    );
-    expect(reader).toMatch(
-      /activeSelection\.segmentId === segId\s*\?\s*\[activeSelection\.start, activeSelection\.end\]\s*:\s*undefined/,
-    );
-  });
-
-  test('SegmentItem：off 模式拆页路径对选区区间求交集并平移到局部坐标系', () => {
-    expect(reader).toMatch(/const localSelectionRange = useMemo<\[number, number\] \| undefined>\(/);
-    expect(reader).toMatch(/const from = Math\.max\(s, selectionRange\[0\]\);/);
-    expect(reader).toMatch(/const to = Math\.min\(e, selectionRange\[1\]\);/);
-    expect(reader).toMatch(/return from < to \? \[from - s, to - s\] : undefined;/);
-    // PinyinText 用全局码点基准，HighlightText 用局部（切片平移后）基准
-    expect(reader).toMatch(/selectionRange=\{selectionRange\}/);
-    expect(reader).toMatch(/selectionRange=\{localSelectionRange\}/);
-  });
-
   test('PinyinText：字格支持 selectionRange 叠加主色半透明选区背景', () => {
     expect(pinyinText).toMatch(/selectionRange\?: \[number, number\];/);
     expect(pinyinText).toMatch(/withAlpha\(colors\.primary, 0\.25\)/);
@@ -230,98 +109,5 @@ describe('④ 活动选区视觉效果（selectionRange 透传链路）', () => 
     expect(readSrc('theme/colors.ts')).toMatch(
       /export function withAlpha\(hex: string, alpha: number\): string/,
     );
-  });
-});
-
-describe('⑤ 选区撤销与删除划线（体验优化）', () => {
-  test('点选区内部 = 收缩（端点字移除 + 中点就近收缩，最小保留 1 字），原扩展路径不回归', () => {
-    // 收缩分支存在于 handleSelectionExtendPress 的「选区内部」路径
-    expect(reader).toMatch(/点按选区内部 → 收缩/);
-    // 点选区端点字 = 把该字从选区移除（二字选区由此可缩到单字）
-    expect(reader).toMatch(/if \(index === prev\.start\) \{/);
-    expect(reader).toMatch(/if \(index === prev\.end - 1\) \{/);
-    expect(reader).toMatch(/const mid = \(prev\.start \+ prev\.end\) \/ 2;/);
-    expect(reader).toMatch(/if \(index <= mid\) \{/);
-    expect(reader).toMatch(/const end = index \+ 1;/);
-    // 单字选区点该字不收缩（收缩后为空）
-    expect(reader).toMatch(/if \(prev\.end - prev\.start > 1\) \{/);
-    // 原有点按扩展路径保留（终点后扩 / 起点前扩 / 跨段重开 1 字选区）
-    expect(reader).toMatch(/if \(index >= prev\.end\) \{/);
-    expect(reader).toMatch(/if \(index < prev\.start\) \{/);
-    expect(reader).toMatch(/segmentId !== prev\?\.segmentId/);
-  });
-
-  test('「收起」按钮已更名「取消」（accessibilityLabel 同步，无旧文案残留）', () => {
-    expect(reader).not.toMatch(/收起选区菜单/);
-    expect(reader).toMatch(/accessibilityLabel="取消选区"/);
-    // 取消为中性操作，维持 textSecondary 弱化样式（按钮语义注释在位）
-    expect(reader).toMatch(/面板「取消」按钮：放弃当前选区/);
-  });
-
-  test('笔记编辑器「删除划线」入口：两步确认 + removeHighlight/removeNote 接线', () => {
-    // 数据层接线：removeHighlight / removeNote 均已解构
-    expect(reader).toMatch(
-      /const \{ highlights, addHighlight, removeHighlight \} = useHighlightsForChapters\(/,
-    );
-    expect(reader).toMatch(
-      /const \{ notes, addNote, updateNote, removeNote \} = useNotesForChapters\(/,
-    );
-    // 入口仅在「点已有划线打开编辑器」（highlightId 已落库）时显示；
-    // 选区新建笔记路径（无 highlightId）不显示
-    expect(reader).toMatch(/\{noteEditor\?\.highlightId \? \(/);
-    expect(reader).toMatch(/confirmDeleteHighlight \? '确认删除划线？' : '删除划线'/);
-    // 两步确认：首点进入待确认态，3 秒未再点自动复位
-    expect(reader).toMatch(/const handleDeleteHighlightPress = useCallback/);
-    expect(reader).toMatch(/deleteConfirmTimer\.current = setTimeout\(/);
-    // 确认后删划线并关闭编辑器
-    expect(reader).toMatch(/removeHighlight\(hlId\)/);
-    // 关联笔记 Alert 二选一；保留笔记走「删旧存新」解绑 highlightId 关联
-    expect(reader).toMatch(/'仅删划线保留笔记'/);
-    expect(reader).toMatch(/'同时删除笔记'/);
-    expect(reader).toMatch(/const note = addNote\(\{\s*\n\s*bookId: linkedNote\.bookId,/);
-  });
-
-  test('删除确认态有复位路径：打开/关闭编辑器均复位，卸载清理计时器', () => {
-    expect(reader).toMatch(/const resetDeleteConfirm = useCallback/);
-    expect(reader).toMatch(/handleHighlightPress[\s\S]*?resetDeleteConfirm\(\);/);
-    expect(reader).toMatch(/closeNoteEditor = [\s\S]*?resetDeleteConfirm\(\);/);
-    expect(reader).toMatch(/clearTimeout\(deleteConfirmTimer\.current\)/);
-  });
-});
-
-describe('⑥ 长按单字初始选区 + 面板「取消划线」入口（体验优化二批）', () => {
-  test('长按正文仅选中长按的单字（初始选区 1 字，不再取 4 字窗口）', () => {
-    // 4 字窗口彻底删除（长按与跨段重开两处均改为 1 字）
-    expect(reader).not.toMatch(/start \+ 4/);
-    expect(reader).toMatch(/仅选中长按的单字并打开浮动菜单/);
-    expect(reader).toMatch(/初始选区 1 字/);
-  });
-
-  test('选区与已有划线重叠时计算重叠集合（同段 + 区间相交，含部分重叠）', () => {
-    expect(reader).toMatch(/const overlappingHighlights = useMemo\(\(\) => \{/);
-    expect(reader).toMatch(/h\.segmentId === selection\.segmentId &&/);
-    expect(reader).toMatch(/h\.startOffset < selection\.end &&/);
-    expect(reader).toMatch(/selection\.start < h\.endOffset,/);
-  });
-
-  test('面板划线行提供「取消划线」入口：两步确认 + removeHighlight 接线', () => {
-    // 入口仅重叠集合非空时渲染于划线行；两步确认文案与警示色同笔记编辑器范式
-    expect(reader).toMatch(/overlappingHighlights\.length > 0 \? \(/);
-    expect(reader).toMatch(/confirmCancelHighlight \? '确认取消划线？' : '取消划线'/);
-    expect(reader).toMatch(/accessibilityLabel=\{\s*\n\s*confirmCancelHighlight \? '确认取消划线' : '取消划线'\s*\n\s*\}/);
-    expect(reader).toMatch(/const handleCancelHighlightPress = useCallback/);
-    expect(reader).toMatch(/cancelHlConfirmTimer\.current = setTimeout\(/);
-    // 确认后删除全部重叠划线并关闭选区
-    expect(reader).toMatch(/overlappingHighlights\.forEach\(\(h\) => removeHighlight\(h\.id\)\)/);
-    expect(reader).toMatch(/resetCancelHighlightConfirm\(\);[\s\S]*?closeSelection\(\);/);
-  });
-
-  test('「取消划线」关联笔记 Alert 二选一（保留笔记走「删旧存新」解绑）', () => {
-    expect(reader).toMatch(/Alert\.alert\('取消划线', '所选划线关联了笔记，如何处理？'/);
-    expect(reader).toMatch(/text: '仅删划线保留笔记'/);
-    expect(reader).toMatch(/text: '同时删除笔记'/);
-    // 待确认态有复位路径：面板关闭/重叠清空复位 + 卸载清理计时器
-    expect(reader).toMatch(/const resetCancelHighlightConfirm = useCallback/);
-    expect(reader).toMatch(/clearTimeout\(cancelHlConfirmTimer\.current\)/);
   });
 });

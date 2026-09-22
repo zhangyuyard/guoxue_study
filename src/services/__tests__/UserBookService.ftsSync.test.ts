@@ -8,23 +8,21 @@
  *   - FTS 写入/清理失败不影响导入/删除的主流程结果（吞错降级）
  */
 jest.mock('react-native-quick-sqlite', () => {
+  const { createFts5Mock, execFts5Sql } =
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    require('./fts5Mock.helper') as typeof import('./fts5Mock.helper');
   const mockState = {
     /** user_books.db 行 */
     userBooks: [] as Array<Record<string, unknown>>,
-    /** guoxue.db segments_fts 内存行 */
-    ftsRows: [] as Array<Record<string, unknown>>,
     /** 置 true 时 guoxue.db 的 segments_fts 相关 SQL 抛错（模拟 FTS 故障） */
     failFts: false,
+    // 【#29】guoxue.db 的 FTS 语句面（segments_fts + segment_fts_rowid）统一走共享
+    // 保真 mock：按语句首词路由 + 真机 rowid 分配（max(rowid)+1，会复用被释放的
+    // rowid）——旧内联 mock 的「子串顺序匹配 + lastRid 单调递增」使
+    // `clearFtsRidMapForBook` 分支永不可达、撞车不可表示（详见 helper 头注释）。
+    ...createFts5Mock(),
   };
   const mockUserBookCols = ['id', 'title', 'author', 'data', 'created_at'];
-  const mockFtsCols = [
-    'segment_id',
-    'book_id',
-    'chapter_id',
-    'book_title',
-    'chapter_title',
-    'text',
-  ];
   const mockRow = (cols: string[], params: unknown[]) => {
     const row: Record<string, unknown> = {};
     cols.forEach((col, i) => {
@@ -70,45 +68,9 @@ jest.mock('react-native-quick-sqlite', () => {
           if (/segments_fts/.test(sql) && mockState.failFts) {
             throw new Error('FTS 不可用（模拟故障）');
           }
-          if (/INSERT OR REPLACE INTO segments_fts/.test(sql)) {
-            const row = mockRow(mockFtsCols, params);
-            const idx = mockState.ftsRows.findIndex(
-              (r) => r.segment_id === row.segment_id,
-            );
-            if (idx >= 0) {
-              mockState.ftsRows[idx] = row;
-            } else {
-              mockState.ftsRows.push(row);
-            }
-            return { rows: { _array: [], length: 0 } };
-          }
-          if (/SELECT DISTINCT book_id FROM segments_fts/.test(sql)) {
-            const seen = new Set<string>();
-            const arr: Record<string, unknown>[] = [];
-            for (const r of mockState.ftsRows) {
-              const id = String(r.book_id);
-              if (!seen.has(id)) {
-                seen.add(id);
-                arr.push({ book_id: id });
-              }
-            }
-            return { rows: { _array: arr, length: arr.length } };
-          }
-          if (/DELETE FROM segments_fts WHERE book_id = \?/.test(sql)) {
-            mockState.ftsRows = mockState.ftsRows.filter(
-              (r) => r.book_id !== params[0],
-            );
-            return { rows: { _array: [], length: 0 } };
-          }
-          // SearchService 的 instr 子串查询（SELECT … FROM segments_fts WHERE instr(text, ?)）
-          if (/FROM segments_fts[\s\S]*WHERE instr\(text, \?\)/.test(sql)) {
-            const kw = String(params[0] ?? '');
-            const hits = mockState.ftsRows.filter((r) =>
-              String(r.text).includes(kw),
-            );
-            return {
-              rows: { _array: hits.map((r) => ({ ...r })), length: hits.length },
-            };
+          const handled = execFts5Sql(mockState, sql, params);
+          if (handled) {
+            return handled;
           }
           // CREATE TABLE / ALTER TABLE 等一律放行
           return { rows: { _array: [], length: 0 } };
@@ -157,6 +119,12 @@ import type { Book, SearchResult } from '@/types';
 const { __ftsSyncState } = require('react-native-quick-sqlite');
 import { UserBookService } from '@/services/UserBookService';
 import { SearchService } from '@/services/SearchService';
+import {
+  pushFtsRow,
+  resetFts5Mock,
+  ridMapEntriesFor,
+  ridMapViolations,
+} from './fts5Mock.helper';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const RNFSMock = require('react-native-fs');
 
@@ -183,8 +151,10 @@ async function importSampleBook(): Promise<Book> {
 describe('UserBookService 与 FTS 索引同步（导入/删除）', () => {
   beforeEach(() => {
     __ftsSyncState.userBooks = [];
-    __ftsSyncState.ftsRows = [];
     __ftsSyncState.failFts = false;
+    // 【#29】FTS 行 + rowid 映射 + 最后插入 rowid 一并重置：只清 ftsRows 会让
+    // 「无行映射」跨用例残留，把上一个用例的撞车条件悄悄带进下一个用例
+    resetFts5Mock(__ftsSyncState);
     RNFSMock.__state.readResults = [];
   });
 
@@ -221,8 +191,8 @@ describe('UserBookService 与 FTS 索引同步（导入/删除）', () => {
 
   test('删除成功 → 该书 FTS 行全部清除，其他书行保留', async () => {
     const book = await importSampleBook();
-    // 预置另一本书的 FTS 行（模拟内置经典已入索引）
-    __ftsSyncState.ftsRows.push({
+    // 预置另一本书的 FTS 行（模拟内置经典已入索引；真机老行必有 rowid、无映射）
+    pushFtsRow(__ftsSyncState, {
       segment_id: 'lunyu-c1-s1',
       book_id: 'lunyu',
       chapter_id: 'lunyu-c1',
@@ -244,6 +214,15 @@ describe('UserBookService 与 FTS 索引同步（导入/删除）', () => {
         (r: Record<string, unknown>) => r.book_id === 'lunyu',
       ),
     ).toBe(true);
+    // 【#29】删书必须同步清该书的 rowid 映射（`clearFtsRidMapForBook` 分支可达性）：
+    // 旧内联 mock 因分支误路由永不到达该 DELETE ⇒ 等价于 mock 内已植入「删书不清
+    // 映射」缺陷仍全绿，故此处断言是该缺陷可被检出的**必要条件**。
+    const segmentIds = book.chapters.flatMap((c) =>
+      c.segments.map((s) => s.id),
+    );
+    expect(segmentIds.length).toBeGreaterThan(0);
+    expect(ridMapEntriesFor(__ftsSyncState, segmentIds)).toEqual([]);
+    expect(ridMapViolations(__ftsSyncState)).toEqual([]);
   });
 
   test('FTS 写入失败不阻断导入（主流程结果不变，错误降级）', async () => {
@@ -267,8 +246,8 @@ describe('UserBookService 与 FTS 索引同步（导入/删除）', () => {
   });
 
   test('内置书可删除（FTS 清理同步触发）', async () => {
-    // 预置内置经典 FTS 行
-    __ftsSyncState.ftsRows.push({
+    // 预置内置经典 FTS 行（真机老行必有 rowid、无映射）
+    pushFtsRow(__ftsSyncState, {
       segment_id: 'lunyu-c1-s1',
       book_id: 'lunyu',
       chapter_id: 'lunyu-c1',
@@ -284,5 +263,8 @@ describe('UserBookService 与 FTS 索引同步（导入/删除）', () => {
         (r: Record<string, unknown>) => r.book_id === 'lunyu',
       ),
     ).toBe(false);
+    // 【#29】内置书路径同样清映射（生产不变量：映射 ⊆ 现存行）
+    expect(ridMapViolations(__ftsSyncState)).toEqual([]);
+    expect(__ftsSyncState.ftsRows).toHaveLength(0);
   });
 });

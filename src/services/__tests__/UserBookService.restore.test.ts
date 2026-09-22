@@ -8,14 +8,18 @@
  *   - 空数组无副作用；非数组入参报错
  */
 jest.mock('react-native-quick-sqlite', () => {
+  const { createFts5Mock, execFts5Sql } =
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    require('./fts5Mock.helper') as typeof import('./fts5Mock.helper');
   const mockState = {
     /** user_books.db 行 */
     userBooks: [] as Array<Record<string, unknown>>,
-    /** guoxue.db segments_fts 内存行 */
-    ftsRows: [] as Array<Record<string, unknown>>,
+    // 【#29】guoxue.db 的 FTS 语句面（segments_fts + segment_fts_rowid）统一走共享
+    // 保真 mock：按语句首词路由 + 真机 rowid 分配（max(rowid)+1，会复用被释放的
+    // rowid）。详见 helper 头注释。
+    ...createFts5Mock(),
   };
   const mockUserBookCols = ['id', 'title', 'author', 'data', 'created_at', 'source_path', 'file_sig'];
-  const mockFtsCols = ['segment_id', 'book_id', 'chapter_id', 'book_title', 'chapter_title', 'text'];
   const mockRow = (cols: string[], params: unknown[]) => {
     const row: Record<string, unknown> = {};
     cols.forEach((col, i) => {
@@ -55,19 +59,9 @@ jest.mock('react-native-quick-sqlite', () => {
             }
             return { rows: { _array: [], length: 0 } };
           }
-          if (/INSERT OR REPLACE INTO segments_fts/.test(sql)) {
-            const row = mockRow(mockFtsCols, params);
-            const idx = mockState.ftsRows.findIndex((r) => r.segment_id === row.segment_id);
-            if (idx >= 0) {
-              mockState.ftsRows[idx] = row;
-            } else {
-              mockState.ftsRows.push(row);
-            }
-            return { rows: { _array: [], length: 0 } };
-          }
-          if (/DELETE FROM segments_fts WHERE book_id = \?/.test(sql)) {
-            mockState.ftsRows = mockState.ftsRows.filter((r) => r.book_id !== params[0]);
-            return { rows: { _array: [], length: 0 } };
+          const handled = execFts5Sql(mockState, sql, params);
+          if (handled) {
+            return handled;
           }
           // CREATE TABLE 等一律放行
           return { rows: { _array: [], length: 0 } };
@@ -104,7 +98,9 @@ import type { Book } from '@/types';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { __restoreState } = require('react-native-quick-sqlite');
 import { UserBookService } from '@/services/UserBookService';
+import { __resetBuiltinLazyStateForTests } from '@/services/UserBookService';
 import { TextLibraryService } from '@/services/TextLibraryService';
+import { resetFts5Mock, ridMapViolations } from './fts5Mock.helper';
 
 /** 构造一本最小合法用户书 */
 function makeBook(id: string, title = '备份之书'): Book {
@@ -142,9 +138,25 @@ async function seedDeviceBook(id: string, title: string): Promise<void> {
 describe('UserBookService.restoreUserBooks（用户书备份恢复）', () => {
   beforeEach(async () => {
     __restoreState.userBooks = [];
-    __restoreState.ftsRows = [];
+    // 【#29】FTS 行 + rowid 映射 + 最后插入 rowid 一并重置（只清 ftsRows 会让
+    // 「无行映射」跨用例残留）
+    resetFts5Mock(__restoreState);
     // 重置 UserBookService 模块级内存列表（loadedBooks 跨用例残留会污染注册断言）
     await UserBookService.loadAndRegisterAll();
+  });
+
+  afterEach(async () => {
+    // 【R2-3】回收在飞的 FTS 后台索引队列：`loadAndRegisterAll` 在
+    // `builtinFtsAutoSchedule`（默认 true）下会 `scheduleBuiltinFtsIndexBuild()`
+    // 排一个 10s 起步、逐书 200ms 的长队列（77 本 ≈ 15s+）。本文件用例在此之前
+    // 早已结束，队列随后继续解析并 `console.info` → jest 报
+    // 「Cannot log after tests are done」（--detectOpenHandles 退出码 1）。
+    // 重置会递增队列世代号 → 队列在下一个书间/暂停轮询检查点立即返回。
+    __resetBuiltinLazyStateForTests();
+    for (let i = 0; i < 4; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
   });
 
   test('合法书恢复：持久化 + 注册 + FTS 同步入索引', async () => {
@@ -170,6 +182,9 @@ describe('UserBookService.restoreUserBooks（用户书备份恢复）', () => {
       (r: Record<string, unknown>) => r.book_id === 'user-r1' && r.text === '温故而知新。',
     );
     expect(ftsHit).toBeDefined();
+    // 【#29】恢复走整书写入（upsertFtsForBook）：必须登记稳定 rowid 且不留孤儿映射
+    expect(__restoreState.ftsRidMap.get('user-r1-c1-s1')).toBe(ftsHit?.rowid);
+    expect(ridMapViolations(__restoreState)).toEqual([]);
   });
 
   test('同 id 幂等覆盖：重复恢复同 id 不产生重复书，内容以备份为准', async () => {

@@ -11,11 +11,16 @@
  * 不显示且无独立展示页），本套件不对其做断言。
  */
 jest.mock('react-native-quick-sqlite', () => {
+  const { createFts5Mock, execFts5Sql } =
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    require('./fts5Mock.helper') as typeof import('./fts5Mock.helper');
   const mockState = {
     /** user_books.db 行 */
     userBooks: [] as Array<Record<string, unknown>>,
-    /** guoxue.db segments_fts 内存行 */
-    ftsRows: [] as Array<Record<string, unknown>>,
+    // 【#29】guoxue.db 的 FTS 语句面（segments_fts + segment_fts_rowid）统一走共享
+    // 保真 mock：按语句首词路由 + 真机 rowid 分配（max(rowid)+1，会复用被释放的
+    // rowid）。详见 helper 头注释。
+    ...createFts5Mock(),
     /** guoxue.db bookmarks 内存行 */
     bookmarkRows: [] as Array<Record<string, unknown>>,
     /** guoxue.db notes 内存行 */
@@ -26,14 +31,6 @@ jest.mock('react-native-quick-sqlite', () => {
     failSql: null as string | null,
   };
   const mockUserBookCols = ['id', 'title', 'author', 'data', 'created_at'];
-  const mockFtsCols = [
-    'segment_id',
-    'book_id',
-    'chapter_id',
-    'book_title',
-    'chapter_title',
-    'text',
-  ];
   const mockRow = (cols: string[], params: unknown[]) => {
     const row: Record<string, unknown> = {};
     cols.forEach((col, i) => {
@@ -79,35 +76,10 @@ jest.mock('react-native-quick-sqlite', () => {
           if (mockState.failSql && sql.includes(mockState.failSql)) {
             throw new Error('级联清理故障（模拟）');
           }
-          if (/INSERT OR REPLACE INTO segments_fts/.test(sql)) {
-            const row = mockRow(mockFtsCols, params);
-            const idx = mockState.ftsRows.findIndex(
-              (r) => r.segment_id === row.segment_id,
-            );
-            if (idx >= 0) {
-              mockState.ftsRows[idx] = row;
-            } else {
-              mockState.ftsRows.push(row);
-            }
-            return { rows: { _array: [], length: 0 } };
-          }
-          if (/SELECT DISTINCT book_id FROM segments_fts/.test(sql)) {
-            const seen = new Set<string>();
-            const arr: Record<string, unknown>[] = [];
-            for (const r of mockState.ftsRows) {
-              const id = String(r.book_id);
-              if (!seen.has(id)) {
-                seen.add(id);
-                arr.push({ book_id: id });
-              }
-            }
-            return { rows: { _array: arr, length: arr.length } };
-          }
-          if (/DELETE FROM segments_fts WHERE book_id = \?/.test(sql)) {
-            mockState.ftsRows = mockState.ftsRows.filter(
-              (r) => r.book_id !== params[0],
-            );
-            return { rows: { _array: [], length: 0 } };
+          // FTS 语句面（保真 mock）
+          const handledFts = execFts5Sql(mockState, sql, params);
+          if (handledFts) {
+            return handledFts;
           }
           if (/DELETE FROM bookmarks WHERE book_id = \?/.test(sql)) {
             mockState.bookmarkRows = mockState.bookmarkRows.filter(
@@ -178,6 +150,11 @@ import { useRecitationStore } from '@/store/useRecitationStore';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { useNoteStore } from '@/store/useNoteStore';
 import { useReaderStore } from '@/store/useReaderStore';
+import {
+  resetFts5Mock,
+  ridMapEntriesFor,
+  ridMapViolations,
+} from './fts5Mock.helper';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const RNFSMock = require('react-native-fs');
 
@@ -274,7 +251,9 @@ describe('UserBookService.deleteBook 级联清理（孤儿数据 BugFix）', () 
 
   beforeEach(() => {
     __cascadeState.userBooks = [];
-    __cascadeState.ftsRows = [];
+    // 【#29】FTS 行 + rowid 映射 + 最后插入 rowid 一并重置（只清 ftsRows 会让
+    // 「无行映射」跨用例残留）
+    resetFts5Mock(__cascadeState);
     __cascadeState.bookmarkRows = [];
     __cascadeState.noteRows = [];
     __cascadeState.recitationRows = [];
@@ -328,6 +307,16 @@ describe('UserBookService.deleteBook 级联清理（孤儿数据 BugFix）', () 
 
     // 续读位置：指向已删书 → 置 null
     expect(useReaderStore.getState().lastRead).toBeNull();
+
+    // 【#29】FTS：删书同时清该书的 rowid 映射（`clearFtsRidMapForBook` 分支可达性 +
+    // 生产不变量「映射 ⊆ 现存行」）。旧内联 mock 因分支误路由永不到达该 DELETE ⇒
+    // 等价于 mock 内已植入「删书不清映射」缺陷却仍全绿。
+    const segmentIds = book.chapters.flatMap((c) =>
+      c.segments.map((s) => s.id),
+    );
+    expect(segmentIds.length).toBeGreaterThan(0);
+    expect(ridMapEntriesFor(__cascadeState, segmentIds)).toEqual([]);
+    expect(ridMapViolations(__cascadeState)).toEqual([]);
   });
 
   test('lastRead 指向他书时保留，仅清理指向待删书的位置', async () => {

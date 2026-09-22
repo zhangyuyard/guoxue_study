@@ -304,13 +304,14 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
               </Text>
             </Pressable>
             {(() => {
-              // 装载诊断：真机上内置书异常（复制失败/解析失败/扫描中断）时
-              // 直接在页脚可见，替代静默吞错
+              // 装载诊断：真机上书库异常（复制失败/解析失败/扫描中断/本轮未解析/
+              // 根路径漂移）时直接在页脚可见，替代静默吞错。前三类属内置书侧，
+              // 后两类属用户书侧（scanInterrupted 亦覆盖「书籍文件夹列举失败」）。
               const diag = UserBookService.getLibrarySyncDiagnostics();
               if (diag.scanInterrupted) {
                 return (
                   <Text style={[styles.footerText, { color: colors.accent }]} numberOfLines={3}>
-                    诊断：书籍扫描异常中断，本轮内置书注册已保留上次结果
+                    诊断：书籍扫描异常中断，本轮书库注册已保留上次结果
                     {diag.scanInterruptedReason ? `（${diag.scanInterruptedReason}）` : ''}
                   </Text>
                 );
@@ -326,6 +327,20 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
                 return (
                   <Text style={[styles.footerText, { color: colors.accent }]}>
                     诊断：内置书资产复制失败 {diag.assetCopyFailures.length} 部（已走资产直读兜底，重启自动重试复制）
+                  </Text>
+                );
+              }
+              if (diag.unparsedFiles.length > 0) {
+                return (
+                  <Text style={[styles.footerText, { color: colors.accent }]} numberOfLines={3}>
+                    诊断：{diag.unparsedFiles.length} 个文件本轮未能解析（已保留既有书籍，未丢书）
+                  </Text>
+                );
+              }
+              if (diag.rootPathDrift) {
+                return (
+                  <Text style={[styles.footerText, { color: colors.accent }]} numberOfLines={3}>
+                    诊断：书籍文件夹路径已变化，本轮未做下架清理（原路径的书均已保留）
                   </Text>
                 );
               }

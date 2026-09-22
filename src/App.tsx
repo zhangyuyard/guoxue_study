@@ -28,6 +28,7 @@ import {
 } from '@react-navigation/native';
 
 import RootNavigator from '@/navigation/RootNavigator';
+import { DeviceTierService, ADAPTIVE_JANK_WINDOW_MS } from '@/services/DeviceTierService';
 import { DictEngine } from '@/services/dict/DictEngine';
 import {
   ensurePhrasePinyinData,
@@ -87,20 +88,45 @@ function App(): React.JSX.Element {
     setReady(true);
     // 【PERF】JS 线程心跳探针：50ms 心跳，间隔 ≥300ms 记一次阻塞窗口，
     // 用于在 logcat 时间线上定位「点击无响应」期间的 JS 饱和段
+    // （r38 T01：冷启动 0~30s 窗口内累计 jank 次数，窗口结束时一次性
+    //   上报给 DeviceTierService 做自适应降档去抖 —— 复用既有探针，零新基建）
     let lastBeat = Date.now();
+    const coldStartAt = Date.now();
+    let coldStartJankCount = 0;
     const heartbeatTimer = setInterval(() => {
       const now = Date.now();
       const gap = now - lastBeat;
       lastBeat = now;
       if (gap >= 300) {
         console.info(`[PERF][jank] jsBlocked=${gap}ms`);
+        if (now - coldStartAt <= ADAPTIVE_JANK_WINDOW_MS) {
+          coldStartJankCount += 1;
+        }
       }
     }, 50);
+    // 冷启动窗口结束：上报窗口内累计 jank（<3 次由 reportJankSample 自行忽略）
+    const jankReportTimer = setTimeout(() => {
+      DeviceTierService.reportJankSample(coldStartJankCount);
+    }, ADAPTIVE_JANK_WINDOW_MS);
     // —— 可延后任务（每个任务独占一个 macrotask，任务间让出 JS 线程）——
     // ① 背诵列表（SQLite 同步读）→ ② 复习提醒同步（读背诵/设置/目标数据，
     //    内部防重入）→ ③ 成就重算（内部自刷背诵/收藏/笔记，幂等，仅新解锁项落账）。
     // 卸载/effect 重跑时取消未执行任务，避免重复调度。
     const cancelTasks = scheduleStartupTasks([
+      {
+        // 【r38 T01】设备档位探测：机型指纹 + 确定性微基准（整块 ≤120ms，
+        // 第 1 轮丢弃避开 Hermes JIT 预热）→ 落 MMKV（下个会话生效的冻结
+        // 语义；机型表命中与用户覆盖立即生效）。放在延后任务里且与 FTS/
+        // 装配队列同为串行 macrotask，首帧已放行，不与用户交互争 JS；
+        // 探测只读 Platform.constants/Dimensions/PixelRatio，零新依赖。
+        // 设置页覆盖先同步进档位服务（本会话覆盖即生效）。
+        key: 'probeDeviceTier',
+        run: () => {
+          const perfTier = useSettingsStore.getState().readerPerfTier;
+          DeviceTierService.setOverride(perfTier === 'auto' ? null : perfTier);
+          void DeviceTierService.probeAndPersist();
+        },
+      },
       {
         // 词组读音数据（phrase-pinyin，~4.5MB 分片资产）预热：P0 下沉后运行时
         // 首次注音前需异步载入；放在延后任务首位，用户点进阅读器前大概率
@@ -140,6 +166,7 @@ function App(): React.JSX.Element {
     ]);
     return () => {
       clearInterval(heartbeatTimer);
+      clearTimeout(jankReportTimer);
       cancelTasks();
     };
   }, [loadBooks]);

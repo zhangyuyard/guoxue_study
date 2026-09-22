@@ -190,10 +190,17 @@ describe('源码结构断言（P0 落地形态）', () => {
     expect(source).toMatch(/ensurePhrasePinyinData\(\)/);
   });
 
-  test('滚动模式 FlatList 含渲染窗口调参', () => {
-    const source = readFileSync(resolve(srcRoot, 'src/screens/ReaderScreen.tsx'), 'utf8');
-    expect(source).toMatch(/windowSize=\{LIST_WINDOW_SIZE\}/);
-    expect(source).toMatch(/maxToRenderPerBatch=\{LIST_MAX_TO_RENDER_PER_BATCH\}/);
-    expect(source).toMatch(/updateCellsBatchingPeriod=\{LIST_UPDATE_CELLS_BATCHING_PERIOD\}/);
-  });
+  // 【已删除用例】原「滚动模式 FlatList 含渲染窗口调参」
+  //   （断言 `windowSize={LIST_WINDOW_SIZE}` / `maxToRenderPerBatch=` /
+  //    `updateCellsBatchingPeriod=` 出现在 `src/screens/ReaderScreen.tsx`）
+  //
+  // 谁删的：cleanup-executor（2026-09-22，团队 software-guoxue-reader）。
+  // 为什么删：依据 `docs/reader-cleanup-plan-2026-09-22.md` §4/§5/§6（用户裁定
+  //   「真零起点」），`ReaderScreen.tsx` 的 5430 行实现**整体移除**（跳章 / 翻页 /
+  //   跨章拼接 / 定位落位 / 视口补偿 / 边缘手势，以及这条滚动窗口调参），文件已替换
+  //   为 56 行空壳。该用例锁定的正是**已删缺陷的形状**——那三个常量所属的
+  //   `LIST_*` 调参族与「跨章拼接 + 视口补偿」同源，属本次清除对象，不得保留断言
+  //   （保留只会得到假红或对空壳恒真，两种都不是回归防护）。
+  // 影响面：本文件其余用例（词组拼音原生模块 / 惰性 provider / 覆盖层 / 晚到载入
+  //   失效机制）全部保留且不受影响。
 });

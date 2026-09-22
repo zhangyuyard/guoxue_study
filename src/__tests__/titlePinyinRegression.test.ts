@@ -1,51 +1,35 @@
 /**
- * 章节标题注音回归防护测试（源码结构断言）
+ * 章节标题注音回归防护测试（清理后残留面）
  *
  * 背景（真机反馈）：阅读页「章节标识」（章标题）未标注拼音——标题行此前是
  * 纯 <Text>，不参与注音链路。
  *
- * 修复结构：
- * 1. ReaderScreen 新增 ChapterTitleText 统一渲染（滚动模式标题行 / 翻页模式
- *    标题块 / 翻页 sizer / loading 占位 / 缺页兜底共 5 处），内部用 PinyinText；
- * 2. PinyinText 扩展 baseTextStyle prop：注音汉字格 / 非汉字 run / off 降级
- *    纯文本三路统一合并调用方文字样式（fontWeight/textAlign），视觉与旧纯
- *    Text 一致；
- * 3. 翻页模式 sizer 用同一组件量高（setTitleHeight）——注音开启时标题高度
- *    增大（字格上下双行），分页自动适配，量测与渲染必须同源。
- * 本文件锁定上述结构，防止后续改动回退到纯 Text 或量测/渲染不同源。
+ * ── 本文件为何被裁剪（书面理由）────────────────────────────────────────────
+ * 原 5 条断言中有 4 条是对 `screens/ReaderScreen.tsx` 源码文本的契约：
+ *   · 「不再有纯 `styles.chapterTitle` / `<ChapterTitleText>` 至少 4 处渲染点 /
+ *     传 `baseTextStyle`+`workId`+`bookId` / 翻页 sizer 的 `setTitleHeight`」
+ *   · 执行者：cleanup-executor（2026-09-22）；依据
+ *     `docs/reader-cleanup-plan-2026-09-22.md` §4/§5/§6（用户裁定「真零起点」）。
+ *   · `ReaderScreen.tsx` 已整体替换为 56 行空壳（旧 5430 行含跳章/翻页/跨章拼接/
+ *     定位落位/视口补偿全部移除）⇒ 这 4 条只剩两种下场：假红（断言具体结构）或
+ *     恒真（`not.toMatch`）。二者都不构成回归防护 ⇒ 随族删除。
+ *   · `ChapterTitleText` 的渲染点数量 / `setTitleHeight` 量测属于已删的翻页 sizer
+ *     与滚动行模型，将在新阅读器从零重写时由新实现自己重新立断言。
+ *
+ * ── 保留了什么 ────────────────────────────────────────────────────────────
+ * `components/reader/PinyinText.tsx` **未在本次清理中改动**（属保留族：正文/标题
+ * 注音渲染本体）。其 `baseTextStyle` 扩展是**组件层 API 契约**——删掉该 prop 或
+ * 任一合并点，下面的断言即变红 ⇒ 保留。
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-const readerSource = readFileSync(join(__dirname, '..', 'screens', 'ReaderScreen.tsx'), 'utf-8');
 const pinyinSource = readFileSync(
   join(__dirname, '..', 'components', 'reader', 'PinyinText.tsx'),
   'utf-8',
 );
 
-describe('章节标题注音（ChapterTitleText 统一渲染）', () => {
-  test('ReaderScreen 不再有纯 Text 章节标题（styles.chapterTitle 已退役）', () => {
-    expect(readerSource).not.toMatch(/styles\.chapterTitle\b/);
-  });
-
-  test('ChapterTitleText 至少覆盖 4 处渲染点（标题块/sizer/loading/滚动标题行）', () => {
-    const used = readerSource.match(/<ChapterTitleText/g) ?? [];
-    expect(used.length).toBeGreaterThanOrEqual(4);
-  });
-
-  test('ChapterTitleText 传 baseTextStyle 与 workId/bookId（语境化判音）', () => {
-    expect(readerSource).toMatch(/baseTextStyle=\{styles\.chapterTitleText\}/);
-    expect(readerSource).toMatch(/workId=\{(?:item\.chapterId|workId)\}/);
-    expect(readerSource).toMatch(/bookId=\{(?:bookId \?\? undefined|bookId)\}/);
-  });
-
-  test('翻页 sizer 量高必须走 ChapterTitleText（量测与渲染同源，分页适配注音行高）', () => {
-    // setTitleHeight 必须在 ChapterTitleText 的 onLayout 内（而非独立纯 Text）
-    expect(readerSource).toMatch(
-      /<ChapterTitleText[\s\S]*?onLayout=\{\(e\) => \{\s*\n\s*setTitleHeight\(e\.nativeEvent\.layout\.height\);/,
-    );
-  });
-
+describe('章节标题注音（PinyinText baseTextStyle 扩展）', () => {
   test('PinyinText 提供 baseTextStyle 扩展（标题等非正文场景）', () => {
     expect(pinyinSource).toMatch(/baseTextStyle\?: TextStyle;/);
     // 注音汉字格 / 非汉字 run 两路合并

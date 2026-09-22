@@ -37,6 +37,16 @@ interface ReaderPersist {
      * 字体/注音设置变更后为近似值；缺失（旧数据/翻页模式）= 不精修。
      */
     offsetRatio?: number;
+    /**
+     * 章内字符偏移（码点，0 起；跨段累计，不含标题行）—— legado `durChapterPos`
+     * 本地化后的**位置真值**。
+     *
+     * 为什么升级：段级恢复只能落到段首，短章 / 大段书（单章单段）的段内位置会
+     * 退化为章首；比例恢复是像素近似值，字号 / 注音变更后即失真。字符偏移是
+     * 内容坐标，与排版无关 —— 任何字号 / 行距 / 注音模式下都能精确回到同一处。
+     * 旧持久化数据无该字段（undefined）⇒ 回退 `segmentId` 段级续读。
+     */
+    charOffset?: number;
   } | null;
   /**
    * 每本书最近一次打开/阅读的时间戳（bookId -> epoch ms）。
@@ -59,8 +69,14 @@ interface ReaderState extends ReaderPersist {
   /** 注音缓存：segmentId -> PinyinAnnotation[] */
   annotationCache: Record<string, PinyinAnnotation[]>;
 
-  /** 打开章节（可指定初始段落与章内滚动比例） */
-  openChapter: (bookId: string, chapterId: string, segmentId?: string, offsetRatio?: number) => void;
+  /** 打开章节（可指定初始段落、章内滚动比例与章内字符偏移） */
+  openChapter: (
+    bookId: string,
+    chapterId: string,
+    segmentId?: string,
+    offsetRatio?: number,
+    charOffset?: number,
+  ) => void;
   /** 切换当前段落 */
   setSegment: (segmentId: string) => void;
   /**
@@ -68,7 +84,7 @@ interface ReaderState extends ReaderPersist {
    * 同时同步 lastRead.segmentId 供续读恢复；滚动模式附带章内滚动比例
    * （offsetRatio，段内精确续读），翻页模式不传（清除陈旧比例）。
    */
-  recordProgress: (segmentId: string, offsetRatio?: number) => void;
+  recordProgress: (segmentId: string, offsetRatio?: number, charOffset?: number) => void;
   /** 对某段文本执行注音并缓存（按设置里的注音模式） */
   annotateSegment: (segmentId: string, text: string) => void;
   /** 读取某段缓存注音 */
@@ -100,13 +116,19 @@ export const useReaderStore = create<ReaderState>()(
       segmentId: null,
       annotationCache: {},
 
-      openChapter: (bookId, chapterId, segmentId, offsetRatio) => {
+      openChapter: (bookId, chapterId, segmentId, offsetRatio, charOffset) => {
         const nextSegmentId = segmentId ?? null;
         const state = get();
         // 幂等：位置未变化时不写入，避免 lastRead 生成新引用、
         // 触发阅读记录订阅方级联重渲染
         const nextRatio =
           nextSegmentId && typeof offsetRatio === 'number' ? offsetRatio : undefined;
+        // 字符偏移是位置真值（legado `durChapterPos` 本地化）：非负有限值即接受，
+        // `0` 是合法值（章首），不得被真值判断吃掉
+        const nextCharOffset =
+          typeof charOffset === 'number' && Number.isFinite(charOffset) && charOffset >= 0
+            ? Math.floor(charOffset)
+            : undefined;
         if (
           state.bookId === bookId &&
           state.chapterId === chapterId &&
@@ -115,7 +137,8 @@ export const useReaderStore = create<ReaderState>()(
           state.lastRead.bookId === bookId &&
           state.lastRead.chapterId === chapterId &&
           state.lastRead.segmentId === (nextSegmentId ?? undefined) &&
-          state.lastRead.offsetRatio === nextRatio
+          state.lastRead.offsetRatio === nextRatio &&
+          state.lastRead.charOffset === nextCharOffset
         ) {
           return;
         }
@@ -123,16 +146,18 @@ export const useReaderStore = create<ReaderState>()(
           bookId,
           chapterId,
           segmentId: nextSegmentId,
-          // 段落级进度：携带 segmentId 时持久化；未携带则不写入该字段
-          // （与旧版持久化数据形态一致，续读语义为回章首）
-          lastRead: nextSegmentId
-            ? {
-                bookId,
-                chapterId,
-                segmentId: nextSegmentId,
-                ...(nextRatio !== undefined ? { offsetRatio: nextRatio } : null),
-              }
-            : { bookId, chapterId },
+          // 进度持久化口径：段级或字符级任一在场即写（旧数据只有段级，
+          // 新版两者同写以便双向兼容）；皆无则只留章级（续读语义 = 回章首）
+          lastRead:
+            nextSegmentId || nextCharOffset !== undefined
+              ? {
+                  bookId,
+                  chapterId,
+                  ...(nextSegmentId ? { segmentId: nextSegmentId } : null),
+                  ...(nextRatio !== undefined ? { offsetRatio: nextRatio } : null),
+                  ...(nextCharOffset !== undefined ? { charOffset: nextCharOffset } : null),
+                }
+              : { bookId, chapterId },
           // 最近阅读记录：书架「最近」分类按此时间倒序。写入时同步裁剪，
           // 防止长期使用无限膨胀（旧记录时间戳不变，按时间淘汰最旧的）
           recentBooks: (() => {
@@ -157,23 +182,35 @@ export const useReaderStore = create<ReaderState>()(
 
       setSegment: (segmentId) => set({ segmentId }),
 
-      recordProgress: (segmentId, offsetRatio) => {
+      recordProgress: (segmentId, offsetRatio, charOffset) => {
         const state = get();
         const last = state.lastRead;
         // 仅当 lastRead 属于当前阅读的书 + 章时才同步段落（跨章由 openChapter 负责）；
-        // 段落与比例均未变化时保持 lastRead 原引用（幂等，防高频滚动产生冗余通知）
+        // 段落 / 比例 / 字符偏移均未变化时保持 lastRead 原引用（幂等，防高频滚动产生
+        // 冗余通知）
         const nextRatio = typeof offsetRatio === 'number' ? offsetRatio : undefined;
+        const nextCharOffset =
+          typeof charOffset === 'number' && Number.isFinite(charOffset) && charOffset >= 0
+            ? Math.floor(charOffset)
+            : undefined;
         let nextLastRead = last;
         if (
           last !== null &&
           last.bookId === state.bookId &&
           last.chapterId === state.chapterId
         ) {
-          if (last.segmentId !== segmentId || last.offsetRatio !== nextRatio) {
+          if (
+            last.segmentId !== segmentId ||
+            last.offsetRatio !== nextRatio ||
+            last.charOffset !== nextCharOffset
+          ) {
             nextLastRead = {
               ...last,
               segmentId,
               ...(nextRatio !== undefined ? { offsetRatio: nextRatio } : { offsetRatio: undefined }),
+              ...(nextCharOffset !== undefined
+                ? { charOffset: nextCharOffset }
+                : { charOffset: undefined }),
             };
           }
         }

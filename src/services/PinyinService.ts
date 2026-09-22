@@ -27,6 +27,11 @@ import {
   pickContextHit,
   type HanSequence,
 } from '@/utils/canonContext';
+import {
+  getNativePhraseMatcher,
+  nativePhraseLoaded,
+  type NativePhraseMatcher,
+} from '@/services/phraseMatcherNative';
 
 /**
  * 外部读音提供者接口（DictEngine 实现）：
@@ -195,9 +200,9 @@ export function resetPhrasePinyinForTests(): void {
   phraseReadyPromise = null;
 }
 
-/** 词组层是否已完成载入（Map 已构建且非空） */
+/** 词组层是否已完成载入（原生就绪 或 JS Map 已构建且非空） */
 export function isPhrasePinyinDataLoaded(): boolean {
-  return phraseMapCache !== null && phraseMapCache.size > 0;
+  return nativePhraseLoaded() || (phraseMapCache !== null && phraseMapCache.size > 0);
 }
 
 /** 默认载入器：Android assets 直读；iOS 预留 MainBundlePath 兜底（未打包则降级） */
@@ -271,7 +276,11 @@ export function ensurePhrasePinyinData(): Promise<boolean> {
   if (phraseSyncProvider) {
     return Promise.resolve(getPhraseMap().size > 0);
   }
-  if (!phraseReadyPromise) {
+  const native = getNativePhraseMatcher();
+  if (native && !phraseReadyPromise) {
+    // 方案 3d 原生支：词组装载在原生后台线程完成，JS 仅轮询就绪（不建 JS Map）
+    phraseReadyPromise = waitForNativeLoaded(native);
+  } else if (!phraseReadyPromise) {
     const loader = phraseAsyncLoader ?? defaultPhraseAssetLoader;
     phraseReadyPromise = (async () => {
       const t0 = Date.now();
@@ -302,6 +311,30 @@ export function ensurePhrasePinyinData(): Promise<boolean> {
   return phraseReadyPromise;
 }
 
+/**
+ * 方案 3d 原生支：轮询原生 isLoaded() 直至就绪（原生后台线程装载不阻塞 JS）。
+ * 上限 60s（1200 × 50ms）；超时 resolve(false) 表示词组层缺席（等价原降级）。
+ */
+function waitForNativeLoaded(native: NativePhraseMatcher): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let ticks = 0;
+    const maxTicks = 1200;
+    const tick = () => {
+      if (native.isLoaded()) {
+        resolve(true);
+        return;
+      }
+      ticks += 1;
+      if (ticks >= maxTicks) {
+        resolve(false);
+        return;
+      }
+      setTimeout(tick, 50);
+    };
+    tick();
+  });
+}
+
 function getPhraseMap(): Map<string, string> {
   if (!phraseMapCache) {
     if (phraseSyncProvider) {
@@ -324,6 +357,12 @@ function getPhraseMap(): Map<string, string> {
  * @returns Map<原文码点下标, 读音>
  */
 export function computePhraseOverlay(logicChars: readonly string[]): Map<number, string> {
+  // 方案 3d：原生词组层就绪时，整段正向最大匹配下沉原生（JS 线程零参与，
+  // 不破 annotate 调用点 / 166 条冻结断言）。未就绪或测试环境回退原 JS 支。
+  const native = getNativePhraseMatcher();
+  if (native && native.isLoaded()) {
+    return buildOverlayFromNative(native, logicChars);
+  }
   const map = getPhraseMap();
   const overlay = new Map<number, string>();
   let i = 0;
@@ -351,6 +390,28 @@ export function computePhraseOverlay(logicChars: readonly string[]): Map<number,
     }
     if (!hit) {
       i += 1;
+    }
+  }
+  return overlay;
+}
+
+/**
+ * 原生支：把原生 match 返回的 [[idx, syllable], …] 还原为 Map<码点下标, 读音>。
+ * 与原 JS 算法输出结构完全一致（annotate 按下标消费，契约不变）。
+ */
+function buildOverlayFromNative(
+  native: NativePhraseMatcher,
+  logicChars: readonly string[],
+): Map<number, string> {
+  const pairs = native.match(logicChars.join(''));
+  const overlay = new Map<number, string>();
+  for (const p of pairs) {
+    if (
+      Array.isArray(p) &&
+      typeof p[0] === 'number' &&
+      typeof p[1] === 'string'
+    ) {
+      overlay.set(p[0], p[1]);
     }
   }
   return overlay;

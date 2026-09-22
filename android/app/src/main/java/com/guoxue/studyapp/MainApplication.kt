@@ -11,6 +11,7 @@ import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.soloader.SoLoader
 import com.guoxue.studyapp.offlinetranslation.OfflineTranslationPackage
+import com.guoxue.studyapp.phrase.PhraseMatcherPackage
 import com.guoxue.studyapp.tts.TtsPackage
 
 class MainApplication : Application(), ReactApplication {
@@ -22,6 +23,7 @@ class MainApplication : Application(), ReactApplication {
               // Packages that cannot be autolinked yet can be added manually here, for example:
               // add(MyReactNativePackage())
               add(OfflineTranslationPackage())
+              add(PhraseMatcherPackage())
               add(TtsPackage())
             }
 

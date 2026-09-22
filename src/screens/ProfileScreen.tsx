@@ -23,6 +23,10 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { PinyinMode } from '@/types';
 import type { T04StackParamList } from '@/screens/types';
 import { useSettingsStore } from '@/store/useSettingsStore';
+import {
+  READER_PERF_TIER_OPTIONS,
+  type ReaderPerfTier,
+} from '@/store/useSettingsStore';
 import { TRANSLATION_PROVIDERS } from '@/types/translation';
 import { useAchievementStore } from '@/store/useAchievementStore';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
@@ -151,6 +155,19 @@ function SectionTitle({ title, colors }: { title: string; colors: ReturnType<typ
   return <Text style={[styles.sectionTitle, { color: colors.primary }]}>{title}</Text>;
 }
 
+/**
+ * 【D5】性能档位的设置页选项标签（顺序沿用 store 的
+ * READER_PERF_TIER_OPTIONS：自动 → 低 → 中 → 高）。
+ * 写入 setReaderPerfTier 即调 DeviceTierService.setOverride，档位随
+ * 装配/缓存/注音等全部预算参数切换；'auto' 恢复设备探测。
+ */
+const PERF_TIER_LABELS: Readonly<Record<ReaderPerfTier, string>> = {
+  auto: '自动',
+  low: '低',
+  mid: '中',
+  high: '高',
+};
+
 export default function ProfileScreen({ navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const theme = useSettingsStore((s) => s.theme);
@@ -167,6 +184,9 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
   const setPinyinMode = useSettingsStore((s) => s.setPinyinMode);
   const setConversionMode = useSettingsStore((s) => s.setConversionMode);
   const setTranslation = useSettingsStore((s) => s.setTranslation);
+  // 【D5】性能档位（r38 T01）：设置页最小入口；'auto' = 设备自动探测
+  const readerPerfTier = useSettingsStore((s) => s.readerPerfTier);
+  const setReaderPerfTier = useSettingsStore((s) => s.setReaderPerfTier);
 
   /** 翻译设置弹层 */
   const [translationModal, setTranslationModal] = useState(false);
@@ -436,6 +456,19 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
             ]}
             value={theme}
             onChange={(v) => setTheme(v)}
+            colors={colors}
+          />
+        </View>
+        {/* 【D5】性能档位：装配/缓存/注音预算的手动覆盖（默认自动探测） */}
+        <View style={[styles.settingRow, { borderTopColor: colors.border }]}>
+          <Text style={[styles.settingLabel, { color: colors.text }]}>性能档位</Text>
+          <SegmentedRow
+            options={READER_PERF_TIER_OPTIONS.map((t) => ({
+              value: t,
+              label: PERF_TIER_LABELS[t],
+            }))}
+            value={readerPerfTier}
+            onChange={(v) => setReaderPerfTier(v)}
             colors={colors}
           />
         </View>

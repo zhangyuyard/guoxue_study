@@ -158,7 +158,17 @@ const CREATE_FTS = `
   );
 `;
 
-/** 初始化数据库：建表 + 全文索引 */
+/**
+ * 初始化数据库：基础表（highlights / notes / bookmarks / recitation_progress）
+ * + 旧库迁移 + FTS5 虚拟表。
+ *
+ * 【#14】基础表与 FTS 建表**解耦**：FTS5 是编译期特性（未定义
+ * SQLITE_ENABLE_FTS5 时 SQLite 内核不含该模块，见 android/gradle.properties），
+ * 一旦把它和基础 DDL 串在同一个 try 里，`CREATE VIRTUAL TABLE … USING fts5`
+ * 抛出的 `no such module: fts5` 会把整个 initDatabase 判为失败——后果是
+ * `restoreHighlights` 等「init 失败即早退」的路径被连坐（全文检索缺失却导致
+ * 划线/笔记备份恢复整体不可用）。故基础表失败才返回失败，FTS 失败只降级。
+ */
 export function initDatabase(): ServiceResult<boolean> {
   const instance = getDb();
   if (!instance) {
@@ -166,31 +176,121 @@ export function initDatabase(): ServiceResult<boolean> {
   }
   try {
     // 执行失败会抛出异常，由 catch 统一捕获
-    for (const sql of [CREATE_HIGHLIGHTS, CREATE_NOTES, CREATE_BOOKMARKS, CREATE_RECITATION, CREATE_FTS]) {
+    for (const sql of [
+      CREATE_HIGHLIGHTS,
+      CREATE_NOTES,
+      CREATE_BOOKMARKS,
+      CREATE_RECITATION,
+      // 【#16】FTS 行身份映射（真表：FTS5 虚拟表加不上唯一索引，只能外挂映射）
+      CREATE_SEGMENT_FTS_ROWID,
+    ]) {
       instance.execute(sql);
     }
-    // 旧库迁移（P1-12）：bookmarks 补 note 列；列已存在时 ALTER 会抛错，忽略即可
+  } catch (e) {
+    return { success: false, error: `建表失败：${(e as Error).message}` };
+  }
+  // 旧库迁移（P1-12）：bookmarks 补 note 列；列已存在时 ALTER 会抛错，忽略即可
+  try {
+    instance.execute('ALTER TABLE bookmarks ADD COLUMN note TEXT');
+  } catch {
+    // 列已存在：静默跳过
+  }
+  // 旧库迁移（P2-07 间隔复习）：recitation_progress 补 completed_at /
+  // review_level / next_due_at 三列；列已存在时静默跳过
+  for (const sql of [
+    'ALTER TABLE recitation_progress ADD COLUMN completed_at TEXT',
+    'ALTER TABLE recitation_progress ADD COLUMN review_level INTEGER',
+    'ALTER TABLE recitation_progress ADD COLUMN next_due_at TEXT',
+  ]) {
     try {
-      instance.execute('ALTER TABLE bookmarks ADD COLUMN note TEXT');
+      instance.execute(sql);
     } catch {
       // 列已存在：静默跳过
     }
-    // 旧库迁移（P2-07 间隔复习）：recitation_progress 补 completed_at /
-    // review_level / next_due_at 三列；列已存在时静默跳过
-    for (const sql of [
-      'ALTER TABLE recitation_progress ADD COLUMN completed_at TEXT',
-      'ALTER TABLE recitation_progress ADD COLUMN review_level INTEGER',
-      'ALTER TABLE recitation_progress ADD COLUMN next_due_at TEXT',
-    ]) {
-      try {
-        instance.execute(sql);
-      } catch {
-        // 列已存在：静默跳过
-      }
+  }
+  // FTS 虚拟表：与基础表解耦（失败只降级，不影响基础表初始化结果）
+  ensureFtsTable(instance);
+  return { success: true, data: true };
+}
+
+// ---------- FTS5 可用性（#14：负缓存 + 一次性降级日志）----------
+
+/** FTS5 虚拟表可用性三态：unknown（未探测）/ ready（已就绪）/ unavailable（负缓存） */
+type FtsAvailability = 'unknown' | 'ready' | 'unavailable';
+
+/**
+ * FTS 可用性负缓存。
+ * 「已就绪」与「不可用」都要缓存：DDL 幂等，成功一次后没必要重跑；失败
+ * （SQLite 未编译 FTS5 / 建表异常）同样是稳定事实，若只缓存成功态，则每个
+ * 装配完成的章都会重跑一遍 initDatabase（4 条 CREATE IF NOT EXISTS + 4 条
+ * 必然抛错的旧库迁移 ALTER，异常构造本身就有开销），真机表现为每章一条
+ * `[PERF][fts] per-chapter skip` 刷屏且白烧 JS 线程。
+ */
+let ftsAvailability: FtsAvailability = 'unknown';
+
+/**
+ * 读取当前 FTS 可用性。
+ * 必须经函数调用读取：模块级 `let` 在同一函数体内被 TS 控制流收窄后，即使
+ * 中间调用了会改写它的函数（initDatabase → ensureFtsTable），收窄也不会重置，
+ * 直接比较会报 TS2367「无重叠类型」。
+ */
+function currentFtsAvailability(): FtsAvailability {
+  return ftsAvailability;
+}
+
+/** 降级日志是否已打过（一次性）：FTS 不可用是稳定事实，不做日志节流会刷屏 */
+let ftsDegradeLogged = false;
+
+/** FTS 不可用时的统一错误串（负缓存命中时立即返回，不重跑 initDatabase） */
+const FTS_UNAVAILABLE_ERROR =
+  'FTS5 不可用：segments_fts 未建立（SQLite 未编译 SQLITE_ENABLE_FTS5），全文检索降级';
+
+/**
+ * 建立 FTS 虚拟表（initDatabase 内的唯一 FTS 探测点）。
+ *  - ready       → 直接 true，零 SQL；
+ *  - unavailable → 直接 false，零 SQL（负缓存核心：绝不重试建表）；
+ *  - unknown     → 只尝试一次 CREATE VIRTUAL TABLE：成功置 ready；失败置
+ *                  unavailable，并**只打一次**降级日志（保留成功路径静默）。
+ * @returns 本进程内 segments_fts 是否可用
+ */
+function ensureFtsTable(instance: DB): boolean {
+  if (ftsAvailability === 'ready') {
+    return true;
+  }
+  if (ftsAvailability === 'unavailable') {
+    return false;
+  }
+  try {
+    instance.execute(CREATE_FTS);
+    ftsAvailability = 'ready';
+    // 【#16】建表就绪后立即做一次老库迁移（播种 rowid 映射 + 清算遗留重复行）。
+    // 放在这里的原因：unknown→ready 每个进程只发生一次，且**先于本进程任何 FTS
+    // 写入**（所有写入路径都经 initDatabase/ensureFtsSchema 进来），所以老段在
+    // 首次被重写前一定已经有映射。
+    // 单独 try：迁移失败绝不能让 FTS 被误判为 unavailable（后果只是「老段首次
+    // 重写退化为追加一行」+ 遗留重复行仍在，由整书写入的替换语义清算）。
+    try {
+      migrateLegacyFtsRows(instance);
+    } catch {
+      // 静默：不影响 FTS 可用性判定
     }
-    return { success: true, data: true };
+    return true;
   } catch (e) {
-    return { success: false, error: `建表失败：${(e as Error).message}` };
+    ftsAvailability = 'unavailable';
+    if (!ftsDegradeLogged) {
+      ftsDegradeLogged = true;
+      const reason = (e as Error).message;
+      // 只打一次：FTS 不可用是稳定事实；原因里带上**可操作**的修复方向，
+      // 避免真机日志只有 `no such module: fts5` 而无从下手。
+      console.warn(
+        `[StorageService] FTS5 不可用，全文检索降级（搜索无结果；阅读/划线/笔记不受影响）：${reason}${
+          /no such module/i.test(reason)
+            ? '；原因：SQLite 未编译 FTS5（需在 android/gradle.properties 注入 quickSqliteFlags="-DSQLITE_ENABLE_FTS5=1" 后重新构建）'
+            : ''
+        }`,
+      );
+    }
+    return false;
   }
 }
 
@@ -206,10 +306,82 @@ export interface FtsRow {
   text: string;
 }
 
-/** FTS 单行插入语句（列序与 ensureFtsIndex 历史实现保持一致） */
+/**
+ * 【#16】FTS 行的**稳定身份**：段 → rowid 映射表（真表，`segment_id` 主键）。
+ *
+ * 为什么需要它（#14 用真实 SQLite 实测登记的 W1）：`segments_fts` 是 FTS5 虚拟表，
+ * **没有主键、也加不上唯一索引**（实测 `CREATE UNIQUE INDEX … ` →
+ * `virtual tables may not be indexed`），而 `INSERT OR REPLACE` 的冲突子句只在
+ * 主键/唯一约束冲突时触发——不显式给 rowid 时每次插入都自动分配新 rowid、
+ * **永不冲突 ⇒ 退化成普通 INSERT**。于是同一段被写两次就留两行：搜索对同一段
+ * 重复返回、索引体积随时间膨胀（重试/补全/重水合/两条装配路径都会重写同一章）。
+ *
+ * 方案选型（全部为 better-sqlite3 真实 SQLite 实测，勿凭直觉改动）：
+ *  - ✅ **本方案**：映射表记住每段的 rowid ⇒ 已知段用 `INSERT OR REPLACE` 覆盖
+ *    **原位**、未知段以 `rowid=NULL` 追加（自动 rowid）并登记。效果：
+ *    ① 真幂等（同段恒 1 行）；② **检索顺序逐字不变**（`ORDER BY rowid ASC` =
+ *    首次写入序 = 书序/章序，与内存回退路径同序）；③ 身份精确、**零哈希碰撞**；
+ *    ④ 实测代价 ≈ 0（2 万行表上 200 行写入：6ms，与纯追加 6ms 相同——批量点查
+ *    走 `segment_id` 主键，非扫描）。
+ *  - ❌ 哈希 docid（`segment_id → 52 位 hash`）：写明 rowid 也幂等，但被打散的
+ *    rowid 会让 `ORDER BY rowid ASC` 从「书序」变成「哈希序」——检索结果顺序漂移，
+ *    与内存回退路径不再同序（真实 FTS5 契约测试当场抓到这个回归）。
+ *  - ❌ 两段式 `DELETE … WHERE segment_id = ?` + INSERT：`segment_id` 是 UNINDEXED
+ *    列 ⇒ 每行一次**全表扫描**（20 万行实测 20ms/次），章级路径每章都付一次 =
+ *    新的卡顿源。
+ *  - ❌ 章级 `DELETE … WHERE book_id=? AND chapter_id=?` 清理：同上，全表扫描。
+ *
+ * 代价与残留（如实登记）：映射表约 40 字节/段（全库量级的一行文本量级）；
+ * **修复前已产生的重复行/幽灵行**不由此处清理（按章清理要全表扫描，见上）；
+ * 改由「整书写入 = 替换」在下次整书重索引时清算
+ *（见 `upsertFtsForBook` / `upsertFtsForBookChunked`）。
+ *
+ * ---------- 【#16 二轮】不变量：「映射里的 rid 必然指向现存行」----------
+ *
+ * 只做「查不到就 NULL 追加」是不够的：**FTS5 的自动 rowid 会复用被释放的 rowid**
+ * （实测 max(rowid)+1 语义：删掉最后 3 行后再插入，拿到的是 1 而不是 4）。
+ * 于是「映射里残留的 rid」会与新段自动分配的 rid **撞车**，此时老段重写会以
+ * 「记忆 rid」把**别的书的行顶掉**——真实 SQLite 复现：
+ *     bookA 删（rowid 1,2 释放，映射残留）→ bookB 写入（自动拿到 rowid 1,2）
+ *     → bookA 重写（用记忆 rid 1）⇒ bookB-s1 那一行**消失**（静默丢段）。
+ * 故凡「删行」必须同时删映射，维持不变量：**映射 ⊆ 现存行**。据此：
+ *  - 新段自动分配的 rid = max(现存 rowid)+1 > 一切映射中的 rid ⇒ 永不相撞；
+ *  - 删行处的清映射口径按「能否被中断」分三类（各有测试锁死）：
+ *    · 章级增量写入：**不删行** ⇒ 复用旧 rowid ⇒ 书序/章序稳定（检索顺序契约见
+ *      `fts5RealSqliteSemantics.test.ts` 的 `ORDER BY rowid ASC` 断言）；
+ *    · 整书**同步**重写：清「库中现存但本次不再写入」的差集（`clearStaleFtsRidMap`，
+ *      一次全表扫描 ≈15ms）；仍在写入的段保留原 rowid ⇒ 同样覆盖原位；
+ *    · 整书**可暂停**重写：清该书**全部**段的映射（PK 点删，≈0.3ms/千段）——
+ *      一旦中途中断，保留「未写入段」的映射会留下无行映射（正是撞车条件）；
+ *      代价是全书 rowid 重新分配，对「整本重建」语义可接受；
+ *    · 无法枚举段 id 的路径（删书 / 死索引自愈）：子查询清（一次全表扫描
+ *      ≈15ms，低频路径可接受）。
+ *
+ * 另外：老库（#16 之前写入的行）没有映射，若不补齐，老段首次重写会「查不到 rid
+ * ⇒ 以 NULL 追加」⇒ 既留重复行，又让读侧去重（`ORDER BY rowid ASC` 保留首行）
+ * 返回**更新前的旧文本**；而且遗留重复行本身也不会消失。故进程内首次建表就绪时
+ * 做一次迁移（`migrateLegacyFtsRows`：播种 `MIN(rowid)` + 清算重复行；实测
+ * 20 万行播种 60ms、去重扫描 15ms，一次性）——迁移后
+ * `COUNT(*) - COUNT(DISTINCT segment_id) = 0`（#16 真机自查口径）。
+ */
+const CREATE_SEGMENT_FTS_ROWID = `
+  CREATE TABLE IF NOT EXISTS segment_fts_rowid (
+    segment_id TEXT PRIMARY KEY NOT NULL,
+    rid INTEGER NOT NULL
+  );
+`;
+
+/** 映射点查的批量行数（避免占位符超限；主键点查，非扫描） */
+const FTS_ROWID_LOOKUP_CHUNK = 200;
+
+/**
+ * FTS 单行插入语句（业务列序与 ensureFtsIndex 历史实现保持一致）。
+ * 【#16】首列为**显式 rowid**：已知段传映射记住的原 rowid（覆盖原位），
+ * 新段传 `null`（实测 FTS5 接受 NULL rowid ⇒ 自动分配并追加到末尾）。
+ */
 const FTS_INSERT_SQL = `INSERT OR REPLACE INTO segments_fts
-  (segment_id, book_id, chapter_id, book_title, chapter_title, text)
-  VALUES (?, ?, ?, ?, ?, ?)`;
+  (rowid, segment_id, book_id, chapter_id, book_title, chapter_title, text)
+  VALUES (?, ?, ?, ?, ?, ?, ?)`;
 
 /**
  * 将一本书的章/段展开为 FTS 待插行（纯函数，便于单测锁定字段映射）。
@@ -233,15 +405,42 @@ export function buildFtsRows(book: Book): FtsRow[] {
   }
   return rows;
 }
-
 /**
- * 将待插行同步逐条写入 segments_fts。
- * 导入书可能很大（数千段），保持同步逐条插入即可——
- * 与原 ensureFtsIndex 全量构建同级代价，不引入异步复杂度。
+ * 将待插行同步逐条写入 segments_fts（**【#16】真幂等 upsert**）。
+ *
+ * 幂等由「映射表记住的稳定 rowid + `INSERT OR REPLACE`」提供（见
+ * `CREATE_SEGMENT_FTS_ROWID` 注释）：同段重写覆盖**原位**（检索顺序也因此稳定），
+ * 新段追加。导入书可能很大（数千段），保持同步逐条插入——与旧实现同级代价
+ * （实测 200 行 6ms，与纯追加同），不引入异步复杂度。
  */
 function insertFtsRows(instance: DB, rows: FtsRow[]): void {
+  if (rows.length === 0) {
+    return;
+  }
+  // ① 批量取已有 rowid：`IN` + 主键点查（每 200 个一条语句，避免占位符超限）
+  const ridOf = new Map<string, number>();
+  for (let s = 0; s < rows.length; s += FTS_ROWID_LOOKUP_CHUNK) {
+    const ids = rows
+      .slice(s, s + FTS_ROWID_LOOKUP_CHUNK)
+      .map((r) => r.segmentId);
+    const placeholders = ids.map(() => '?').join(', ');
+    const found = selectRows(
+      instance,
+      `SELECT segment_id, rid FROM segment_fts_rowid WHERE segment_id IN (${placeholders})`,
+      ids,
+    );
+    for (const row of found) {
+      const rid = Number(row.rid);
+      if (Number.isFinite(rid) && rid > 0) {
+        ridOf.set(String(row.segment_id), rid);
+      }
+    }
+  }
+  // ② 逐行写入：已知段覆盖原位；新段以 NULL rowid 追加并立刻登记映射
   for (const r of rows) {
+    const known = ridOf.get(r.segmentId);
     instance.execute(FTS_INSERT_SQL, [
+      known ?? null,
       r.segmentId,
       r.bookId,
       r.chapterId,
@@ -249,7 +448,148 @@ function insertFtsRows(instance: DB, rows: FtsRow[]): void {
       r.chapterTitle,
       r.text,
     ]);
+    if (known !== undefined) {
+      continue;
+    }
+    const last = selectRows(instance, 'SELECT last_insert_rowid() AS rid');
+    const rid = last.length > 0 ? Number(last[0].rid ?? 0) : 0;
+    if (Number.isFinite(rid) && rid > 0) {
+      instance.execute(
+        'INSERT OR REPLACE INTO segment_fts_rowid (segment_id, rid) VALUES (?, ?)',
+        [r.segmentId, rid],
+      );
+      ridOf.set(r.segmentId, rid); // 同批重复段：后续走覆盖分支
+    }
   }
+}
+
+/**
+ * 【#16】清除若干段的 rowid 映射（**PK 点删，无扫描**；实测 1000 段 0.3ms）。
+ * 调用契约：**必须在删除对应 FTS 行之前**调用——先解除映射，再删行，
+ * 中间不存在「映射指向不存在的行」的窗口（不变量见 `CREATE_SEGMENT_FTS_ROWID`）。
+ */
+function clearFtsRidMap(instance: DB, segmentIds: string[]): void {
+  for (const segmentId of segmentIds) {
+    instance.execute('DELETE FROM segment_fts_rowid WHERE segment_id = ?', [
+      segmentId,
+    ]);
+  }
+}
+
+/**
+ * 【#16】清除**某书**全部段的 rowid 映射（无法枚举段 id 的路径使用）。
+ * 代价：子查询要走 `segments_fts` 一次全表扫描（`book_id` 是 UNINDEXED 列，
+ * 20 万行实测 ≈15ms），故只用于「删书」「死索引自愈」这类低频路径。
+ */
+function clearFtsRidMapForBook(instance: DB, bookId: string): void {
+  instance.execute(
+    `DELETE FROM segment_fts_rowid WHERE segment_id IN (
+       SELECT segment_id FROM segments_fts WHERE book_id = ?
+     )`,
+    [bookId],
+  );
+}
+
+/**
+ * 【#16】老库一次性迁移（触发条件：**映射为空但库中已有行**；每个进程最多一次）。
+ *
+ * ① **播种** `segment_id → rowid`：取 `MIN(rowid)`——那正是检索
+ *    （`ORDER BY rowid ASC` + 读侧去重保留首行）下**用户实际看到**的那一行；
+ *    若取到更高的重复行，老段重写就会去覆盖一行用户看不见的行，可见那行仍是旧文本。
+ * ② **清算遗留重复行**：#16 之前 `INSERT OR REPLACE` 在真实 FTS5 上退化为普通
+ *    INSERT，同段多行是常态产物。此处按映射删掉「非最小 rowid」的同段行，使
+ *    **`COUNT(*) - COUNT(DISTINCT segment_id) = 0`**（#16 的真机自查口径；
+ *    没有映射时无法判定「该保留哪一行」，所以必须与 ① 同时做）。
+ *    按 `rowid` 删（PK 点查），不做 `WHERE segment_id = ?`（UNINDEXED 全表扫描）。
+ *
+ * 代价（better-sqlite3 实测，20 万行）：探测 O(1) · 播种 60ms · 去重计数扫描
+ * ≈15ms + 每删一行 ~1.3µs（半数重复的极端库存 100k 重复行也只 148ms）。
+ * 这是**一次性**冷启动成本，与 FTS 冷启动重建同阶段；故打一行 `[PERF][fts]`
+ * 供真机核对（含本次清掉的重复行数——正是修复前缺陷的真实规模）。
+ *  - 映射非空 ⇒ 已迁移过（或库由新代码写入）⇒ 直接返回（只付 O(1) 探测）；
+ *  - 映射空 + 库中无行 ⇒ 全新安装 ⇒ 直接返回（不产生多余语句）。
+ */
+function migrateLegacyFtsRows(instance: DB): void {
+  if (
+    selectRows(instance, 'SELECT 1 AS hit FROM segment_fts_rowid LIMIT 1')
+      .length > 0
+  ) {
+    return;
+  }
+  if (selectRows(instance, 'SELECT 1 AS hit FROM segments_fts LIMIT 1').length === 0) {
+    return;
+  }
+  const startedAt = Date.now();
+  instance.execute(
+    `INSERT OR REPLACE INTO segment_fts_rowid (segment_id, rid)
+       SELECT segment_id, MIN(rowid) FROM segments_fts GROUP BY segment_id`,
+  );
+  const seededRows = selectRows(
+    instance,
+    'SELECT COUNT(*) AS c FROM segment_fts_rowid',
+  );
+  const seeded = seededRows.length > 0 ? Number(seededRows[0].c ?? 0) : 0;
+
+  const dupeRows = selectRows(
+    instance,
+    'SELECT COUNT(*) - COUNT(DISTINCT segment_id) AS d FROM segments_fts',
+  );
+  const dupes = dupeRows.length > 0 ? Number(dupeRows[0].d ?? 0) : 0;
+  if (dupes > 0) {
+    // 同段多行：映射那一行（MIN(rowid)）留下，其余删掉
+    instance.execute(
+      `DELETE FROM segments_fts WHERE rowid IN (
+         SELECT f.rowid FROM segments_fts f
+         JOIN segment_fts_rowid m ON m.segment_id = f.segment_id
+         WHERE f.rowid <> m.rid
+       )`,
+    );
+  }
+  console.info(
+    `[PERF][fts] migrate-legacy-fts rows=${seeded} dupes=${dupes} ms=${Date.now() - startedAt}`,
+  );
+}
+
+/**
+ * 【#16】整书**同步**重写前的映射整理：只解除「库中现存、但本次不再写入」的段。
+ *
+ * 为什么不能只清「本次要写入的段」（那会丢原位）：同段重写要覆盖**原位**才能让
+ * 检索顺序（`ORDER BY rowid ASC` = 书序/章序）稳定；只清差集则仍在写入的段保留
+ * 原 rowid，同时不再存在的段不留下孤儿映射。
+ * 代价：一次 `segments_fts` 全表扫描（`book_id` 是 UNINDEXED 列，20 万行实测
+ * ≈15ms；本函数只在整书级路径调用，低频）。
+ * 只用于**同步**路径（不可中断，不存在「清了映射却没写成行」的窗口）；
+ * 可暂停路径见 `upsertFtsForBookChunked` 的相反取法。
+ */
+function clearStaleFtsRidMap(
+  instance: DB,
+  bookId: string,
+  incoming: Set<string>,
+): void {
+  const existing = selectRows(
+    instance,
+    'SELECT segment_id FROM segments_fts WHERE book_id = ?',
+    [bookId],
+  );
+  const stale = new Set<string>();
+  for (const row of existing) {
+    const id = String(row.segment_id);
+    if (!incoming.has(id)) {
+      stale.add(id);
+    }
+  }
+  clearFtsRidMap(instance, Array.from(stale));
+}
+
+/** 【#16】该书的全部段 id（整书路径清映射用；不构造行对象，代价 = 段数级循环） */
+function segmentIdsOfBook(book: Book): string[] {
+  const ids: string[] = [];
+  for (const chapter of book.chapters) {
+    for (const seg of chapter.segments) {
+      ids.push(seg.id);
+    }
+  }
+  return ids;
 }
 
 /**
@@ -295,6 +635,8 @@ export function ensureFtsIndex(): ServiceResult<boolean> {
     for (const row of selectRows(instance, 'SELECT DISTINCT book_id FROM segments_fts')) {
       const id = String(row.book_id);
       if (!libraryIds.has(id)) {
+        // 【#16】清行同时清映射（否则被释放的 rowid 会与新书自动分配的 rowid 撞车）
+        clearFtsRidMapForBook(instance, id);
         instance.execute('DELETE FROM segments_fts WHERE book_id = ?', [id]);
       }
     }
@@ -344,7 +686,27 @@ export function upsertFtsForBook(book: Book): ServiceResult<boolean> {
     if (!initRes.success) {
       return initRes;
     }
-    insertFtsRows(instance, buildFtsRows(book));
+    const ftsRows = buildFtsRows(book);
+    // 【#16】整书写入语义 = **替换**该书索引（先清该书行，再全量写入）。
+    // 必要性：旧写入路径在真实 FTS5 上退化为普通 INSERT（同段多行），加上
+    // 「游标混合 push」时代可能写入过不存在的段号（幽灵行），这些历史残留
+    // 只能靠一次整书重写清掉——而**章级路径做不到**（按章清理要 `WHERE
+    // book_id=? AND chapter_id=?` 全表扫描：20 万行实测 20ms/章，章级路径
+    // 每章都付一次 = 新的卡顿源，故明确不做）。
+    // 代价：一次全表扫描/书（20 万行实测 20ms），相对整书重写本身可忽略。
+    // 中断安全性：本函数是**同步**整本写入，不存在中途暂停；即使抛错，调用方
+    // （导入后写入 / 侧路重索引）下次会按 `isBookIndexedInFts` 等判据重跑。
+    // 同时**先解除「该书不再写入的段」的映射**（不变量：映射 ⊆ 现存行；否则被
+    // 释放的 rowid 会被新段自动分配拿走，老段重写时会静默顶掉别的书的行——实测
+    // 复现，见 `CREATE_SEGMENT_FTS_ROWID`）。仍在写入的段**保留原 rowid** ⇒ 覆盖
+    // 原位 ⇒ 检索顺序不变（`clearStaleFtsRidMap`）。
+    clearStaleFtsRidMap(
+      instance,
+      book.id,
+      new Set(ftsRows.map((r) => r.segmentId)),
+    );
+    instance.execute('DELETE FROM segments_fts WHERE book_id = ?', [book.id]);
+    insertFtsRows(instance, ftsRows);
     return { success: true, data: true };
   } catch (e) {
     return { success: false, error: `FTS 索引写入失败：${(e as Error).message}` };
@@ -382,6 +744,37 @@ function buildAndInsertChapterFts(
 }
 
 /**
+ * FTS 表结构就绪守卫（章级增量写入的热路径）。
+ * `initDatabase()` 每次调用都会执行 4 条 CREATE IF NOT EXISTS + 4 条必然
+ * 抛错的 ALTER（旧库迁移），被章级写入按章调用会引入无谓的异常构造开销；
+ * DDL 幂等，故**成功一次即置位跳过**。
+ *
+ * 【#14】失败也缓存（负缓存）：FTS5 未编译时 `CREATE VIRTUAL TABLE … USING
+ * fts5` 必然失败，且是稳定事实——只缓存成功态会让每个装配完成的章都重跑一遍
+ * initDatabase，并使 UserBookService 侧按章打印降级日志（真机刷屏）。
+ * 一旦判定不可用即**立即返回失败，绝不重跑 initDatabase**（零 SQL 零异常）。
+ */
+function ensureFtsSchema(): ServiceResult<boolean> {
+  if (ftsAvailability === 'ready') {
+    return { success: true, data: true };
+  }
+  if (ftsAvailability === 'unavailable') {
+    return { success: false, error: FTS_UNAVAILABLE_ERROR };
+  }
+  // unknown：仅此一次探测（initDatabase 内部经 ensureFtsTable 写回可用性）
+  const res = initDatabase();
+  if (!res.success) {
+    return res;
+  }
+  // 注意：必须经函数调用读取——否则 TS 控制流会把「探测过程中被写入的新状态」
+  // 收窄成死分支（TS2367）。探测成功且非 unavailable ⇒ 只能是 ready。
+  if (currentFtsAvailability() === 'unavailable') {
+    return { success: false, error: FTS_UNAVAILABLE_ERROR };
+  }
+  return { success: true, data: true };
+}
+
+/**
  * 分片异步版单书 FTS 索引写入（幂等 upsert，语义与 upsertFtsForBook 一致）。
  * 默认时间片驱动：逐章「构建行 + 插入」，每章完成检查耗时，超
  * FTS_TIME_BUDGET_MS 即让出 JS 线程（macrotask）；显式传入 opts.chunkChapters
@@ -409,6 +802,19 @@ export async function upsertFtsForBookChunked(
     if (!initRes.success) {
       return initRes;
     }
+    // 【#16】整书重写语义 = **替换**（先清该书行）——理由与中断安全性分析见
+    // `upsertFtsForBook` 同处注释。此处额外说明「可暂停」路径的后果：若在
+    // shouldPause 挂起期间被取消，本次只写了部分章 → 但调用方（填充完成 /
+    // 后台索引队列）以 `isBookFullyIndexedInFts` 计数判据复核，未达标即重跑，
+    // 故为「短暂不完整 + 自愈」，不会留下永久缺章（对比：不清理则永久多行）。
+    // 映射同样**先清该书全部段的映射**（不变量：映射 ⊆ 现存行）。此处与同步路径
+    // 刻意取不同口径——同步路径只清「不再写入的段」以保住原位，而本路径**可暂停**：
+    // 一旦中途抛错/被取消，只写了部分章，若保留未写入段的映射就留下「无行映射」，
+    // 正是让别的书被自动分配的 rowid 撞车后顶掉的条件（详见
+    // `CREATE_SEGMENT_FTS_ROWID`）。清光代价是该书 rowid 全部重新分配（位置可能
+    // 变化），对「整本重建」语义而言可接受。
+    clearFtsRidMap(instance, segmentIdsOfBook(book));
+    instance.execute('DELETE FROM segments_fts WHERE book_id = ?', [book.id]);
     if (opts?.chunkChapters !== undefined) {
       // 固定章数分片（测试/兼容路径）：与旧实现逐语句一致
       const chunkSize = Math.max(1, opts.chunkChapters);
@@ -487,9 +893,103 @@ export function isBookIndexedInFts(bookId: string): boolean {
 }
 
 /**
+ * 【r38 T03】FTS 章级增量写入：单章装配完成（READY_FULL）即写该章行。
+ *
+ * 背景（PRD 待确认问题 ①「全文检索是否必须依赖整本装配」）：旧链路是
+ * 「整本书装配完成后 `upsertFtsForBookChunked(整本)`」——大部头（玉台新咏
+ * 390 章）在装配推进到搜索所需章之前，该书完全搜不到；且整本写入必然
+ * 等到全书就位。改为章级增量后，**已装配章立即可被搜到**，
+ * 「FTS 可用性」不再与「整本装配完成」耦合。
+ *
+ * 实现复用私有 `buildAndInsertChapterFts`（与分片整书路径**同一行构造口径**，
+ * 字段映射逐列一致：segment/book/chapter id + 书名/章名冗余列 + 段文本）。
+ *  - **幂等来自映射表，不来自 `INSERT OR REPLACE`**（【#16】更正旧注释，勿写回）：
+ *    FTS5 虚拟表**加不上唯一索引**（`CREATE UNIQUE INDEX` 直接抛
+ *    `virtual tables may not be indexed`）⇒ 不给显式 rowid 时该语句**永不冲突**，
+ *    在真实 FTS5 上**退化为普通 INSERT**（同段多行；历史库里的重复行即由此产生）。
+ *    旧注释「幂等：`INSERT OR REPLACE`（FTS5 无主键 → 按 segment_id 覆盖同段行）」
+ *    是错的判定：`INSERT OR REPLACE` 从不按 `segment_id` 覆盖。
+ *    真幂等由 `segment_fts_rowid` 映射表（段 → 稳定 rowid）保证：**已知段**传映射
+ *    记住的原 rowid ⇒ **覆盖原位**（检索顺序因此稳定）；**新段**才由 FTS5 自动分配
+ *    rowid 并登记；删行必须同步清映射（不变量与四档口径见
+ *    `CREATE_SEGMENT_FTS_ROWID` 注释）。回归由 `ftsIdempotencyRealSqlite.test.ts`
+ *    / `fts5RealSqliteSemantics.test.ts`（真实 SQLite 驱动生产函数）在 CI 层拦截。
+ *  - 空章（无段落）零动作，不产生行（与 buildFtsRows 口径一致）；
+ *  - **不做全书字数上限判定**：`FTS_MAX_BOOK_CHARS` 是「整本解析代价」的
+ *    守卫，章级写入的单章代价恒为单章量级；超限书由调用方（整书路径）
+ *    自行跳过，章级写入不回退（宁可多几章可搜，也不引入新的静默缺失）。
+ */
+export function upsertFtsForChapter(
+  book: Book,
+  chapter: Book['chapters'][number],
+): ServiceResult<boolean> {
+  const instance = getDb();
+  if (!instance) {
+    return { success: false, error: 'SQLite 不可用' };
+  }
+  if (!book || !chapter || !Array.isArray(chapter.segments) || chapter.segments.length === 0) {
+    return { success: true, data: true };
+  }
+  try {
+    const initRes = ensureFtsSchema();
+    if (!initRes.success) {
+      return initRes;
+    }
+    buildAndInsertChapterFts(instance, book, chapter);
+    return { success: true, data: true };
+  } catch (e) {
+    return { success: false, error: `FTS 单章写入失败：${(e as Error).message}` };
+  }
+}
+
+/**
+ * 【r38 T03】计数式「整本已入索引」判据（已索引章数 ≥ totalChapters）。
+ *
+ * 与既有 `isBookIndexedInFts`（存在即真）的区别：章级增量写入下，
+ * 「写了 1 章」就存在行——存在判据会把「只索引了 1 章」误判为整本已索引，
+ * 使整书兜底路径被永久跳过（真·缺章）。计数判据把「整本覆盖」作为门槛，
+ * 超集（残留多余章行）亦视为已覆盖。
+ *  - db 不可用 / totalChapters 非法 → false（调用方会尝试补写，重复劳动无害）；
+ *  - **不改** `isBookIndexedInFts` 既有语义（队列幂等跳过仍以它为准）。
+ */
+export function isBookFullyIndexedInFts(
+  bookId: string,
+  totalChapters: number,
+): boolean {
+  if (!bookId) {
+    return false;
+  }
+  if (!Number.isFinite(totalChapters) || totalChapters <= 0) {
+    return false;
+  }
+  try {
+    const instance = getDb();
+    if (!instance) {
+      return false;
+    }
+    const rows = selectRows(
+      instance,
+      'SELECT COUNT(DISTINCT chapter_id) AS indexed FROM segments_fts WHERE book_id = ?',
+      [bookId],
+    );
+    const indexed = rows.length > 0 ? Number(rows[0].indexed ?? 0) : 0;
+    if (!Number.isFinite(indexed)) {
+      return false;
+    }
+    return indexed >= totalChapters;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 按 bookId 清除 FTS 索引行。
  * 供 UserBookService.deleteBook 在删除成功后调用，
  * 防止已删书在 segments_fts 中残留死索引、搜索命中后加载失败。
+ * 【#16】同时清掉该书的 rowid 映射：删行会**释放 rowid**，而 FTS5 的自动分配会
+ * 复用被释放的 rowid（实测），映射若残留，该书日后被恢复/重导入时就会用「记忆
+ * rowid」把别的书占了同一 rowid 的行顶掉（静默丢段）。此路径无法枚举段 id，
+ * 故走子查询形式（多一次全表扫描，20 万行 ≈15ms；删书是低频用户动作）。
  */
 export function deleteFtsForBook(bookId: string): ServiceResult<boolean> {
   const instance = getDb();
@@ -501,6 +1001,7 @@ export function deleteFtsForBook(bookId: string): ServiceResult<boolean> {
     if (!initRes.success) {
       return initRes;
     }
+    clearFtsRidMapForBook(instance, bookId);
     instance.execute('DELETE FROM segments_fts WHERE book_id = ?', [bookId]);
     return { success: true, data: true };
   } catch (e) {
@@ -1104,6 +1605,9 @@ export const StorageService = {
   upsertFtsForBook,
   upsertFtsForBookChunked,
   isBookIndexedInFts,
+  // —— r38 T03 新增（FTS 章级增量 + 计数式书级判据）——
+  upsertFtsForChapter,
+  isBookFullyIndexedInFts,
   deleteFtsForBook,
   buildFtsRows,
   genId,

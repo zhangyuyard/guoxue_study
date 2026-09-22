@@ -182,8 +182,8 @@ const epubFiles: ZipFileSpec[] = [
 ];
 
 describe('epubExtractText', () => {
-  test('按 spine 顺序提取，章节标题取 ncx，回退 h2/<title>；书名作者取自 dc 元数据', () => {
-    const r = epubExtractText(buildZip(epubFiles));
+  test('按 spine 顺序提取，章节标题取 ncx，回退 h2/<title>；书名作者取自 dc 元数据', async () => {
+    const r = await epubExtractText(buildZip(epubFiles));
     expect(r.title).toBe('测试之书');
     expect(r.author).toBe('张三');
     expect(r.text).toContain(`${CHAPTER_MARKER}第一章 起点`);
@@ -196,16 +196,16 @@ describe('epubExtractText', () => {
     expect(r.text).not.toContain('fake-image-bytes');
   });
 
-  test('损坏 zip 抛出可读错误', () => {
-    expect(() => epubExtractText(new Uint8Array([0, 1, 2, 3]))).toThrow('无效的 zip 文件');
+  test('损坏 zip 抛出可读错误', async () => {
+    await expect(epubExtractText(new Uint8Array([0, 1, 2, 3]))).rejects.toThrow('无效的 zip 文件');
   });
 });
 
 describe('convertBookBytes 统一入口', () => {
   const enc = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, 'utf-8'));
 
-  test('txt 直通（编码检测）', () => {
-    expect(convertBookBytes('txt', enc('道可道')).text).toBe('道可道');
+  test('txt 直通（编码检测）', async () => {
+    expect((await convertBookBytes('txt', enc('道可道'))).text).toBe('道可道');
   });
 
   test('md/html/fb2/epub 均视为结构化格式', () => {
@@ -216,8 +216,8 @@ describe('convertBookBytes 统一入口', () => {
     expect(isStructuredFormat('txt')).toBe(false);
   });
 
-  test('epub 提取结果可直接被 parseTxtBook 消费（markers 模式）', () => {
-    const r = epubExtractText(buildZip(epubFiles));
+  test('epub 提取结果可直接被 parseTxtBook 消费（markers 模式）', async () => {
+    const r = await epubExtractText(buildZip(epubFiles));
     const book = parseTxtBook('测试之书.epub', r.text, 'user-test', {
       markers: true,
       title: r.title,
@@ -332,14 +332,14 @@ describe('odtExtractText', () => {
 });
 
 describe('zipExtractText', () => {
-  test('多文本条目按文件名切章（含子目录，跳过 __MACOSX）', () => {
+  test('多文本条目按文件名切章（含子目录，跳过 __MACOSX）', async () => {
     const zip = buildZip([
       { name: '__MACOSX/._a.txt', content: '垃圾数据' },
       { name: 'books/上卷.txt', content: '上卷内容。' },
       { name: 'books/下卷.txt', content: '下卷内容。' },
       { name: 'cover.png', content: 'fake-image' },
     ]);
-    const r = zipExtractText(zip);
+    const r = await zipExtractText(zip);
     expect(r.text).toContain(`${CHAPTER_MARKER}上卷`);
     expect(r.text).toContain('上卷内容。');
     expect(r.text).toContain(`${CHAPTER_MARKER}下卷`);
@@ -347,18 +347,18 @@ describe('zipExtractText', () => {
     expect(r.text).not.toContain('垃圾数据');
   });
 
-  test('内嵌 epub 的 zip 自动按 EPUB 提取', () => {
+  test('内嵌 epub 的 zip 自动按 EPUB 提取', async () => {
     const innerEpub = buildZip(epubFiles);
     const outer = buildZip([{ name: 'book.epub', bytes: innerEpub, method: 8 }]);
-    const r = zipExtractText(outer);
+    const r = await zipExtractText(outer);
     expect(r.title).toBe('测试之书');
     expect(r.text).toContain('山不在高。');
   });
 
-  test('无文本条目抛错', () => {
-    expect(() =>
+  test('无文本条目抛错', async () => {
+    await expect(
       zipExtractText(buildZip([{ name: 'img.png', content: 'x' }])),
-    ).toThrow('压缩包内没有可识别的文本文档');
+    ).rejects.toThrow('压缩包内没有可识别的文本文档');
   });
 });
 
@@ -372,14 +372,14 @@ describe('convertBookBytes 新格式路由', () => {
     expect(isStructuredFormat('txt')).toBe(false);
   });
 
-  test('html 文件启用 h1-h3 切章', () => {
-    const r = convertBookBytes('html', enc('<html><body><h2>上篇</h2><p>内容。</p></body></html>'));
+  test('html 文件启用 h1-h3 切章', async () => {
+    const r = await convertBookBytes('html', enc('<html><body><h2>上篇</h2><p>内容。</p></body></html>'));
     expect(r.text).toContain(`${CHAPTER_MARKER}上篇`);
     expect(r.text).toContain('内容。');
   });
 
-  test('rtf 走解码 + 解析链', () => {
-    const r = convertBookBytes('rtf', enc('{\\rtf1\\ansi \\u20013?\\u22269?}'));
+  test('rtf 走解码 + 解析链', async () => {
+    const r = await convertBookBytes('rtf', enc('{\\rtf1\\ansi \\u20013?\\u22269?}'));
     expect(r.text).toBe('中国');
   });
 });
