@@ -38,6 +38,7 @@ import {
 import { buildHighlightedSegments } from '@/utils/highlight';
 import { clearPinyinCache, getPinyinPairs, isCJKChar } from '@/utils/pinyin';
 import { toSimplified } from '@/utils/conversion';
+import { pinyinRowMetrics } from '@/reader/geometry';
 
 // ---------- 渲染单元数据模型 ----------
 
@@ -156,6 +157,10 @@ function buildCells(
 interface CharCellProps {
   cell: CharCellData;
   styles: CellStyles;
+  /** 正文字号（= 字格宽 1em，拼音自适应缩放的格宽上限） */
+  fontSize: number;
+  /** 默认拼音字号（getPinyinSize 同源） */
+  pinyinSize: number;
   /** 多音字拼音色 */
   accentColor: string;
   /** 活动选区背景色（主色半透明），仅选中字格着色 */
@@ -176,6 +181,8 @@ interface CharCellProps {
 const CharCell = React.memo(function CharCell({
   cell,
   styles,
+  fontSize,
+  pinyinSize,
   accentColor,
   selectionBg,
   selected,
@@ -186,6 +193,10 @@ const CharCell = React.memo(function CharCell({
   onPressTongjia,
 }: CharCellProps) {
   const highlight = cell.highlight;
+  // 拼音字号自适应（架构 §7.2 第 1 条）：格宽固定 1em ⇒ 长拼音按「格宽 / 拼音码点数」
+  // 缩放（下限 8）；仍超限由 numberOfLines=1 + clip 裁剪。仅缩字形，拼音槽高不变 ⇒ 行高恒定。
+  const pinyinLen = cell.pinyin ? Array.from(cell.pinyin).length : 0;
+  const pinyinFontSize = Math.max(8, Math.min(pinyinSize, Math.floor(fontSize / Math.max(1, pinyinLen))));
   // 汉字点按：选区扩展中（onPressChar 存在）→ 点按扩展选区；
   // 否则保持原行为——点已划线字符打开关联笔记
   const pressChar = onPressChar
@@ -208,15 +219,16 @@ const CharCell = React.memo(function CharCell({
           hitSlop={6}
           accessibilityLabel={`通假字：${cell.char} 通 ${cell.tongjia.original}`}
         >
-          <Text style={styles.tongjiaMarkText} numberOfLines={1}>
+          <Text style={styles.tongjiaMarkText} numberOfLines={1} allowFontScaling={false}>
             通
           </Text>
         </Pressable>
       ) : null}
       <Text
-        style={[styles.pinyin, cell.isPolyphone ? { color: accentColor } : null]}
+        style={[styles.pinyin, { fontSize: pinyinFontSize }, cell.isPolyphone ? { color: accentColor } : null]}
         numberOfLines={1}
         ellipsizeMode="clip"
+        allowFontScaling={false}
         onPress={pressPinyin}
       >
         {cell.pinyin}
@@ -233,6 +245,7 @@ const CharCell = React.memo(function CharCell({
           // 活动选区视觉反馈：主色半透明背景（菜单打开期间实时跟随扩展更新）
           selected ? { backgroundColor: selectionBg } : null,
         ]}
+        allowFontScaling={false}
         onPress={pressChar}
         onLongPress={onLongPressChar ? () => onLongPressChar(cell.index) : undefined}
       >
@@ -245,11 +258,19 @@ const CharCell = React.memo(function CharCell({
 interface RunCellProps {
   cell: RunCellData;
   styles: CellStyles;
+  fontSize: number;
 }
 
 /** 非汉字片段单元（顶部留出拼音行高度以对齐正文基线） */
-const RunCell = React.memo(function RunCell({ cell, styles }: RunCellProps) {
-  return <Text style={styles.run}>{cell.text}</Text>;
+const RunCell = React.memo(function RunCell({ cell, styles, fontSize }: RunCellProps) {
+  // 定宽 = 码点数 × fontSize（架构 §7.2 第 3 条：宽度确定于文本，禁随字体度量伸缩；
+  // 全角标点天然 ≈1em，ASCII 按 1em 计偏保守 ⇒ 只会提前折，不会超宽）
+  const width = Math.round(Array.from(cell.text).length * fontSize);
+  return (
+    <Text style={[styles.run, { width }]} allowFontScaling={false}>
+      {cell.text}
+    </Text>
+  );
 });
 
 // ---------- 多音字读音浮窗 ----------
@@ -615,10 +636,9 @@ function PinyinTextBase({
   }, [cells, charRange]);
 
   const styles = useMemo<CellStyles>(() => {
-    const pinyinLineHeight = Math.round(pinyinSize * 1.35);
-    const charLineHeight = Math.round(fontSize * 1.3);
-    // flexWrap 行间距以 paddingBottom 模拟
-    const rowGap = Math.max(2, Math.round(fontSize * (lineHeight - 1)));
+    // 行高子项唯一真源：reader/geometry.pinyinRowMetrics（几何层与渲染器同源，
+    // 消除「两处公式各自漂移」的 r73 同型风险）
+    const { pinyinLineHeight, charLineHeight, rowGap } = pinyinRowMetrics(fontSize, lineHeight);
     // 通假字「通」圆标边长与字号联动；悬浮于拼音行上方（独立一行，不占布局高度 → 不改变行基线）
     const markSize = Math.max(14, Math.round(pinyinSize * 1.15));
     const markFont = Math.max(8, Math.round(markSize * 0.6));
@@ -640,6 +660,9 @@ function PinyinTextBase({
       },
       cell: {
         alignItems: 'center',
+        // 定宽 1em（= fontSize，几何层 cellWidth 同源）：字格不再由拼音串撑宽，
+        // 换行点成为「文本 + 档位」的纯函数（架构 §7.2 第 1 条）
+        width: fontSize,
         paddingBottom: rowGap,
         // 水平字间距：使相邻字格（及其拼音）之间留出空隙，全文注音模式下更宽
         marginHorizontal: charGap,
@@ -650,6 +673,11 @@ function PinyinTextBase({
         fontSize: pinyinSize,
         lineHeight: pinyinLineHeight,
         height: pinyinLineHeight,
+        // 定宽 1em：拼音在格内居中，超出由 numberOfLines+clip 裁剪（T1=C1 已接受）
+        width: fontSize,
+        // 方案 D（定案）：拼音槽占 pinyinLineHeight + PINYIN_LINE_GAP，与 run 的
+        // paddingTop 同源同值 ⇒ cell 与 run 渲染高度相等且等于 rowHeight（默认档 50）
+        marginBottom: PINYIN_LINE_GAP,
         color: colors.pinyin,
         textAlign: 'center',
         includeFontPadding: false,
@@ -667,6 +695,8 @@ function PinyinTextBase({
       char: {
         fontSize,
         lineHeight: charLineHeight,
+        // 定宽 1em：与 cell.width / 拼音槽同宽，格内容不撑宽格体
+        width: fontSize,
         color: colors.text,
         textAlign: 'center',
         includeFontPadding: false,
@@ -980,6 +1010,7 @@ function PinyinTextBase({
           },
           baseTextStyle,
         ]}
+        allowFontScaling={false}
       >
         {plainText}
       </Text>
@@ -994,6 +1025,8 @@ function PinyinTextBase({
             key={`c${cell.index}`}
             cell={cell}
             styles={styles}
+            fontSize={fontSize}
+            pinyinSize={pinyinSize}
             accentColor={colors.accent}
             selectionBg={selectionBg}
             selected={
@@ -1008,7 +1041,7 @@ function PinyinTextBase({
             onPressTongjia={handleTongjiaPress}
           />
         ) : (
-          <RunCell key={`r${cell.index}`} cell={cell} styles={styles} />
+          <RunCell key={`r${cell.index}`} cell={cell} styles={styles} fontSize={fontSize} />
         ),
       )}
       {polyphonePopup ? (
