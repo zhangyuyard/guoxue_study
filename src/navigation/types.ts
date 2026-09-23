@@ -25,6 +25,12 @@ export interface ReaderRouteParams {
   chapterId: string;
   segmentId?: string;
   /**
+   * 章内字符偏移（码点，0 起，跨段累计，不含标题行——与 useReaderStore
+   * lastRead.charOffset 同口径）。传入时优先于持久化 lastRead 与 segmentId
+   * 定位（L2 开环，lineAtCharOffset 二分）。
+   */
+  charOffset?: number;
+  /**
    * 跳转序号（goToChapter 每次跳转刷新）：目录跳转到「当前章」时，路由
    * 参数与现值完全相同不会触发任何 effect（navigate 浅合并语义），携带
    * 递增序号让切章重置 effect 重新执行，落回章首（重复跳转生效）。

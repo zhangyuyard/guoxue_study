@@ -124,6 +124,7 @@ export default function LibraryScreen({ navigation }: Props): React.JSX.Element 
         bookId: book.id,
         chapterId: chapter.id,
         segmentId: resume ? last?.segmentId : undefined,
+        charOffset: resume ? last?.charOffset : undefined,
       });
     },
     [navigation],

@@ -25,6 +25,17 @@ export const CHAR_LINE_HEIGHT_RATIO = 1.3;
 /** 拼音字号下限（PinyinText.tsx getPinyinSize 同源） */
 export const PINYIN_SIZE_FLOOR = 9;
 
+/**
+ * 字格水平间距（渲染器 marginHorizontal 与几何层 cellAdvance 同源，
+ * 消除「两处字距公式各自漂移」）。与 PinyinText.tsx 原 charGap 公式逐字同值：
+ * 全文注音模式加大避免相邻拼音相贴，其余模式保持紧凑。
+ */
+export function charGapFor(pinyinMode: 'full' | 'rare' | 'off', fontSize: number): number {
+  return pinyinMode === 'full'
+    ? Math.max(4, Math.round(fontSize * 0.16))
+    : Math.max(2, Math.round(fontSize * 0.06));
+}
+
 /** 注音行的行高子项（渲染器与几何层共同消费，消除两处公式漂移） */
 export interface PinyinRowMetrics {
   readonly pinyinSize: number;

@@ -38,7 +38,7 @@ import {
 import { buildHighlightedSegments } from '@/utils/highlight';
 import { clearPinyinCache, getPinyinPairs, isCJKChar } from '@/utils/pinyin';
 import { toSimplified } from '@/utils/conversion';
-import { pinyinRowMetrics } from '@/reader/geometry';
+import { pinyinRowMetrics, charGapFor } from '@/reader/geometry';
 
 // ---------- 渲染单元数据模型 ----------
 
@@ -595,14 +595,29 @@ function PinyinTextBase({
 
   const pairs = useMemo(() => getPinyinPairs(source), [source]);
 
-  // off 模式或注音结果与文本不对齐时，降级为纯文本渲染
+  // off 模式渲染纯文本；注音模式**永不换渲染结构**（架构 §7.2 第 6 条，
+  // U7「几何不得等注音」的唯一落地）：注音结果缺失/与文本不对齐时，
+  // 以空拼音槽逐格渲染 —— 行数与行高与注音就绪无关，消除
+  // 「未就绪按段落行高、就绪后切换逐格模型」的整页重排来源。
   const chars = useMemo(() => Array.from(text), [text]);
   const usable = pinyinMode !== 'off' && pairs.length > 0 && pairs.length === chars.length;
+  const effectivePairs = useMemo(
+    () =>
+      usable
+        ? pairs
+        : chars.map((ch) => ({
+            char: ch,
+            pinyin: '',
+            isRare: false,
+            isPolyphone: false,
+          })),
+    [usable, pairs, chars],
+  );
 
   // 预计算渲染数组与样式（依赖变化时才重建，其余渲染直接复用）
   const pinyinSize = getPinyinSize(fontSize);
   const cells = useMemo(
-    () => (usable ? buildCells(pairs, highlights) : []),
+    () => (pinyinMode !== 'off' ? buildCells(effectivePairs, highlights) : []),
     [usable, pairs, highlights],
   );
 
@@ -644,10 +659,9 @@ function PinyinTextBase({
     const markFont = Math.max(8, Math.round(markSize * 0.6));
     // 水平字间距：全文注音模式加大，避免相邻拼音左右相贴/重叠；
     // 生僻字注音等其余模式取较小值，保持正文紧凑、阅读自然。
-    const isFull = pinyinMode === 'full';
-    const charGap = isFull
-      ? Math.max(4, Math.round(fontSize * 0.16))
-      : Math.max(2, Math.round(fontSize * 0.06));
+    // 字距唯一真源：reader/geometry.charGapFor（几何层 cellAdvance 同源，
+    // 保证 L1 charsPerLine 与渲染折行口径一致）
+    const charGap = charGapFor(pinyinMode, fontSize);
     // 标点间距略小，避免中文标点两侧过于空旷
     const runGap = Math.max(1, Math.round(fontSize * 0.04));
     return {
@@ -992,8 +1006,9 @@ function PinyinTextBase({
     };
   }, [fontSize, colors]);
 
-  if (!usable) {
-    // 降级纯文本：charRange 场景下按码点切片（拆页时每块只渲染自己的区间）
+  if (pinyinMode === 'off') {
+    // off 模式：纯文本渲染（这是模式本身的渲染器，不是结构降级）。
+    // charRange 场景下按码点切片（拆页时每块只渲染自己的区间）
     const plainText = charRange
       ? Array.from(text)
           .slice(charRange[0], charRange[1])

@@ -12,6 +12,7 @@ import {
   CHAR_LINE_HEIGHT_RATIO,
   PINYIN_LINE_HEIGHT_RATIO,
   PINYIN_SIZE_FLOOR,
+  charGapFor,
   getItemLayoutOf,
   layoutChapter,
   pinyinRowMetrics,
@@ -189,6 +190,20 @@ describe('position：位置模型（INV-P1 往返一致 + 边界）', () => {
     for (let i = 0; i < lines.length; i++) {
       expect(lineAtY(g, yOfLine(g, i))).toBe(i);
     }
+  });
+});
+
+describe('charGapFor：字距唯一真源（几何 cellAdvance 与渲染器 marginHorizontal 同源）', () => {
+  it('默认档定值：full=4（max(4, round(2.88))）、rare=2（max(2, round(1.08))）、off 同 rare', () => {
+    expect(charGapFor('full', 18)).toBe(4);
+    expect(charGapFor('rare', 18)).toBe(2);
+    expect(charGapFor('off', 18)).toBe(2);
+  });
+
+  it('大字号 full 档由公式主导（fs=24：round(3.84)=4）；小字号钳下限', () => {
+    expect(charGapFor('full', 24)).toBe(4);
+    expect(charGapFor('full', 32)).toBe(5);
+    expect(charGapFor('rare', 12)).toBe(2);
   });
 });
 
