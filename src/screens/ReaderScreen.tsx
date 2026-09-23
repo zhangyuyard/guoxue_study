@@ -29,9 +29,10 @@ import { UserBookService } from '@/services/UserBookService';
 import { useReaderStore } from '@/store/useReaderStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getColors, type ThemeColors } from '@/theme';
-import { charGapFor, getItemLayoutOf, layoutChapter, resolveGeometry } from '@/reader/geometry';
+import { charGapFor, getItemLayoutOf, layoutChapter, pinyinRowMetrics, resolveGeometry } from '@/reader/geometry';
 import { lineAtCharOffset } from '@/reader/position';
 import { charOffsetAtY } from '@/reader/position';
+import { annotate, maxPinyinLength } from '@/services/PinyinService';
 import type { ReaderRouteParams } from '@/navigation/types';
 import type { Chapter, TextSegment } from '@/types';
 
@@ -161,6 +162,34 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   );
   const getItemLayout = useMemo(() => getItemLayoutOf(geometry), [geometry]);
 
+  // ── 拼音字号全章统一（架构 §7.2 观感统一）：按章内最长拼音算一次，
+  // 全章同一值，消除逐字自适应造成的同行大小/字重不齐（24px 档 gé=12px 混 yǒu=8px）。
+  // 仅缩字形不改拼音槽高 ⇒ 行高恒等（INV-G1）不受影响；U7 不破坏：
+  // 几何（行高/行数）不依赖此值，注音缺失时行仍按 rowHeight 渲染。
+  const chapterMaxPinyinLen = useMemo(() => {
+    if (!pinyinOn) {
+      return 0;
+    }
+    let max = 0;
+    for (const seg of segments) {
+      const res = annotate(seg.text, pinyinMode, { workId: chapterId, bookId });
+      if (res.success && res.data) {
+        const len = maxPinyinLength(res.data);
+        if (len > max) {
+          max = len;
+        }
+      }
+    }
+    return max;
+  }, [segments, pinyinOn, pinyinMode, chapterId, bookId]);
+  const unifiedPinyinFontSize = useMemo(() => {
+    if (!pinyinOn || chapterMaxPinyinLen < 1) {
+      return undefined;
+    }
+    const pinyinSize = pinyinRowMetrics(fontSize, lineHeight).pinyinSize;
+    return Math.max(8, Math.min(pinyinSize, Math.floor(fontSize / chapterMaxPinyinLen)));
+  }, [pinyinOn, chapterMaxPinyinLen, fontSize, lineHeight]);
+
   // 段内码点基准备查：line.charStart（章局）→ 段内 [segStart, segEnd)
   const segmentSpans = useMemo(() => {
     const spans = new Map<string, { start: number; end: number }>();
@@ -270,6 +299,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           rowHeight={geometry.rowHeight}
           fontSize={fontSize}
           lineHeight={lineHeight}
+          unifiedPinyinFontSize={unifiedPinyinFontSize}
           pinyinMode={pinyinMode}
           conversionMode={conversionMode}
           workId={chapterId}
@@ -284,6 +314,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       geometry.rowHeight,
       fontSize,
       lineHeight,
+      unifiedPinyinFontSize,
       pinyinMode,
       conversionMode,
       chapterId,

@@ -161,6 +161,8 @@ interface CharCellProps {
   fontSize: number;
   /** 默认拼音字号（getPinyinSize 同源） */
   pinyinSize: number;
+  /** 全章统一拼音字号（提供时替代逐字自适应，消除同行大小/字重不齐） */
+  unifiedPinyinFontSize?: number;
   /** 多音字拼音色 */
   accentColor: string;
   /** 活动选区背景色（主色半透明），仅选中字格着色 */
@@ -183,6 +185,7 @@ const CharCell = React.memo(function CharCell({
   styles,
   fontSize,
   pinyinSize,
+  unifiedPinyinFontSize,
   accentColor,
   selectionBg,
   selected,
@@ -193,10 +196,13 @@ const CharCell = React.memo(function CharCell({
   onPressTongjia,
 }: CharCellProps) {
   const highlight = cell.highlight;
-  // 拼音字号自适应（架构 §7.2 第 1 条）：格宽固定 1em ⇒ 长拼音按「格宽 / 拼音码点数」
+  // 拼音字号：全章统一值优先（消除同行大小/字重不齐）；未提供时逐字自适应
+  //（架构 §7.2 第 1 条）：格宽固定 1em ⇒ 长拼音按「格宽 / 拼音码点数」
   // 缩放（下限 8）；仍超限由 numberOfLines=1 + clip 裁剪。仅缩字形，拼音槽高不变 ⇒ 行高恒定。
   const pinyinLen = cell.pinyin ? Array.from(cell.pinyin).length : 0;
-  const pinyinFontSize = Math.max(8, Math.min(pinyinSize, Math.floor(fontSize / Math.max(1, pinyinLen))));
+  const pinyinFontSize =
+    unifiedPinyinFontSize ??
+    Math.max(8, Math.min(pinyinSize, Math.floor(fontSize / Math.max(1, pinyinLen))));
   // 汉字点按：选区扩展中（onPressChar 存在）→ 点按扩展选区；
   // 否则保持原行为——点已划线字符打开关联笔记
   const pressChar = onPressChar
@@ -516,6 +522,8 @@ export interface PinyinTextProps {
   fontSize: number;
   /** 行距倍数 */
   lineHeight: number;
+  /** 全章统一拼音字号（行渲染场景由上层按章最长拼音算好传入；缺省逐字自适应） */
+  unifiedPinyinFontSize?: number;
   /** 注音模式：off 时直接渲染纯文本 */
   pinyinMode: PinyinMode;
   /**
@@ -575,6 +583,7 @@ function PinyinTextBase({
   bookId,
   charRange,
   baseTextStyle,
+  unifiedPinyinFontSize,
 }: PinyinTextProps): React.JSX.Element {
   const theme = useSettingsStore((s) => s.theme);
   const storeConversionMode = useSettingsStore((s) => s.conversionMode);
@@ -1042,6 +1051,7 @@ function PinyinTextBase({
             styles={styles}
             fontSize={fontSize}
             pinyinSize={pinyinSize}
+            unifiedPinyinFontSize={unifiedPinyinFontSize}
             accentColor={colors.accent}
             selectionBg={selectionBg}
             selected={

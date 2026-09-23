@@ -774,4 +774,22 @@ export const PinyinService = {
   setReadingOverrideProvider,
 };
 
+/**
+ * 章级最长拼音码点数（拼音字号全章统一的输入，架构 §7.2 拼音观感统一）。
+ * 逐字自适应字号会造成同行拼音大小/字重不齐（真机 24px 档 gé=12px 混 yǒu=8px），
+ * 改为「按章内最长拼音一次性算字号、全章同一值」；空结果返回 0（调用方兜底）。
+ */
+export function maxPinyinLength(annotations: PinyinAnnotation[]): number {
+  let max = 0;
+  for (const a of annotations) {
+    if (a.pinyin) {
+      const len = Array.from(a.pinyin).length;
+      if (len > max) {
+        max = len;
+      }
+    }
+  }
+  return max;
+}
+
 export default PinyinService;

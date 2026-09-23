@@ -26,6 +26,8 @@ export interface LineRowProps {
   rowHeight: number;
   fontSize: number;
   lineHeight: number;
+  /** 全章统一拼音字号（上层按章最长拼音算好传入；缺省逐字自适应） */
+  unifiedPinyinFontSize?: number;
   pinyinMode: PinyinMode;
   conversionMode?: 'simplified' | 'traditional';
   /** 外部注入的注音结果（缺省走 PinyinText 内部注音） */
@@ -48,6 +50,7 @@ const LineRow = React.memo(function LineRow({
   rowHeight,
   fontSize,
   lineHeight,
+  unifiedPinyinFontSize,
   pinyinMode,
   conversionMode,
   annotations,
@@ -75,6 +78,7 @@ const LineRow = React.memo(function LineRow({
         charRange={charRange}
         fontSize={fontSize}
         lineHeight={lineHeight}
+        unifiedPinyinFontSize={unifiedPinyinFontSize}
         pinyinMode={pinyinMode}
         conversionMode={conversionMode}
         annotations={annotations}
