@@ -21,6 +21,16 @@ export interface UsePinyinResult {
   error?: string;
 }
 
+/** 多音字读音来源 → 注音缓存盐（渲染侧 usePinyin 与预拼侧必须同源） */
+export function polyphoneSaltOf(source: { type: string; dictId?: string }): string {
+  return source.type === 'dict' ? `dict:${source.dictId}` : 'builtin';
+}
+
+/** 非渲染上下文（预拼后台任务）读取当前缓存盐 */
+export function currentPolyphoneSalt(): string {
+  return polyphoneSaltOf(useDictStore.getState().polyphoneSource);
+}
+
 /**
  * 对文本注音的 Hook。
  * @param text 待注音文本
@@ -36,8 +46,7 @@ export function usePinyin(
   const mode = modeOverride ?? storeMode;
   // 字典域扩展：多音字读音来源切换后注音结果需要重算（作为缓存盐 + memo 依赖）
   const polyphoneSource = useDictStore((s) => s.polyphoneSource);
-  const polyphoneSalt =
-    polyphoneSource.type === 'dict' ? `dict:${polyphoneSource.dictId}` : 'builtin';
+  const polyphoneSalt = polyphoneSaltOf(polyphoneSource);
   const { workId, bookId } = opts ?? {};
 
   // 手动刷新版本号：bump 后 useMemo 重算

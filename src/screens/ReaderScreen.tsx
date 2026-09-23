@@ -33,6 +33,8 @@ import { charGapFor, getItemLayoutOf, layoutChapter, pinyinRowMetrics, resolveGe
 import { lineAtCharOffset } from '@/reader/position';
 import { charOffsetAtY } from '@/reader/position';
 import { annotate, maxPinyinLength } from '@/services/PinyinService';
+import { currentPolyphoneSalt } from '@/hooks/usePinyin';
+import { prewarmPinyinCache } from '@/utils/pinyin';
 import {
   createChapterWindow,
   windowBegin,
@@ -151,9 +153,24 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [bookId],
   );
 
+  /** R2b3 预拼：章装载后分批预热注音缓存（与渲染侧同参 ⇒ 首渲染命中） */
+  const prewarmChapter = useCallback(
+    (data: LoadedChapter, cid: string) => {
+      if (!pinyinOn) {
+        return;
+      }
+      void prewarmPinyinCache(
+        data.segments.map((s) => s.text),
+        pinyinMode,
+        currentPolyphoneSalt(),
+        { workId: cid, bookId },
+      );
+    },
+    [pinyinOn, pinyinMode, bookId],
+  );
+
   /** 指定章的滑窗保留集：中心 ∪ 前后邻章（跳章清窗语义的裁剪白名单） */
-  const retainSetFor = useCallback((cid: string): Set<string> => {
-    const set = new Set<string>([cid]);
+  const retainSetFor = useCallback((cid: string): Set<string> => {    const set = new Set<string>([cid]);
     const sib = TextLibraryService.getSiblingChapters(cid);
     if (sib.success && sib.data) {
       if (sib.data.prev) {
@@ -219,6 +236,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           }
           setWin((w) => windowPut(w, chapterId, data));
           finalize(data);
+          prewarmChapter(data, chapterId);
         } catch (e) {
           if (cancelled) {
             return;
@@ -256,6 +274,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         try {
           const data = await loadChapterData(nid);
           setWin((w) => windowPut(w, nid, data));
+          prewarmChapter(data, nid);
         } catch {
           setWin((w) => windowFail(w, nid));
         }
@@ -425,13 +444,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           try {
             const data = await loadChapterData(cid);
             setWin((w) => windowPut(w, cid, data));
+            prewarmChapter(data, cid);
           } catch {
             setWin((w) => windowFail(w, cid));
           }
         })();
       }
     },
-    [loadChapterData, retainSetFor],
+    [loadChapterData, retainSetFor, prewarmChapter],
   );
 
   // ── 行渲染 ──

@@ -158,3 +158,42 @@ export function getPinyinPairs(annotations: PinyinAnnotation[]): PinyinPair[] {
 export function clearPinyinCache(): void {
   cache.clear();
 }
+
+/** 当前缓存条目数（测试/诊断用） */
+export function pinyinCacheSize(): number {
+  return cache.size;
+}
+
+/** 预拼分批大小：每批段数（批间让出 JS 线程，避免预拼阻塞渲染） */
+const PREWARM_BATCH = 20;
+
+/**
+ * 预热注音缓存（R2b3 预拼）：对预取章的各段按「与渲染侧完全同参」跑一次
+ * annotateText 填 LRU，用户切到该章时 PinyinText 首渲染即命中缓存。
+ * 分批 + 批间 setTimeout 让出 JS 线程，避免长章预拼阻塞渲染。
+ * @returns 实际计算（未命中缓存）的段数
+ */
+export async function prewarmPinyinCache(
+  texts: readonly string[],
+  mode: PinyinMode,
+  cacheSalt: string,
+  opts?: AnnotateTextOptions,
+): Promise<number> {
+  let computed = 0;
+  for (let i = 0; i < texts.length; i += PREWARM_BATCH) {
+    for (const text of texts.slice(i, i + PREWARM_BATCH)) {
+      if (!text) {
+        continue;
+      }
+      const sizeBefore = cache.size;
+      const res = annotateText(text, mode, undefined, cacheSalt, opts);
+      if (res.success && cache.size > sizeBefore) {
+        computed += 1;
+      }
+    }
+    if (i + PREWARM_BATCH < texts.length) {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    }
+  }
+  return computed;
+}
