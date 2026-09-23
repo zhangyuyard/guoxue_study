@@ -33,6 +33,17 @@ import { charGapFor, getItemLayoutOf, layoutChapter, pinyinRowMetrics, resolveGe
 import { lineAtCharOffset } from '@/reader/position';
 import { charOffsetAtY } from '@/reader/position';
 import { annotate, maxPinyinLength } from '@/services/PinyinService';
+import {
+  createChapterWindow,
+  windowBegin,
+  windowFail,
+  windowGet,
+  windowHas,
+  windowIsLoading,
+  windowPut,
+  windowRecenter,
+  type ChapterWindow,
+} from '@/reader/chapterWindow';
 import type { ReaderRouteParams } from '@/navigation/types';
 import type { Chapter, TextSegment } from '@/types';
 
@@ -92,73 +103,185 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [fontSize, lineHeight, pinyinOn, pinyinMode, containerWidth],
   );
 
-  // ── 章内容加载（内置书同步；用户书先水合）──
-  const [loaded, setLoaded] = useState<LoadedChapter | null>(null);
+  // ── 章滑窗状态（R2b2）：窗缓存全部章数据；activeChapterId = 当前中心章 ──
+  const [win, setWin] = useState<ChapterWindow<LoadedChapter>>(() => createChapterWindow());
+  const [activeChapterId, setActiveChapterId] = useState<string>(chapterId);
   const [error, setError] = useState<string | null>(null);
+  /** 就地切换序号：切换章时递增，驱动 FlatList 重挂载（initialScrollIndex 重算） */
+  const [switchSeq, setSwitchSeq] = useState(0);
+  /** 当前中心章 ref（异步装载回写的陈旧判定用，避免闭包过期） */
+  const centerRef = useRef<string>(chapterId);
+  // 路由 chapterId 变化（书架重进/路由跳章）时同步中心
+  useEffect(() => {
+    if (chapterId && chapterId !== centerRef.current) {
+      centerRef.current = chapterId;
+      setActiveChapterId(chapterId);
+    }
+  }, [chapterId]);
+
   const openChapter = useReaderStore((s) => s.openChapter);
   const recordProgress = useReaderStore((s) => s.recordProgress);
   const setSegment = useReaderStore((s) => s.setSegment);
   const lastRead = useReaderStore((s) => s.lastRead);
 
+  /** 窗镜像（latest-ref 模式）：装载判定在 updater 外做，避免 StrictMode 双调副作用 */
+  const winRef = useRef<ChapterWindow<LoadedChapter>>(win);
+  winRef.current = win;
+
+  /** 装载单章：水合（懒加载壳）→ 取章 → 排序。内置书与用户书同一 API。 */
+  const loadChapterData = useCallback(
+    async (cid: string): Promise<LoadedChapter> => {
+      const ensure = await UserBookService.ensureBookLoaded(bookId);
+      if (!ensure.success) {
+        throw new Error(ensure.error ?? '书籍加载失败');
+      }
+      const chapterRes = TextLibraryService.getChapter(cid);
+      if (!chapterRes.success || !chapterRes.data) {
+        throw new Error(chapterRes.error ?? '章节不存在');
+      }
+      const chapter = chapterRes.data;
+      const bookRes = TextLibraryService.getBook(chapter.bookId);
+      const segments = [...chapter.segments].sort((a, b) => a.order - b.order);
+      return {
+        bookTitle: bookRes.success ? bookRes.data?.title ?? '' : '',
+        chapter,
+        segments,
+      };
+    },
+    [bookId],
+  );
+
+  /** 指定章的滑窗保留集：中心 ∪ 前后邻章（跳章清窗语义的裁剪白名单） */
+  const retainSetFor = useCallback((cid: string): Set<string> => {
+    const set = new Set<string>([cid]);
+    const sib = TextLibraryService.getSiblingChapters(cid);
+    if (sib.success && sib.data) {
+      if (sib.data.prev) {
+        set.add(sib.data.prev.id);
+      }
+      if (sib.data.next) {
+        set.add(sib.data.next.id);
+      }
+    }
+    return set;
+  }, []);
+
+  /** 派生当前章：窗中中心章数据（就地切换时目标未就绪 → null → 渲染 spinner） */
+  const loaded = useMemo(
+    () => (activeChapterId ? windowGet(win, activeChapterId) ?? null : null),
+    [win, activeChapterId],
+  );
+
+  // ── 进入 / 路由跳章：recenter（清窗+陈旧丢弃）→ 命中缓存就地切，否则装载 ──
   useEffect(() => {
+    if (!chapterId) {
+      return;
+    }
     let cancelled = false;
     setError(null);
-    setLoaded(null);
-    (async () => {
-      try {
-        // 懒水合入口（内置书与用户书同一 API）：启动只注册元数据壳
-        // （segments 空），必须先水合再 getChapter，否则「本章暂无正文」
-        const ensure = await UserBookService.ensureBookLoaded(bookId);
-        if (!ensure.success) {
-          throw new Error(ensure.error ?? '书籍加载失败');
-        }
-        const chapterRes = TextLibraryService.getChapter(chapterId);
-        if (!chapterRes.success || !chapterRes.data) {
-          throw new Error(chapterRes.error ?? '章节不存在');
-        }
-        const chapter = chapterRes.data;
-        const bookRes = TextLibraryService.getBook(chapter.bookId);
-        const segments = [...chapter.segments].sort((a, b) => a.order - b.order);
-        if (cancelled) {
-          return;
-        }
-        setLoaded({
-          bookTitle: bookRes.success ? bookRes.data?.title ?? '' : '',
-          chapter,
-          segments,
-        });
-        // ★ 续读真值保序：openChapter 不带 charOffset 会把持久化偏移覆盖为空
-        // （store 语义：lastRead 整体重写）⇒ 必须把本轮定位用的偏移原样传入，
-        // 优先级与 initialLineIndex 一致：路由 charOffset > 同章持久化 charOffset
-        const routeOffset = params?.charOffset;
-        const restoreOffset =
-          typeof routeOffset === 'number' && routeOffset >= 0
-            ? routeOffset
-            : lastRead &&
-                lastRead.bookId === bookId &&
-                lastRead.chapterId === chapterId &&
-                typeof lastRead.charOffset === 'number' &&
-                lastRead.charOffset >= 0
-              ? lastRead.charOffset
-              : undefined;
-        openChapter(chapter.bookId, chapter.id, params?.segmentId, undefined, restoreOffset);
-      } catch (e) {
-        if (!cancelled) {
+    centerRef.current = chapterId;
+    setActiveChapterId(chapterId);
+    setSwitchSeq((s) => s + 1); // 路由进入/跳转也驱动列表重挂载（initialScrollIndex 重算）
+    const retain = retainSetFor(chapterId);
+    const before = winRef.current;
+    const cached = windowGet(before, chapterId);
+    const needLoad = !cached && !windowIsLoading(before, chapterId);
+    setWin((w) => {
+      const rw = windowRecenter(w, chapterId, retain);
+      // updater 幂等：StrictMode 双调下 begin 结果一致（recenter 只裁剪不新增）
+      return needLoad ? (windowBegin(rw, chapterId) ?? rw) : rw;
+    });
+    // ★ 续读真值保序：openChapter 不带 charOffset 会把持久化偏移覆盖为空
+    // （store 语义：lastRead 整体重写）⇒ 必须把本轮定位用的偏移原样传入，
+    // 优先级与 initialLineIndex 一致：路由 charOffset > 同章持久化 charOffset
+    const finalize = (data: LoadedChapter) => {
+      const routeOffset = params?.charOffset;
+      const restoreOffset =
+        typeof routeOffset === 'number' && routeOffset >= 0
+          ? routeOffset
+          : lastRead &&
+              lastRead.bookId === bookId &&
+              lastRead.chapterId === chapterId &&
+              typeof lastRead.charOffset === 'number' &&
+              lastRead.charOffset >= 0
+            ? lastRead.charOffset
+            : undefined;
+      openChapter(data.chapter.bookId, data.chapter.id, params?.segmentId, undefined, restoreOffset);
+    };
+    if (cached) {
+      finalize(cached);
+    } else if (needLoad) {
+      void (async () => {
+        try {
+          const data = await loadChapterData(chapterId);
+          if (cancelled) {
+            return;
+          }
+          setWin((w) => windowPut(w, chapterId, data));
+          finalize(data);
+        } catch (e) {
+          if (cancelled) {
+            return;
+          }
+          setWin((w) => windowFail(w, chapterId));
           setError((e as Error).message ?? '加载失败');
         }
-      }
-    })();
+      })();
+    }
     return () => {
       cancelled = true;
     };
     // jumpSeq 入参：重复跳转同章也要重置 effect（路由浅合并语义）
   }, [bookId, chapterId, jumpSeq]);
 
+  // ── 邻章预取（R2b2）：中心就绪后后台装载 prev/next；begin 闸门去重 ──
+  useEffect(() => {
+    if (!loaded || !activeChapterId) {
+      return;
+    }
+    const sib = TextLibraryService.getSiblingChapters(activeChapterId);
+    if (!sib.success || !sib.data) {
+      return;
+    }
+    for (const nid of [sib.data.prev?.id, sib.data.next?.id]) {
+      if (!nid) {
+        continue;
+      }
+      const before = winRef.current;
+      if (windowHas(before, nid) || windowIsLoading(before, nid)) {
+        continue;
+      }
+      setWin((w) => windowBegin(w, nid) ?? w);
+      void (async () => {
+        try {
+          const data = await loadChapterData(nid);
+          setWin((w) => windowPut(w, nid, data));
+        } catch {
+          setWin((w) => windowFail(w, nid));
+        }
+      })();
+    }
+  }, [loaded, activeChapterId, loadChapterData]);
+
+  // ── 中心章 lastRead 同步（R2b2）：就地切换不产生滚动事件，若不在此
+  // 同步，杀进程重开会恢复到切换前的旧章（真机实测复现）。与 R1 路由
+  // 跳章语义一致：跳到新中心 = lastRead 重写为新章（charOffset 空 = 章首）；
+  // 之后的滚动停止仍由 recordProgress 以码点真值覆盖。
+  useEffect(() => {
+    if (!loaded || loaded.chapter.id !== activeChapterId || !bookId) {
+      return;
+    }
+    if (lastRead?.bookId === bookId && lastRead?.chapterId === activeChapterId) {
+      return;
+    }
+    openChapter(bookId, activeChapterId, undefined, undefined, undefined);
+  }, [loaded, activeChapterId, bookId, lastRead, openChapter]);
+
   // ── 行化（L1）：段文本按码点切行，行不跨段、章局码点连续 ──
   const segments = loaded?.segments ?? EMPTY_SEGMENTS;
   const layout = useMemo(
-    () => layoutChapter(chapterId, segments, geometry),
-    [chapterId, segments, geometry],
+    () => layoutChapter(activeChapterId, segments, geometry),
+    [activeChapterId, segments, geometry],
   );
   const getItemLayout = useMemo(() => getItemLayoutOf(geometry), [geometry]);
 
@@ -172,7 +295,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     }
     let max = 0;
     for (const seg of segments) {
-      const res = annotate(seg.text, pinyinMode, { workId: chapterId, bookId });
+      const res = annotate(seg.text, pinyinMode, { workId: activeChapterId, bookId });
       if (res.success && res.data) {
         const len = maxPinyinLength(res.data);
         if (len > max) {
@@ -181,7 +304,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       }
     }
     return max;
-  }, [segments, pinyinOn, pinyinMode, chapterId, bookId]);
+  }, [segments, pinyinOn, pinyinMode, activeChapterId, bookId]);
   const unifiedPinyinFontSize = useMemo(() => {
     if (!pinyinOn || chapterMaxPinyinLen < 1) {
       return undefined;
@@ -203,36 +326,40 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   }, [segments]);
 
   // ── 续读定位（L2，开环）：路由 charOffset > 持久化 charOffset > segmentId > 章首 ──
+  // 路由参数只对「参数所属章」生效：就地切换到其他章后 params 仍是旧章的，
+  // 不得把旧章偏移映射进新章 layout（归属保护）。
   const initialLineIndex = useMemo(() => {
     if (layout.lines.length === 0) {
       return 0;
     }
     const clamp = (i: number) => Math.min(Math.max(i, 0), layout.lines.length - 1);
-    const routeOffset = params?.charOffset;
+    const routeOwned = params?.chapterId === activeChapterId;
+    const routeOffset = routeOwned ? params?.charOffset : undefined;
     if (typeof routeOffset === 'number' && routeOffset >= 0) {
       return clamp(lineAtCharOffset(layout.lines, routeOffset));
     }
     if (
       lastRead &&
       lastRead.bookId === bookId &&
-      lastRead.chapterId === chapterId &&
+      lastRead.chapterId === activeChapterId &&
       typeof lastRead.charOffset === 'number' &&
       lastRead.charOffset >= 0
     ) {
       return clamp(lineAtCharOffset(layout.lines, lastRead.charOffset));
     }
-    if (params?.segmentId) {
-      const idx = layout.lines.findIndex((l) => l.segmentId === params.segmentId);
+    const routeSegmentId = routeOwned ? params?.segmentId : undefined;
+    if (routeSegmentId) {
+      const idx = layout.lines.findIndex((l) => l.segmentId === routeSegmentId);
       if (idx >= 0) {
         return idx;
       }
     }
     return 0;
     // 仅在章内容/定位输入变化时重算（initialScrollIndex 只在挂载时生效，
-    // 列表以 key=chapterId:jumpSeq 强制重挂载，见下）
-  }, [layout, bookId, chapterId]);
+    // 列表以 key=activeChapterId:switchSeq 强制重挂载，见下）
+  }, [layout, bookId, activeChapterId, params]);
 
-  const listKey = `${chapterId}:${jumpSeq}`;
+  const listKey = `${activeChapterId}:${switchSeq}`;
 
   // ── 滚动停止 → 位置真值持久化（码点，非像素）──
   const handleScrollEnd = useCallback(
@@ -263,24 +390,48 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [navigation],
   );
 
-  // ── 章间导航（R1：按钮式；R2 起为滑窗 + 双向预拼）──
+  // ── 章间导航（R2b2：滑窗就地切换，不再路由重导航）──
   const siblings = useMemo(() => {
-    if (!loaded) {
+    if (!activeChapterId) {
       return {};
     }
-    const res = TextLibraryService.getSiblingChapters(chapterId);
+    const res = TextLibraryService.getSiblingChapters(activeChapterId);
     return res.success ? res.data ?? {} : {};
-  }, [loaded, chapterId]);
+  }, [activeChapterId]);
 
+  /**
+   * 就地切换章：命中窗缓存零加载直切；未命中 recenter（清窗+陈旧丢弃）后
+   * 经 begin 闸门装载。目标未就绪期间渲染 spinner（不清屏旧章内容由
+   * loaded=null 分支统一处理），预取命中时用户无感。
+   */
   const jumpTo = useCallback(
     (cid: string) => {
-      navigation?.navigate('Reader', {
-        bookId,
-        chapterId: cid,
-        jumpSeq: Date.now(),
+      if (!cid || cid === centerRef.current) {
+        return;
+      }
+      const retain = retainSetFor(cid);
+      centerRef.current = cid;
+      setActiveChapterId(cid);
+      setSwitchSeq((s) => s + 1);
+      // 装载判定用合并前窗：recenter 只裁剪不新增，begin 判定结果与合并后一致
+      const before = winRef.current;
+      const needLoad = !windowHas(before, cid) && !windowIsLoading(before, cid);
+      setWin((w) => {
+        const rw = windowRecenter(w, cid, retain);
+        return needLoad ? (windowBegin(rw, cid) ?? rw) : rw;
       });
+      if (needLoad) {
+        void (async () => {
+          try {
+            const data = await loadChapterData(cid);
+            setWin((w) => windowPut(w, cid, data));
+          } catch {
+            setWin((w) => windowFail(w, cid));
+          }
+        })();
+      }
     },
-    [bookId, navigation],
+    [loadChapterData, retainSetFor],
   );
 
   // ── 行渲染 ──
@@ -302,7 +453,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           unifiedPinyinFontSize={unifiedPinyinFontSize}
           pinyinMode={pinyinMode}
           conversionMode={conversionMode}
-          workId={chapterId}
+          workId={activeChapterId}
           bookId={bookId}
           onPressChar={handlePressChar(seg.text)}
         />
@@ -317,7 +468,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       unifiedPinyinFontSize,
       pinyinMode,
       conversionMode,
-      chapterId,
+      activeChapterId,
       bookId,
       handlePressChar,
     ],
@@ -380,8 +531,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         />
       )}
 
-      {/* 底栏：章间导航 */}
-      {loaded ? (
+      {/* 底栏：章间导航（就地切换中也保持显示，目标装载时按钮沿用 siblings） */}
+      {activeChapterId ? (
         <View style={[styles.footer, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Pressable
             hitSlop={8}
