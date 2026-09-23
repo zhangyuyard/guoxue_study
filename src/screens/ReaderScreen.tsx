@@ -24,7 +24,7 @@ import {
 } from 'react-native';
 
 import LineRow from '@/components/reader/LineRow';
-import { isUserBookId, TextLibraryService } from '@/services/TextLibraryService';
+import { TextLibraryService } from '@/services/TextLibraryService';
 import { UserBookService } from '@/services/UserBookService';
 import { useReaderStore } from '@/store/useReaderStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
@@ -105,11 +105,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     setLoaded(null);
     (async () => {
       try {
-        if (isUserBookId(bookId)) {
-          const ensure = await UserBookService.ensureBookLoaded(bookId);
-          if (!ensure.success) {
-            throw new Error(ensure.error ?? '用户书籍加载失败');
-          }
+        // 懒水合入口（内置书与用户书同一 API）：启动只注册元数据壳
+        // （segments 空），必须先水合再 getChapter，否则「本章暂无正文」
+        const ensure = await UserBookService.ensureBookLoaded(bookId);
+        if (!ensure.success) {
+          throw new Error(ensure.error ?? '书籍加载失败');
         }
         const chapterRes = TextLibraryService.getChapter(chapterId);
         if (!chapterRes.success || !chapterRes.data) {
