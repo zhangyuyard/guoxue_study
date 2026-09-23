@@ -12,11 +12,15 @@ import {
   CHAR_LINE_HEIGHT_RATIO,
   PINYIN_LINE_HEIGHT_RATIO,
   PINYIN_SIZE_FLOOR,
+  PINYIN_UNIFIED_FLOOR,
+  PINYIN_UNIFIED_RATIO,
+  LATIN_WIDTH_K,
   charGapFor,
   getItemLayoutOf,
   layoutChapter,
   pinyinRowMetrics,
   resolveGeometry,
+  unifiedPinyinFontSizeFor,
   type Line,
 } from '../reader/geometry';
 import {
@@ -215,5 +219,49 @@ describe('getItemLayoutOf：无表纯算式（L1/L3 唯一入口）', () => {
     expect(fn({} as Line, 7)).toEqual({ length: 50, offset: 350, index: 7 });
     const gOff = resolveGeometry({ fontSize: 18, lineHeight: 1.6, pinyinEnabled: false, containerWidth: 320 });
     expect(getItemLayoutOf(gOff)(null, 3)).toEqual({ length: 29, offset: 87, index: 3 });
+  });
+
+  describe('unifiedPinyinFontSizeFor（全章统一拼音字号，随档位变化）', () => {
+    it('maxLen=4 时档位有梯度：24 档 > 20/18/16 档（修复「各档恒 8px 无梯度」）', () => {
+      const s16 = unifiedPinyinFontSizeFor(16, 4);
+      const s18 = unifiedPinyinFontSizeFor(18, 4);
+      const s20 = unifiedPinyinFontSizeFor(20, 4);
+      const s24 = unifiedPinyinFontSizeFor(24, 4);
+      expect(s24).toBeGreaterThan(s20);
+      expect(s20).toBeGreaterThanOrEqual(s18);
+      expect(s18).toBeGreaterThanOrEqual(s16);
+      expect(s16).toBeGreaterThanOrEqual(PINYIN_UNIFIED_FLOOR);
+      // 数值锚：24 档 = min(round(24×0.45)=11, floor(24×1.7/4)=10, 13) = 10
+      expect(s24).toBe(10);
+    });
+
+    it('最长拼音越长字号越小（溢出保护）：maxLen 单调', () => {
+      const len3 = unifiedPinyinFontSizeFor(24, 3);
+      const len4 = unifiedPinyinFontSizeFor(24, 4);
+      const len6 = unifiedPinyinFontSizeFor(24, 6);
+      expect(len3).toBeGreaterThan(len4);
+      expect(len4).toBeGreaterThan(len6);
+    });
+
+    it('下限与上限：极长拼音不跌破 8；短拼音不超 pinyinSize', () => {
+      expect(unifiedPinyinFontSizeFor(24, 12)).toBe(PINYIN_UNIFIED_FLOOR);
+      expect(unifiedPinyinFontSizeFor(24, 1)).toBeLessThanOrEqual(
+        Math.max(PINYIN_SIZE_FLOOR, Math.round(24 * 0.55)),
+      );
+    });
+
+    it('maxLen<1 返回 0（调用方据此走 undefined 缺省）', () => {
+      expect(unifiedPinyinFontSizeFor(24, 0)).toBe(0);
+      expect(unifiedPinyinFontSizeFor(24, -1)).toBe(0);
+    });
+
+    it('比例系数口径锚：公式各因子在档位上的单调方向', () => {
+      // PINYIN_UNIFIED_RATIO 与 LATIN_WIDTH_K 的口径锚（变异敏感）：
+      // ratio 提到 0.55 时 24/maxLen4 = min(13,10)=10 不变，但 16 档抬到 min(9,6)=6→8 不变，
+      // 锚定中间值 20/maxLen4：min(round(9)=9, floor(34/4)=8) = 8（ratio=0.55 时为 9→与 K 联动变 8？）
+      // 取不受另一因子影响的组合：24/maxLen6 = min(11, floor(40.8/6)=6) = 6→8
+      expect(Math.round(24 * PINYIN_UNIFIED_RATIO)).toBe(11);
+      expect(Math.floor((24 * LATIN_WIDTH_K) / 4)).toBe(10);
+    });
   });
 });

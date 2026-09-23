@@ -36,6 +36,33 @@ export function charGapFor(pinyinMode: 'full' | 'rare' | 'off', fontSize: number
     : Math.max(2, Math.round(fontSize * 0.06));
 }
 
+/**
+ * 全章统一拼音字号（R2b3 观感统一 + R2c 档位跟随）。
+ *
+ * 三个约束取最小：
+ * 1. 目标观感 = round(fontSize × PINYIN_UNIFIED_RATIO)（≈0.45，随档位线性变化）；
+ * 2. 最长拼音不溢出格宽：拉丁字符实际宽 ≈0.6×字号，全章最长 maxLen 个字符
+ *    放进 1em 格 ⇒ S ≤ fontSize×LATIN_WIDTH_K/maxLen（K≈1.7 为实测校准系数）；
+ * 3. 上限 pinyinSize（比例观感）、下限 8（可读性）。
+ * 旧行为（floor(fontSize/maxLen) 被 8 下限拍死 ⇒ 各档恒 8px）即此函数
+ * 在 K=1、ratio 无关时的退化，已由真机确认观感过小且档位无梯度。
+ */
+export const PINYIN_UNIFIED_RATIO = 0.45;
+/** 拉丁字符宽系数：字符实际宽 ≈ 字号/K（含声调字母，实测校准） */
+export const LATIN_WIDTH_K = 1.7;
+/** 统一拼音字号下限 */
+export const PINYIN_UNIFIED_FLOOR = 8;
+
+export function unifiedPinyinFontSizeFor(fontSize: number, chapterMaxPinyinLen: number): number {
+  if (chapterMaxPinyinLen < 1) {
+    return 0;
+  }
+  const target = Math.round(fontSize * PINYIN_UNIFIED_RATIO);
+  const fitCap = Math.floor((fontSize * LATIN_WIDTH_K) / chapterMaxPinyinLen);
+  const pinyinSize = Math.max(PINYIN_SIZE_FLOOR, Math.round(fontSize * PINYIN_FONT_RATIO));
+  return Math.max(PINYIN_UNIFIED_FLOOR, Math.min(target, fitCap, pinyinSize));
+}
+
 /** 注音行的行高子项（渲染器与几何层共同消费，消除两处公式漂移） */
 export interface PinyinRowMetrics {
   readonly pinyinSize: number;

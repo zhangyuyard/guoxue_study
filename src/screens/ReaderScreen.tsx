@@ -29,7 +29,7 @@ import { UserBookService } from '@/services/UserBookService';
 import { useReaderStore } from '@/store/useReaderStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getColors, type ThemeColors } from '@/theme';
-import { charGapFor, getItemLayoutOf, layoutChapter, pinyinRowMetrics, resolveGeometry } from '@/reader/geometry';
+import { charGapFor, getItemLayoutOf, layoutChapter, resolveGeometry, unifiedPinyinFontSizeFor } from '@/reader/geometry';
 import { lineAtCharOffset } from '@/reader/position';
 import { charOffsetAtY } from '@/reader/position';
 import { annotate, maxPinyinLength } from '@/services/PinyinService';
@@ -328,9 +328,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     if (!pinyinOn || chapterMaxPinyinLen < 1) {
       return undefined;
     }
-    const pinyinSize = pinyinRowMetrics(fontSize, lineHeight).pinyinSize;
-    return Math.max(8, Math.min(pinyinSize, Math.floor(fontSize / chapterMaxPinyinLen)));
-  }, [pinyinOn, chapterMaxPinyinLen, fontSize, lineHeight]);
+    return unifiedPinyinFontSizeFor(fontSize, chapterMaxPinyinLen);
+  }, [pinyinOn, chapterMaxPinyinLen, fontSize]);
 
   // 段内码点基准备查：line.charStart（章局）→ 段内 [segStart, segEnd)
   const segmentSpans = useMemo(() => {
