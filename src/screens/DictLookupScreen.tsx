@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -48,6 +49,8 @@ export default function DictLookupScreen({ route, navigation }: Props): React.JS
 
   const [query, setQuery] = useState(route.params?.headword ?? '');
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  /** 搜索区底部绝对 y（联想浮层 Modal 定位基准；Modal 独立 window，脱离 View 树 z 序） */
+  const [searchBottomY, setSearchBottomY] = useState(0);
   const [result, setResult] = useState<DictLookupResult | null>(null);
   const [notFound, setNotFound] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -148,7 +151,10 @@ export default function DictLookupScreen({ route, navigation }: Props): React.JS
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* 搜索区 */}
-      <View style={[styles.searchWrap, { paddingTop: insets.top + 8, borderColor: colors.border }]}>
+      <View
+        style={[styles.searchWrap, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderColor: colors.border }]}
+        onLayout={(e) => setSearchBottomY(e.nativeEvent.layout.y + e.nativeEvent.layout.height)}
+      >
         <View style={[styles.searchBox, { backgroundColor: colors.inputBackground }]}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
@@ -167,21 +173,6 @@ export default function DictLookupScreen({ route, navigation }: Props): React.JS
             </Pressable>
           ) : null}
         </View>
-        {suggestions.length > 0 ? (
-          <View style={[styles.suggestionBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-              {suggestions.map((s) => (
-                <Pressable
-                  key={s}
-                  style={({ pressed }) => [styles.suggestionItem, pressed && styles.pressed]}
-                  onPress={() => handleWordTap(s)}
-                >
-                  <Text style={[styles.suggestionText, { color: colors.text }]}>{s}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        ) : null}
       </View>
 
       {/* 结果区 */}
@@ -302,6 +293,30 @@ export default function DictLookupScreen({ route, navigation }: Props): React.JS
           </View>
         )}
       </ScrollView>
+      {/* 联想浮层：Modal 级（独立 window 恒在最上层，不参与 View 树 z 序）。
+          定位基准 = 搜索区底部绝对 y（onLayout 实测）；点空白收起。 */}
+      <Modal transparent visible={suggestions.length > 0} onRequestClose={() => setSuggestions([])}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setSuggestions([])}>
+          <View
+            style={[styles.suggestionSheet, { top: searchBottomY + 8, backgroundColor: colors.card, borderColor: colors.border }]}
+          >
+            <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+              {suggestions.map((s) => (
+                <Pressable
+                  key={s}
+                  style={({ pressed }) => [styles.suggestionItem, pressed && styles.pressed]}
+                  onPress={() => {
+                    setSuggestions([]);
+                    handleWordTap(s);
+                  }}
+                >
+                  <Text style={[styles.suggestionText, { color: colors.text }]}>{s}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -315,6 +330,9 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 8,
+    // Android z 序保险：ScrollView 兄弟的 zIndex 不可靠（真机反馈浮层「透出
+    // 下层」），整层搜索区垫背景 + elevation 抬到结果区之上，浮层随之不透。
+    elevation: 4,
   },
   searchBox: {
     flexDirection: 'row',
@@ -335,20 +353,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     padding: 4,
   },
-  suggestionBox: {
-    // 下拉浮层（用户裁定）：绝对定位悬浮在搜索区下方，不占文档流——
-    // 原文档流版会把结果区整体下推（真机观察），联想出现/消失引起跳动。
+  // 联想浮层演化（用户两次真机反馈）：文档流版推挤结果区 → absolute 版仍被
+  // 结果区 ScrollView 盖住（Android 兄弟 z 序对 ScrollView 不可靠，父层垫
+  // elevation 也不保）→ 最终 Modal 级：独立 window 恒在最上层，不参与 z 序。
+  modalBackdrop: {
+    flex: 1,
+  },
+  suggestionSheet: {
     position: 'absolute',
-    top: '100%',
-    left: 12,
-    right: 12,
-    zIndex: 10,
-    // Android 阴影层级（elevation 高于结果区 ScrollView 才盖得住）
-    elevation: 8,
+    left: 16,
+    right: 16,
     maxHeight: 280,
     borderRadius: 10,
+    overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     paddingVertical: 4,
+    elevation: 8,
   },
   suggestionItem: {
     paddingHorizontal: 12,
