@@ -203,13 +203,16 @@ const CharCell = React.memo(function CharCell({
   const pinyinFontSize =
     unifiedPinyinFontSize ??
     Math.max(8, Math.min(pinyinSize, Math.floor(fontSize / Math.max(1, pinyinLen))));
-  // 汉字点按：选区扩展中（onPressChar 存在）→ 点按扩展选区；
-  // 否则保持原行为——点已划线字符打开关联笔记
-  const pressChar = onPressChar
-    ? () => onPressChar(cell.index)
-    : highlight && onHighlightPress
+  // 汉字点按优先级（R2d-2，真机实证反转）：点已划线字 = 查看划线（面板），
+  // 未划线字 = 查词（DictLookup）。旧序（onPressChar 恒优先）会让划线点击被
+  // 查词永远抢占（renderItem 始终传查词回调 ⇒ 划线不可点，真机实测复现）。
+  // 后续真选区落地时由「选区模式开关」显式接管，而非靠本优先级顺位。
+  const pressChar =
+    highlight && onHighlightPress
       ? () => onHighlightPress(highlight)
-      : undefined;
+      : onPressChar
+        ? () => onPressChar(cell.index)
+        : undefined;
   // 仅多音字拼音响应点击（弹出全部读音），不占用汉字的划线点击与长按手势
   const pressPinyin =
     cell.isPolyphone && onPressPinyin ? () => onPressPinyin(cell) : undefined;

@@ -24,7 +24,9 @@ import {
 } from 'react-native';
 
 import LineRow from '@/components/reader/LineRow';
+import HighlightActionSheet from '@/components/reader/HighlightActionSheet';
 import { TextLibraryService } from '@/services/TextLibraryService';
+import { StorageService } from '@/services/StorageService';
 import { UserBookService } from '@/services/UserBookService';
 import { useReaderStore } from '@/store/useReaderStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
@@ -32,6 +34,7 @@ import { getColors, type ThemeColors } from '@/theme';
 import { charGapFor, getItemLayoutOf, layoutChapter, resolveGeometry, unifiedPinyinFontSizeFor } from '@/reader/geometry';
 import { lineAtCharOffset } from '@/reader/position';
 import { charOffsetAtY } from '@/reader/position';
+import { buildSegmentHighlight } from '@/reader/highlightFactory';
 import { annotate, maxPinyinLength } from '@/services/PinyinService';
 import { currentPolyphoneSalt } from '@/hooks/usePinyin';
 import { prewarmPinyinCache } from '@/utils/pinyin';
@@ -47,7 +50,7 @@ import {
   type ChapterWindow,
 } from '@/reader/chapterWindow';
 import type { ReaderRouteParams } from '@/navigation/types';
-import type { Chapter, TextSegment } from '@/types';
+import type { Chapter, Highlight, HighlightColor, TextSegment } from '@/types';
 
 /** ReaderScreen 所需的最小导航能力（RootStack 注入或阅读 Tab 手动构造均可满足） */
 interface ReaderScreenProps {
@@ -343,6 +346,83 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     return spans;
   }, [segments]);
 
+
+  // ── 划线（R2d）：章级装载 + 整段粒度 MVP（精确选区留 selectionRange 后续迭代）──
+  const [chapterHighlights, setChapterHighlights] = useState<Highlight[]>([]);
+  const [highlightSheet, setHighlightSheet] = useState<
+    | { mode: 'create'; segmentId: string; text: string }
+    | { mode: 'view'; highlight: Highlight }
+    | null
+  >(null);
+
+  // 章切换 → 重拉本章划线（同步读 db，量小；cancelled 防 StrictMode 竞态写回）
+  useEffect(() => {
+    if (!bookId || !activeChapterId) {
+      setChapterHighlights([]);
+      return;
+    }
+    let cancelled = false;
+    const res = StorageService.getHighlights(bookId, activeChapterId);
+    if (!cancelled) {
+      setChapterHighlights(res.success && res.data ? res.data : []);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [bookId, activeChapterId]);
+
+  // segmentId → 划线组（renderItem 行级取用）
+  const segmentHighlightMap = useMemo(() => {
+    const m = new Map<string, Highlight[]>();
+    for (const h of chapterHighlights) {
+      const arr = m.get(h.segmentId);
+      if (arr) {
+        arr.push(h);
+      } else {
+        m.set(h.segmentId, [h]);
+      }
+    }
+    return m;
+  }, [chapterHighlights]);
+
+  const handleLongPressChar = useCallback(
+    (seg: TextSegment) => () => {
+      setHighlightSheet({ mode: 'create', segmentId: seg.id, text: seg.text });
+    },
+    [],
+  );
+
+  const handleViewHighlight = useCallback((h: Highlight) => {
+    setHighlightSheet({ mode: 'view', highlight: h });
+  }, []);
+
+  const handleCreateHighlight = useCallback(
+    (color: HighlightColor) => {
+      if (!highlightSheet || highlightSheet.mode !== 'create' || !bookId || !activeChapterId) {
+        return;
+      }
+      const text = highlightSheet.text;
+      const h = buildSegmentHighlight(bookId, activeChapterId, highlightSheet.segmentId, text, color);
+      const res = StorageService.saveHighlight(h);
+      if (res.success) {
+        setChapterHighlights((prev) => [h, ...prev]);
+        setHighlightSheet(null);
+      } else {
+        setError(res.error ?? '保存划线失败');
+        setHighlightSheet(null);
+      }
+    },
+    [highlightSheet, bookId, activeChapterId],
+  );
+
+  const handleDeleteHighlight = useCallback((id: string) => {
+    const res = StorageService.deleteHighlight(id);
+    if (res.success) {
+      setChapterHighlights((prev) => prev.filter((h) => h.id !== id));
+    }
+    setHighlightSheet(null);
+  }, []);
+
   // ── 续读定位（L2，开环）：路由 charOffset > 持久化 charOffset > segmentId > 章首 ──
   // 路由参数只对「参数所属章」生效：就地切换到其他章后 params 仍是旧章的，
   // 不得把旧章偏移映射进新章 layout（归属保护）。
@@ -475,6 +555,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           workId={activeChapterId}
           bookId={bookId}
           onPressChar={handlePressChar(seg.text)}
+          highlights={segmentHighlightMap.get(item.segmentId)}
+          onLongPressChar={handleLongPressChar(seg)}
+          onPressHighlight={handleViewHighlight}
         />
       );
     },
@@ -490,6 +573,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       activeChapterId,
       bookId,
       handlePressChar,
+      handleLongPressChar,
+      segmentHighlightMap,
+      handleViewHighlight,
     ],
   );
 
@@ -581,6 +667,21 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           </Pressable>
         </View>
       ) : null}
+      <HighlightActionSheet
+        visible={highlightSheet !== null}
+        onClose={() => setHighlightSheet(null)}
+        mode={highlightSheet?.mode ?? 'create'}
+        text={
+          highlightSheet
+            ? highlightSheet.mode === 'view'
+              ? highlightSheet.highlight.text
+              : highlightSheet.text
+            : ''
+        }
+        highlight={highlightSheet?.mode === 'view' ? highlightSheet.highlight : undefined}
+        onCreate={handleCreateHighlight}
+        onDelete={handleDeleteHighlight}
+      />
     </View>
   );
 }

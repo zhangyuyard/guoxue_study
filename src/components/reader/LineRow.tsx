@@ -39,6 +39,8 @@ export interface LineRowProps {
   /** 点按汉字回调（段内码点索引，供上层查字/选区扩展） */
   onPressChar?: (index: number) => void;
   onLongPressChar?: (index: number) => void;
+  /** 点按命中划线回调（透传 PinyinText.onPressHighlight，R2d-2 查看面板入口） */
+  onPressHighlight?: (h: Highlight) => void;
 }
 
 /** INV-G1 运行期探针：行高 ≠ rowHeight 时计数（真机验收须恒 0） */
@@ -58,6 +60,7 @@ const LineRow = React.memo(function LineRow({
   workId,
   bookId,
   onPressChar,
+  onPressHighlight,
   onLongPressChar,
 }: LineRowProps) {
   const handleLayout = useCallback(
@@ -86,6 +89,7 @@ const LineRow = React.memo(function LineRow({
         workId={workId}
         bookId={bookId}
         onPressChar={onPressChar}
+        onPressHighlight={onPressHighlight}
         onLongPressChar={onLongPressChar}
       />
     </View>

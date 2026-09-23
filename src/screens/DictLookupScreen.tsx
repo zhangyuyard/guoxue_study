@@ -169,15 +169,17 @@ export default function DictLookupScreen({ route, navigation }: Props): React.JS
         </View>
         {suggestions.length > 0 ? (
           <View style={[styles.suggestionBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            {suggestions.map((s) => (
-              <Pressable
-                key={s}
-                style={({ pressed }) => [styles.suggestionItem, pressed && styles.pressed]}
-                onPress={() => handleWordTap(s)}
-              >
-                <Text style={[styles.suggestionText, { color: colors.text }]}>{s}</Text>
-              </Pressable>
-            ))}
+            <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+              {suggestions.map((s) => (
+                <Pressable
+                  key={s}
+                  style={({ pressed }) => [styles.suggestionItem, pressed && styles.pressed]}
+                  onPress={() => handleWordTap(s)}
+                >
+                  <Text style={[styles.suggestionText, { color: colors.text }]}>{s}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
           </View>
         ) : null}
       </View>
@@ -334,6 +336,16 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   suggestionBox: {
+    // 下拉浮层（用户裁定）：绝对定位悬浮在搜索区下方，不占文档流——
+    // 原文档流版会把结果区整体下推（真机观察），联想出现/消失引起跳动。
+    position: 'absolute',
+    top: '100%',
+    left: 12,
+    right: 12,
+    zIndex: 10,
+    // Android 阴影层级（elevation 高于结果区 ScrollView 才盖得住）
+    elevation: 8,
+    maxHeight: 280,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
     paddingVertical: 4,
