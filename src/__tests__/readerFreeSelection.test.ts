@@ -41,10 +41,19 @@ const analysisPanel = readSrc('components/reader/AnalysisPanel.tsx');
 const dictService = readSrc('services/DictionaryService.ts');
 
 describe('① 两渲染模式的 per-char 点按支持', () => {
-  test('PinyinText：字格支持 onPressChar（优先于划线点击），长按保留', () => {
+  test('PinyinText：点已划线字 = 划线优先，未划线字 = 查词，长按保留', () => {
+    // 契约变更留痕（R2d，649daec）：旧断言「onPressChar 优先于划线点击」已随
+    // 真机实证反转——旧序让 renderItem 恒传的查词回调抢死划线点击（点划线字
+    // 永远进查词页，划线不可点）。新序：划线 > 查词；真选区将来由显式选区
+    // 模式接管，不再靠顺位。否定对照：旧序模式不得再现。
     expect(pinyinText).toMatch(/onPressChar\?: \(index: number\) => void;/);
-    expect(pinyinText).toMatch(/const pressChar = onPressChar/);
+    expect(pinyinText).toMatch(
+      /const pressChar =\s*\n\s*highlight && onHighlightPress/,
+    );
+    expect(pinyinText).toMatch(/\?\s*\(\) => onHighlightPress\(highlight\)/);
     expect(pinyinText).toMatch(/onPressChar\(cell\.index\)/);
+    // 否定对照（变异自证）：旧优先级模式回潮即红
+    expect(pinyinText).not.toMatch(/const pressChar = onPressChar/);
   });
 
   test('HighlightText：提供 onPressChar 时逐字渲染并按码点索引上报', () => {

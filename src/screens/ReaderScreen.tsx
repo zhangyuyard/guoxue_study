@@ -29,6 +29,7 @@ import { TextLibraryService } from '@/services/TextLibraryService';
 import { StorageService } from '@/services/StorageService';
 import { UserBookService } from '@/services/UserBookService';
 import { useReaderStore } from '@/store/useReaderStore';
+import { useNoteStore } from '@/store/useNoteStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getColors, type ThemeColors } from '@/theme';
 import { charGapFor, getItemLayoutOf, layoutChapter, resolveGeometry, unifiedPinyinFontSizeFor } from '@/reader/geometry';
@@ -349,6 +350,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
   // ── 划线（R2d）：章级装载 + 整段粒度 MVP（精确选区留 selectionRange 后续迭代）──
   const [chapterHighlights, setChapterHighlights] = useState<Highlight[]>([]);
+  const addNote = useNoteStore((st) => st.addNote);
+  const updateNoteContent = useNoteStore((st) => st.updateNoteContent);
+  const removeNote = useNoteStore((st) => st.removeNote);
+  const [highlightNoteMap, setHighlightNoteMap] = useState<Map<string, { id: string; content: string }>>(new Map());
   const [highlightSheet, setHighlightSheet] = useState<
     | { mode: 'create'; segmentId: string; text: string }
     | { mode: 'view'; highlight: Highlight }
@@ -363,8 +368,16 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     }
     let cancelled = false;
     const res = StorageService.getHighlights(bookId, activeChapterId);
+    const notesRes = StorageService.getNotes(bookId, activeChapterId);
     if (!cancelled) {
       setChapterHighlights(res.success && res.data ? res.data : []);
+      const map = new Map<string, { id: string; content: string }>();
+      for (const n of notesRes.success && notesRes.data ? notesRes.data : []) {
+        if (n.highlightId) {
+          map.set(n.highlightId, { id: n.id, content: n.content });
+        }
+      }
+      setHighlightNoteMap(map);
     }
     return () => {
       cancelled = true;
@@ -397,31 +410,93 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   }, []);
 
   const handleCreateHighlight = useCallback(
-    (color: HighlightColor) => {
+    (color: HighlightColor, noteText: string) => {
       if (!highlightSheet || highlightSheet.mode !== 'create' || !bookId || !activeChapterId) {
         return;
       }
       const text = highlightSheet.text;
       const h = buildSegmentHighlight(bookId, activeChapterId, highlightSheet.segmentId, text, color);
       const res = StorageService.saveHighlight(h);
-      if (res.success) {
-        setChapterHighlights((prev) => [h, ...prev]);
-        setHighlightSheet(null);
-      } else {
+      if (!res.success) {
         setError(res.error ?? '保存划线失败');
         setHighlightSheet(null);
+        return;
       }
+      let stored = h;
+      if (noteText) {
+        const noteId = addNote({
+          bookId,
+          chapterId: activeChapterId,
+          segmentId: highlightSheet.segmentId,
+          startOffset: 0,
+          endOffset: h.endOffset,
+          content: noteText,
+          highlightId: h.id,
+        });
+        if (noteId) {
+          // 回写 noteId：INSERT OR REPLACE 全字段覆盖（划线-笔记双向可查）
+          stored = { ...h, noteId };
+          StorageService.saveHighlight(stored);
+        }
+      }
+      setChapterHighlights((prev) => [stored, ...prev]);
+      setHighlightSheet(null);
     },
-    [highlightSheet, bookId, activeChapterId],
+    [highlightSheet, bookId, activeChapterId, addNote],
   );
 
-  const handleDeleteHighlight = useCallback((id: string) => {
-    const res = StorageService.deleteHighlight(id);
-    if (res.success) {
-      setChapterHighlights((prev) => prev.filter((h) => h.id !== id));
-    }
-    setHighlightSheet(null);
-  }, []);
+  /** view 态存笔记：无笔记 → 新建并回写 noteId；有 → 更新内容 */
+  const handleNoteSubmit = useCallback(
+    (content: string) => {
+      if (!highlightSheet || highlightSheet.mode !== 'view' || !bookId || !activeChapterId || !content) {
+        return;
+      }
+      const hl = highlightSheet.highlight;
+      const existing = highlightNoteMap.get(hl.id);
+      if (existing) {
+        updateNoteContent(existing.id, content);
+        setHighlightNoteMap((prev) => new Map(prev).set(hl.id, { id: existing.id, content }));
+      } else {
+        const noteId = addNote({
+          bookId,
+          chapterId: activeChapterId,
+          segmentId: hl.segmentId,
+          startOffset: hl.startOffset,
+          endOffset: hl.endOffset,
+          content,
+          highlightId: hl.id,
+        });
+        if (noteId) {
+          StorageService.saveHighlight({ ...hl, noteId });
+          setChapterHighlights((prev) => prev.map((x) => (x.id === hl.id ? { ...x, noteId } : x)));
+          setHighlightNoteMap((prev) => new Map(prev).set(hl.id, { id: noteId, content }));
+        }
+      }
+      setHighlightSheet(null);
+    },
+    [highlightSheet, bookId, activeChapterId, highlightNoteMap, addNote, updateNoteContent],
+  );
+
+  const handleDeleteHighlight = useCallback(
+    (id: string) => {
+      // 级联：删笔记再删划线（noteId 回写在划线行上，孤儿笔记防不住这里防）
+      const note = highlightNoteMap.get(id);
+      if (note) {
+        removeNote(note.id);
+        setHighlightNoteMap((prev) => {
+          const next = new Map(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+      const res = StorageService.deleteHighlight(id);
+      if (res.success) {
+        setChapterHighlights((prev) => prev.filter((h) => h.id !== id));
+      }
+      setHighlightSheet(null);
+    },
+    [highlightNoteMap, removeNote],
+  );
 
   // ── 续读定位（L2，开环）：路由 charOffset > 持久化 charOffset > segmentId > 章首 ──
   // 路由参数只对「参数所属章」生效：就地切换到其他章后 params 仍是旧章的，
@@ -679,7 +754,13 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             : ''
         }
         highlight={highlightSheet?.mode === 'view' ? highlightSheet.highlight : undefined}
+        note={
+          highlightSheet?.mode === 'view'
+            ? highlightNoteMap.get(highlightSheet.highlight.id)?.content ?? ''
+            : ''
+        }
         onCreate={handleCreateHighlight}
+        onNoteSubmit={handleNoteSubmit}
         onDelete={handleDeleteHighlight}
       />
     </View>

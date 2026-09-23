@@ -9,7 +9,7 @@
  * 朗读状态自包含于本组件（speak/stop/finish 订阅），ReaderScreen 不感知 TTS。
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import BottomSheet from '@/components/common/BottomSheet';
 import { speakText, stopSpeech, onSpeechFinish, onSpeechError } from '@/services/tts/TtsService';
@@ -25,9 +25,13 @@ export interface HighlightActionSheetProps {
   text: string;
   /** view 态必传：被查看的划线 */
   highlight?: Highlight;
-  /** create：选定颜色提交划线 */
-  onCreate: (color: HighlightColor) => void;
-  /** view：删除该划线 */
+  /** view 态：该划线关联笔记内容（无笔记时为空 → 输入即新建） */
+  note?: string;
+  /** create：选定颜色提交划线（可选附笔记，ReaderScreen 原子落库） */
+  onCreate: (color: HighlightColor, noteText: string) => void;
+  /** view：保存笔记（无笔记 → 新建并回写 noteId；有 → 更新内容） */
+  onNoteSubmit: (content: string) => void;
+  /** view：删除该划线（级联删笔记） */
   onDelete: (id: string) => void;
 }
 
@@ -52,12 +56,22 @@ function HighlightActionSheetBase({
   mode,
   text,
   highlight,
+  note,
   onCreate,
+  onNoteSubmit,
   onDelete,
 }: HighlightActionSheetProps): React.JSX.Element {
   const theme = useSettingsStore((s) => s.theme);
   const colors: ThemeColors = getColors(theme);
   const [speaking, setSpeaking] = useState(false);
+  const [noteText, setNoteText] = useState('');
+
+  // 每次打开重置输入（view 态预填已有笔记；create 态清空）
+  useEffect(() => {
+    if (visible) {
+      setNoteText(mode === 'view' ? note ?? '' : '');
+    }
+  }, [visible, mode, note]);
 
   // 朗读完成/出错 → 按钮复位（onSpeechFinish 返回 {remove} 句柄，卸载时退订）
   useEffect(() => {
@@ -99,7 +113,7 @@ function HighlightActionSheetBase({
         <Pressable
           key={color}
           accessibilityLabel={`划线颜色-${SWATCH_LABELS[color]}`}
-          onPress={() => onCreate(color)}
+          onPress={() => onCreate(color, noteText.trim())}
           style={({ pressed }) => [
             sheetStyles.swatchWrap,
             { opacity: pressed ? 0.6 : 1 },
@@ -115,7 +129,7 @@ function HighlightActionSheetBase({
   );
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={title} height={300}>
+    <BottomSheet visible={visible} onClose={onClose} title={title} height={380}>
       <View style={sheetStyles.container}>
         <Text
           style={[sheetStyles.preview, { color: colors.textSecondary }]}
@@ -126,16 +140,61 @@ function HighlightActionSheetBase({
         </Text>
 
         {mode === 'create' ? (
-          <View style={sheetStyles.actionRow}>
-            {swatchRow}
-          </View>
+          <>
+            <View style={sheetStyles.actionRow}>{swatchRow}</View>
+            <TextInput
+              style={[
+                sheetStyles.noteInput,
+                { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground },
+              ]}
+              value={noteText}
+              onChangeText={setNoteText}
+              placeholder="附一笔笔记（可选）"
+              placeholderTextColor={colors.textSecondary}
+              multiline
+              numberOfLines={2}
+              allowFontScaling={false}
+            />
+          </>
         ) : (
-          <View
-            style={[sheetStyles.colorBar, { backgroundColor: highlight ? SWATCH_COLORS[highlight.color] : colors.border }]}
-          />
+          <>
+            <View
+              style={[
+                sheetStyles.colorBar,
+                { backgroundColor: highlight ? SWATCH_COLORS[highlight.color] : colors.border },
+              ]}
+            />
+            <TextInput
+              style={[
+                sheetStyles.noteInput,
+                { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground },
+              ]}
+              value={noteText}
+              onChangeText={setNoteText}
+              placeholder="写点笔记…"
+              placeholderTextColor={colors.textSecondary}
+              multiline
+              numberOfLines={2}
+              allowFontScaling={false}
+            />
+          </>
         )}
 
         <View style={sheetStyles.buttonRow}>
+          {mode === 'view' ? (
+            <Pressable
+              accessibilityLabel="保存笔记"
+              onPress={() => onNoteSubmit(noteText.trim())}
+              style={({ pressed }) => [
+                sheetStyles.button,
+                { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+              ]}
+            >
+              <Text style={[sheetStyles.buttonText, { color: colors.primary }]} allowFontScaling={false}>
+                存笔记
+              </Text>
+            </Pressable>
+          ) : null}
           <Pressable
             accessibilityLabel={speaking ? '停止朗读' : '朗读'}
             onPress={handleToggleSpeak}
@@ -201,6 +260,17 @@ const sheetStyles = StyleSheet.create({
   colorBar: {
     height: 4,
     borderRadius: 2,
+  },
+  noteInput: {
+    minHeight: 56,
+    maxHeight: 88,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlignVertical: 'top',
   },
   buttonRow: {
     flexDirection: 'row',

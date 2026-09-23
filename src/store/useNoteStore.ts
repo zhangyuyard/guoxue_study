@@ -26,7 +26,7 @@ interface NoteState {
     endOffset: number;
     content: string;
     highlightId?: string;
-  }) => void;
+  }) => string | null;
   /** 更新笔记内容 */
   updateNoteContent: (id: string, content: string) => void;
   /** 删除笔记 */
@@ -72,9 +72,11 @@ export const useNoteStore = create<NoteState>()((set, get) => ({
     const res = StorageService.saveNote(note);
     if (res.success) {
       set((state) => ({ notes: [note, ...state.notes] }));
-    } else {
-      set({ error: res.error ?? '保存笔记失败' });
+      // 返回 id 供「划线回写 noteId」链路（R2d 笔记接线）；失败返回 null
+      return note.id;
     }
+    set({ error: res.error ?? '保存笔记失败' });
+    return null;
   },
 
   updateNoteContent: (id, content) => {
