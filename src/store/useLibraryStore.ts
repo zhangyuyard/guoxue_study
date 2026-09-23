@@ -7,6 +7,9 @@ import { create } from 'zustand';
 import type { Book, Category } from '@/types';
 import { TextLibraryService } from '@/services/TextLibraryService';
 import { UserBookService } from '@/services/UserBookService';
+// 注意：onUserBooksChanged 是 UserBookService 的**模块级导出**（不在
+// UserBookService 命名空间对象上）——用对象属性调会在模块加载时直接 TypeError。
+import { onUserBooksChanged } from '@/services/UserBookService';
 
 interface LibraryState {
   books: Book[];
@@ -81,5 +84,19 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
 
   clearSelection: () => set({ currentBookId: null }),
 }));
+
+// 超大书后台装载完成等异步注册时机（R2c 修复）：服务层注册表已更新但
+// 无同步调用点会触发书架重拉 ⇒ 订阅变更广播后立即重拉上屏，
+// 否则超大书（如后台解析 7s 的用户大书）在本会话内永久不可见。
+onUserBooksChanged(() => {
+  const booksRes = TextLibraryService.getBooks();
+  const catRes = TextLibraryService.getCategories();
+  if (booksRes.success && booksRes.data) {
+    useLibraryStore.setState({
+      books: booksRes.data,
+      categories: catRes.success && catRes.data ? catRes.data : [],
+    });
+  }
+});
 
 export default useLibraryStore;

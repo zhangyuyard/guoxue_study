@@ -169,6 +169,32 @@ let oversizedQueueRunning = false;
 /** 超大书 id → 源文件/缓存文件位置（超大书不落 db，删除时按此清理文件） */
 const oversizedBookFiles = new Map<string, { path: string; cachePath: string }>();
 
+/**
+ * 用户书集合变更监听（R2c 修复：超大书后台装载完成注册后通知 UI 层）。
+ * 后台队列在书架渲染之后才完成注册——没有任何同步调用点会触发书架重拉，
+ * 不通知则超大书在本次会话内永久不可见（真机实测复现）。
+ */
+const userBooksChangedListeners = new Set<() => void>();
+
+/** 订阅用户书集合变更（UI 层刷新用）；返回退订函数 */
+export function onUserBooksChanged(cb: () => void): () => void {
+  userBooksChangedListeners.add(cb);
+  return () => {
+    userBooksChangedListeners.delete(cb);
+  };
+}
+
+/** 广播用户书集合变更（异步注册写回成功后调用；单监听器异常不影响其余） */
+export function notifyUserBooksChanged(): void {
+  userBooksChangedListeners.forEach((cb) => {
+    try {
+      cb();
+    } catch {
+      // 监听器异常不阻断广播
+    }
+  });
+}
+
 /** 单个超大书后台装载任务 */
 interface OversizedTask {
   path: string;
@@ -4527,7 +4553,11 @@ async function processOversizedBooks(tasks: OversizedTask[]): Promise<Book[]> {
             ...currentUser,
             ...loaded.filter((b) => !currentUser.some((x) => x.id === b.id)),
           ];
-          TextLibraryService.registerUserBooks(merged);
+          const reg = TextLibraryService.registerUserBooks(merged);
+          if (reg.success) {
+            // 通知书架重拉：此注册发生在书架渲染之后（异步队列），无通知则不刷新
+            notifyUserBooksChanged();
+          }
         } catch {
           // 注册失败不阻断队列
         }
