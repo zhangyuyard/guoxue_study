@@ -35,6 +35,7 @@ import { getColors, type ThemeColors } from '@/theme';
 import { charGapFor, getItemLayoutOf, layoutChapter, resolveGeometry, unifiedPinyinFontSizeFor } from '@/reader/geometry';
 import { lineAtCharOffset } from '@/reader/position';
 import { charOffsetAtY } from '@/reader/position';
+import { offsetOfPage, pageAtOffset, paginateChapter } from '@/reader/pagination';
 import { buildSegmentHighlight } from '@/reader/highlightFactory';
 import { annotate, maxPinyinLength } from '@/services/PinyinService';
 import { currentPolyphoneSalt } from '@/hooks/usePinyin';
@@ -87,11 +88,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const lineHeight = useSettingsStore((s) => s.lineHeight);
   const pinyinMode = useSettingsStore((s) => s.pinyinMode);
   const conversionMode = useSettingsStore((s) => s.conversionMode);
+  const readerMode = useSettingsStore((s) => s.readerMode);
   const colors: ThemeColors = getColors(theme);
 
   const innerListRef = useRef<FlatList | null>(null);
 
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const pinyinOn = pinyinMode !== 'off';
   const pageMargin = pinyinOn ? PAGE_MARGIN_PINYIN : PAGE_MARGIN_PLAIN;
   const containerWidth = Math.max(0, windowWidth - pageMargin * 2);
@@ -498,6 +500,34 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [highlightNoteMap, removeNote],
   );
 
+  // ── R3-2 翻页（page 模式）：章分页 + 左右热区；scroll 模式零改动 ──
+  const [viewportHMeasured, setViewportH] = useState(0);
+  // Android「onLayout 仅在布局变化时派发」：二次挂载同尺寸 View 不再回调
+  // ⇒ viewportHMeasured 恒 0、翻页死。兜底 = 窗高 − 顶栏(52) − 底栏(39)
+  // （52/39 为本轮真机实测稳定值）；onLayout 真值到达时覆盖兜底。
+  const viewportH = viewportHMeasured || Math.round(windowHeight) - 52 - 39;
+  // 热区 bottom 让位底栏：热区 absolute 于 listWrap，若压到 footer 两端按钮，
+  // 章间导航被透明层吞 tap（真机实证：footer 按钮在热区 bounds 内全程无响应）
+  const [footerH, setFooterH] = useState(0);
+  const footerHEff = footerH || 39;
+  const pagination = useMemo(
+    () => paginateChapter(layout, geometry, viewportH),
+    [layout, geometry, viewportH],
+  );
+  const curPageRef = useRef(0);
+
+  const flipPage = useCallback(
+    (dir: 1 | -1) => {
+      if (pagination.pageCount === 0) {
+        return;
+      }
+      const next = Math.min(Math.max(curPageRef.current + dir, 0), pagination.pageCount - 1);
+      innerListRef.current?.scrollToOffset({ offset: offsetOfPage(pagination, next), animated: true });
+      curPageRef.current = next;
+    },
+    [pagination],
+  );
+
   // ── 续读定位（L2，开环）：路由 charOffset > 持久化 charOffset > segmentId > 章首 ──
   // 路由参数只对「参数所属章」生效：就地切换到其他章后 params 仍是旧章的，
   // 不得把旧章偏移映射进新章 layout（归属保护）。
@@ -548,8 +578,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       }
       recordProgress(line.segmentId, undefined, line.charStart);
       setSegment(line.segmentId);
+      // R3 互切：滚动位置 → 页号单源同步（翻页落点由同一 offset 系推导）
+      if (pagination.pageCount > 0) {
+        curPageRef.current = pageAtOffset(pagination, y);
+      }
     },
-    [layout, geometry, recordProgress, setSegment],
+    [layout, geometry, recordProgress, setSegment, pagination],
   );
 
   // ── 查字入口：点按汉字 → DictLookup ──
@@ -674,7 +708,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         <View style={styles.headerSpacer} />
       </View>
 
-      {/* 正文 */}
+      {/* 正文：listWrap 包裹（onLayout + 热区载体）。注意：tap 分发按 z 序，
+          热区 zIndex:10 会压过无 zIndex 的纵排 footer——footer 需 zIndex:20。 */}
       {error ? (
         <View style={styles.center}>
           <Text style={{ color: colors.textSecondary }}>{`加载失败：${error}`}</Text>
@@ -688,6 +723,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           <Text style={{ color: colors.textSecondary }}>本章暂无正文</Text>
         </View>
       ) : (
+        <View
+          style={styles.listWrap}
+          onLayout={(e) => setViewportH(e.nativeEvent.layout.height)}
+        >
         <FlatList
           key={listKey}
           data={layout.lines}
@@ -709,11 +748,31 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           style={styles.list}
           ref={innerListRef}
         />
+        {readerMode === 'page' && pagination.pageCount > 0 ? (
+          <>
+            {/* 翻页热区（R3-2 MVP）：左右 30% 翻页、中间 40% 保留点字查词/长按划线。
+                legado 同款取舍；手势仿真翻页（覆盖动画）为 R3 后续步。 */}
+            <Pressable
+              style={[styles.tapZoneL, { bottom: footerHEff }]}
+              accessibilityLabel="上一页"
+              onPress={() => flipPage(-1)}
+            />
+            <Pressable
+              style={[styles.tapZoneR, { bottom: footerHEff }]}
+              accessibilityLabel="下一页"
+              onPress={() => flipPage(1)}
+            />
+          </>
+        ) : null}
+        </View>
       )}
 
-      {/* 底栏：章间导航（就地切换中也保持显示，目标装载时按钮沿用 siblings） */}
+      {/* 底栏：章间导航 */}
       {activeChapterId ? (
-        <View style={[styles.footer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View
+          style={[styles.footer, { backgroundColor: colors.card, borderColor: colors.border, elevation: 10 }]}
+          onLayout={(e) => setFooterH(e.nativeEvent.layout.height)}
+        >
           <Pressable
             hitSlop={8}
             disabled={!siblings.prev}
@@ -773,6 +832,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  list: {
+    flex: 1,
+  },
+  listWrap: {
+    flex: 1,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -798,14 +863,31 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 44,
   },
-  list: {
-    flex: 1,
+  // 翻页热区（page 模式）：左右 30% 透明层，absolute 相对 container，
+  // top/bottom 运行时让位 headerH/footerH
+  tapZoneL: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: '30%',
+    zIndex: 10,
+  },
+  tapZoneR: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: '30%',
+    zIndex: 10,
   },
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // 底栏挂壳级纵排（见 JSX 注）：container 被长章 FlatList 撑出屏的实证下，
+  // 纵排兄弟是唯一恒贴屏底的结构；正文尾部 paddingBottom=footerH 让位。
   footer: {
     flexDirection: 'row',
     justifyContent: 'space-between',

@@ -182,6 +182,9 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
   const setFontSize = useSettingsStore((s) => s.setFontSize);
   const setLineHeight = useSettingsStore((s) => s.setLineHeight);
   const setPinyinMode = useSettingsStore((s) => s.setPinyinMode);
+  // R3-2：阅读模式档位（scroll/page）——悬空字段 readerMode 的 UI 入口
+  const readerMode = useSettingsStore((s) => s.readerMode);
+  const setReaderMode = useSettingsStore((s) => s.setReaderMode);
   const setConversionMode = useSettingsStore((s) => s.setConversionMode);
   const setTranslation = useSettingsStore((s) => s.setTranslation);
   // 【D5】性能档位（r38 T01）：设置页最小入口；'auto' = 设备自动探测
@@ -460,6 +463,18 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
           />
         </View>
         {/* 【D5】性能档位：装配/缓存/注音预算的手动覆盖（默认自动探测） */}
+        <View style={[styles.settingRow, { borderTopColor: colors.border }]}>
+          <Text style={[styles.settingLabel, { color: colors.text }]}>翻页模式</Text>
+          <SegmentedRow
+            options={[
+              { value: 'scroll' as const, label: '滚动' },
+              { value: 'page' as const, label: '翻页' },
+            ]}
+            value={readerMode}
+            onChange={setReaderMode}
+            colors={colors}
+          />
+        </View>
         <View style={[styles.settingRow, { borderTopColor: colors.border }]}>
           <Text style={[styles.settingLabel, { color: colors.text }]}>性能档位</Text>
           <SegmentedRow
