@@ -12,10 +12,12 @@
  * - 注音数据就绪与否不改变行数与行高（U7，PinyinText 已删降级换结构支）；
  * - 一次只动一个变量：本轮只做单章 + 章间按钮导航，跨章滑窗/分片在 R2。
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Pressable,
   StyleSheet,
   Text,
@@ -32,10 +34,15 @@ import { useReaderStore } from '@/store/useReaderStore';
 import { useNoteStore } from '@/store/useNoteStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getColors, type ThemeColors } from '@/theme';
-import { charGapFor, getItemLayoutOf, layoutChapter, resolveGeometry, unifiedPinyinFontSizeFor } from '@/reader/geometry';
-import { lineAtCharOffset } from '@/reader/position';
+import { charGapFor, getItemLayoutOf, layoutChapter, resolveGeometry, unifiedPinyinFontSizeFor, type Line } from '@/reader/geometry';
+import { lineAtCharOffset, lineAtY } from '@/reader/position';
 import { charOffsetAtY } from '@/reader/position';
 import { offsetOfPage, pageAtOffset, paginateChapter } from '@/reader/pagination';
+import {
+  buildStitchedLines,
+  compensationDelta,
+  orderedRenderChapters,
+} from '@/reader/stitch';
 import { buildSegmentHighlight } from '@/reader/highlightFactory';
 import { annotate, maxPinyinLength } from '@/services/PinyinService';
 import { currentPolyphoneSalt } from '@/hooks/usePinyin';
@@ -303,10 +310,41 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   }, [loaded, activeChapterId, bookId, lastRead, openChapter]);
 
   // ── 行化（L1）：段文本按码点切行，行不跨段、章局码点连续 ──
-  const segments = loaded?.segments ?? EMPTY_SEGMENTS;
+  // 跨章拼接（R3-stitch）：先建「窗内每章段」映射，锚章段用于现有单章逻辑/分页
+  const segmentsByChapter = useMemo(() => {
+    const m = new Map<string, TextSegment[]>();
+    for (const [cid, data] of win.data) {
+      m.set(cid, data.segments);
+    }
+    return m;
+  }, [win]);
+  const segments = segmentsByChapter.get(activeChapterId) ?? EMPTY_SEGMENTS;
   const layout = useMemo(
     () => layoutChapter(activeChapterId, segments, geometry),
     [activeChapterId, segments, geometry],
+  );
+
+  // ── 跨章拼接（scroll 模式）：窗内每章独立 layout + 拼接全局行序列 ──
+  // layoutOfMap：章 id → 该章 layout（与 anchor 的 `layout` 同源，几何一致）
+  const layoutOfMap = useMemo(() => {
+    const m = new Map<string, { lines: Line[]; totalHeight: number }>();
+    for (const [cid, data] of win.data) {
+      m.set(cid, layoutChapter(cid, data.segments, geometry));
+    }
+    return m;
+    // layoutChapter 返回类型含 lines/totalHeight，取子集即可
+  }, [win, geometry]);
+  // 渲染序 = 含锚章的最长已装载连续章链（锚章缺失则空）
+  const loadedChapters = useMemo(
+    () => orderedRenderChapters(new Set(win.data.keys()), activeChapterId, (id) => {
+      const res = TextLibraryService.getSiblingChapters(id);
+      return res.success && res.data ? res.data : {};
+    }),
+    [win, activeChapterId],
+  );
+  const stitched = useMemo(
+    () => buildStitchedLines(loadedChapters, (id) => layoutOfMap.get(id)),
+    [loadedChapters, layoutOfMap],
   );
   const getItemLayout = useMemo(() => getItemLayoutOf(geometry), [geometry]);
 
@@ -337,72 +375,112 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     return unifiedPinyinFontSizeFor(fontSize, chapterMaxPinyinLen);
   }, [pinyinOn, chapterMaxPinyinLen, fontSize]);
 
-  // 段内码点基准备查：line.charStart（章局）→ 段内 [segStart, segEnd)
-  const segmentSpans = useMemo(() => {
-    const spans = new Map<string, { start: number; end: number }>();
-    let offset = 0;
-    for (const seg of segments) {
-      const len = Array.from(seg.text).length;
-      spans.set(seg.id, { start: offset, end: offset + len });
-      offset += len;
+  // 段内码点基准备查（跨章）：章 id → 段 id → [segStart, segEnd)
+  const segmentSpanByChapter = useMemo(() => {
+    const m = new Map<string, Map<string, { start: number; end: number }>>();
+    for (const [cid, segs] of segmentsByChapter) {
+      const inner = new Map<string, { start: number; end: number }>();
+      let offset = 0;
+      for (const seg of segs) {
+        const len = Array.from(seg.text).length;
+        inner.set(seg.id, { start: offset, end: offset + len });
+        offset += len;
+      }
+      m.set(cid, inner);
     }
-    return spans;
-  }, [segments]);
+    return m;
+  }, [segmentsByChapter]);
 
 
-  // ── 划线（R2d）：章级装载 + 整段粒度 MVP（精确选区留 selectionRange 后续迭代）──
-  const [chapterHighlights, setChapterHighlights] = useState<Highlight[]>([]);
+  // 跨章统一拼音字号：按章算（邻章最长拼音可能异于锚章，避免溢出 1em 格）
+  const unifiedPinyinFontSizeByChapter = useMemo(() => {
+    const m = new Map<string, number | undefined>();
+    for (const [cid, segs] of segmentsByChapter) {
+      if (!pinyinOn) {
+        m.set(cid, undefined);
+        continue;
+      }
+      let max = 0;
+      for (const seg of segs) {
+        const res = annotate(seg.text, pinyinMode, { workId: cid, bookId });
+        if (res.success && res.data) {
+          const len = maxPinyinLength(res.data);
+          if (len > max) {
+            max = len;
+          }
+        }
+      }
+      m.set(cid, max < 1 ? undefined : unifiedPinyinFontSizeFor(fontSize, max));
+    }
+    return m;
+  }, [segmentsByChapter, pinyinOn, pinyinMode, bookId, fontSize]);
+
+  // ── 划线（R2d，跨章）：为所有可见章装载划线/笔记（拼接场景下邻章也显高亮）──
   const addNote = useNoteStore((st) => st.addNote);
   const updateNoteContent = useNoteStore((st) => st.updateNoteContent);
   const removeNote = useNoteStore((st) => st.removeNote);
-  const [highlightNoteMap, setHighlightNoteMap] = useState<Map<string, { id: string; content: string }>>(new Map());
+  const [highlightsByChapter, setHighlightsByChapter] = useState<Map<string, Highlight[]>>(new Map());
+  const [notesByChapter, setNotesByChapter] = useState<Map<string, Map<string, { id: string; content: string }>>>(new Map());
   const [highlightSheet, setHighlightSheet] = useState<
-    | { mode: 'create'; segmentId: string; text: string }
+    | { mode: 'create'; chapterId: string; segmentId: string; text: string }
     | { mode: 'view'; highlight: Highlight }
     | null
   >(null);
 
-  // 章切换 → 重拉本章划线（同步读 db，量小；cancelled 防 StrictMode 竞态写回）
+  // 可见章集合变化 → 补拉缺失章的划线/笔记（同步读 db；hlRef 防重拉；cancelled 防 StrictMode 竞态）
+  const hlRef = useRef(highlightsByChapter);
+  hlRef.current = highlightsByChapter;
+  const loadedChaptersKey = loadedChapters.join('|');
   useEffect(() => {
-    if (!bookId || !activeChapterId) {
-      setChapterHighlights([]);
+    if (!bookId) {
       return;
     }
     let cancelled = false;
-    const res = StorageService.getHighlights(bookId, activeChapterId);
-    const notesRes = StorageService.getNotes(bookId, activeChapterId);
-    if (!cancelled) {
-      setChapterHighlights(res.success && res.data ? res.data : []);
+    for (const cid of loadedChapters) {
+      if (hlRef.current.has(cid)) {
+        continue;
+      }
+      const res = StorageService.getHighlights(bookId, cid);
+      const notesRes = StorageService.getNotes(bookId, cid);
+      if (cancelled) {
+        return;
+      }
+      const arr = res.success && res.data ? res.data : [];
+      setHighlightsByChapter((prev) => (prev.has(cid) ? prev : new Map(prev).set(cid, arr)));
       const map = new Map<string, { id: string; content: string }>();
       for (const n of notesRes.success && notesRes.data ? notesRes.data : []) {
         if (n.highlightId) {
           map.set(n.highlightId, { id: n.id, content: n.content });
         }
       }
-      setHighlightNoteMap(map);
+      setNotesByChapter((prev) => (prev.has(cid) ? prev : new Map(prev).set(cid, map)));
     }
     return () => {
       cancelled = true;
     };
-  }, [bookId, activeChapterId]);
+  }, [bookId, loadedChaptersKey]);
 
-  // segmentId → 划线组（renderItem 行级取用）
-  const segmentHighlightMap = useMemo(() => {
-    const m = new Map<string, Highlight[]>();
-    for (const h of chapterHighlights) {
-      const arr = m.get(h.segmentId);
-      if (arr) {
-        arr.push(h);
-      } else {
-        m.set(h.segmentId, [h]);
+  // 章 id → 段 id → 划线组（renderItem 行级取用；跨章按 line.chapterId 查）
+  const segmentHighlightByChapter = useMemo(() => {
+    const m = new Map<string, Map<string, Highlight[]>>();
+    for (const [cid, arr] of highlightsByChapter) {
+      const inner = new Map<string, Highlight[]>();
+      for (const h of arr) {
+        const list = inner.get(h.segmentId);
+        if (list) {
+          list.push(h);
+        } else {
+          inner.set(h.segmentId, [h]);
+        }
       }
+      m.set(cid, inner);
     }
     return m;
-  }, [chapterHighlights]);
+  }, [highlightsByChapter]);
 
   const handleLongPressChar = useCallback(
-    (seg: TextSegment) => () => {
-      setHighlightSheet({ mode: 'create', segmentId: seg.id, text: seg.text });
+    (seg: TextSegment, chapterId: string) => () => {
+      setHighlightSheet({ mode: 'create', chapterId, segmentId: seg.id, text: seg.text });
     },
     [],
   );
@@ -413,11 +491,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
   const handleCreateHighlight = useCallback(
     (color: HighlightColor, noteText: string) => {
-      if (!highlightSheet || highlightSheet.mode !== 'create' || !bookId || !activeChapterId) {
+      if (!highlightSheet || highlightSheet.mode !== 'create' || !bookId) {
         return;
       }
+      const cid = highlightSheet.chapterId;
       const text = highlightSheet.text;
-      const h = buildSegmentHighlight(bookId, activeChapterId, highlightSheet.segmentId, text, color);
+      const h = buildSegmentHighlight(bookId, cid, highlightSheet.segmentId, text, color);
       const res = StorageService.saveHighlight(h);
       if (!res.success) {
         setError(res.error ?? '保存划线失败');
@@ -428,7 +507,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       if (noteText) {
         const noteId = addNote({
           bookId,
-          chapterId: activeChapterId,
+          chapterId: cid,
           segmentId: highlightSheet.segmentId,
           startOffset: 0,
           endOffset: h.endOffset,
@@ -441,27 +520,39 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           StorageService.saveHighlight(stored);
         }
       }
-      setChapterHighlights((prev) => [stored, ...prev]);
+      setHighlightsByChapter((prev) => {
+        const next = new Map(prev);
+        const arr = next.get(cid) ?? [];
+        next.set(cid, [stored, ...arr]);
+        return next;
+      });
       setHighlightSheet(null);
     },
-    [highlightSheet, bookId, activeChapterId, addNote],
+    [highlightSheet, bookId, addNote],
   );
 
-  /** view 态存笔记：无笔记 → 新建并回写 noteId；有 → 更新内容 */
+  /** view 态存笔记：无笔记 → 新建并回写 noteId；有 → 更新内容（按划线所属章） */
   const handleNoteSubmit = useCallback(
     (content: string) => {
-      if (!highlightSheet || highlightSheet.mode !== 'view' || !bookId || !activeChapterId || !content) {
+      if (!highlightSheet || highlightSheet.mode !== 'view' || !bookId || !content) {
         return;
       }
       const hl = highlightSheet.highlight;
-      const existing = highlightNoteMap.get(hl.id);
+      const cid = hl.chapterId;
+      const existing = notesByChapter.get(cid)?.get(hl.id);
       if (existing) {
         updateNoteContent(existing.id, content);
-        setHighlightNoteMap((prev) => new Map(prev).set(hl.id, { id: existing.id, content }));
+        setNotesByChapter((prev) => {
+          const next = new Map(prev);
+          const m = new Map(next.get(cid));
+          m.set(hl.id, { id: existing.id, content });
+          next.set(cid, m);
+          return next;
+        });
       } else {
         const noteId = addNote({
           bookId,
-          chapterId: activeChapterId,
+          chapterId: cid,
           segmentId: hl.segmentId,
           startOffset: hl.startOffset,
           endOffset: hl.endOffset,
@@ -470,34 +561,58 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         });
         if (noteId) {
           StorageService.saveHighlight({ ...hl, noteId });
-          setChapterHighlights((prev) => prev.map((x) => (x.id === hl.id ? { ...x, noteId } : x)));
-          setHighlightNoteMap((prev) => new Map(prev).set(hl.id, { id: noteId, content }));
+          setHighlightsByChapter((prev) => {
+            const next = new Map(prev);
+            const arr = next.get(cid) ?? [];
+            next.set(cid, arr.map((x) => (x.id === hl.id ? { ...x, noteId } : x)));
+            return next;
+          });
+          setNotesByChapter((prev) => {
+            const next = new Map(prev);
+            const m = new Map(next.get(cid));
+            m.set(hl.id, { id: noteId, content });
+            next.set(cid, m);
+            return next;
+          });
         }
       }
       setHighlightSheet(null);
     },
-    [highlightSheet, bookId, activeChapterId, highlightNoteMap, addNote, updateNoteContent],
+    [highlightSheet, bookId, notesByChapter, addNote, updateNoteContent],
   );
 
   const handleDeleteHighlight = useCallback(
     (id: string) => {
-      // 级联：删笔记再删划线（noteId 回写在划线行上，孤儿笔记防不住这里防）
-      const note = highlightNoteMap.get(id);
+      // 级联：删笔记再删划线（按划线所属章定位，跨章安全）
+      let cid: string | undefined;
+      highlightsByChapter.forEach((arr, c) => {
+        if (arr.some((h) => h.id === id)) {
+          cid = c;
+        }
+      });
+      const note = cid ? notesByChapter.get(cid)?.get(id) : undefined;
       if (note) {
         removeNote(note.id);
-        setHighlightNoteMap((prev) => {
+        setNotesByChapter((prev) => {
           const next = new Map(prev);
-          next.delete(id);
+          const m = new Map(next.get(cid!));
+          m.delete(id);
+          next.set(cid!, m);
           return next;
         });
       }
       const res = StorageService.deleteHighlight(id);
-      if (res.success) {
-        setChapterHighlights((prev) => prev.filter((h) => h.id !== id));
+      if (res.success && cid) {
+        setHighlightsByChapter((prev) => {
+          const next = new Map(prev);
+          const arr = next.get(cid!) ?? [];
+          next.set(cid!, arr.filter((h) => h.id !== id));
+          return next;
+        });
       }
       setHighlightSheet(null);
     },
-    [highlightNoteMap, removeNote],
+    [highlightsByChapter, notesByChapter, removeNote],
   );
 
   // ── R3-2 翻页（page 模式）：章分页 + 左右热区；scroll 模式零改动 ──
@@ -529,17 +644,13 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   );
 
   // ── 续读定位（L2，开环）：路由 charOffset > 持久化 charOffset > segmentId > 章首 ──
-  // 路由参数只对「参数所属章」生效：就地切换到其他章后 params 仍是旧章的，
-  // 不得把旧章偏移映射进新章 layout（归属保护）。
-  const initialLineIndex = useMemo(() => {
-    if (layout.lines.length === 0) {
-      return 0;
-    }
-    const clamp = (i: number) => Math.min(Math.max(i, 0), layout.lines.length - 1);
+  // scroll 模式：定位落在「拼接序列」中锚章首行 + 章内行下标；page 模式：章内行下标。
+  // 路由参数只对「参数所属章」生效（归属保护，见上）。
+  const initialCharOffset = useMemo(() => {
     const routeOwned = params?.chapterId === activeChapterId;
     const routeOffset = routeOwned ? params?.charOffset : undefined;
     if (typeof routeOffset === 'number' && routeOffset >= 0) {
-      return clamp(lineAtCharOffset(layout.lines, routeOffset));
+      return routeOffset;
     }
     if (
       lastRead &&
@@ -548,43 +659,126 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       typeof lastRead.charOffset === 'number' &&
       lastRead.charOffset >= 0
     ) {
-      return clamp(lineAtCharOffset(layout.lines, lastRead.charOffset));
-    }
-    const routeSegmentId = routeOwned ? params?.segmentId : undefined;
-    if (routeSegmentId) {
-      const idx = layout.lines.findIndex((l) => l.segmentId === routeSegmentId);
-      if (idx >= 0) {
-        return idx;
-      }
+      return lastRead.charOffset;
     }
     return 0;
-    // 仅在章内容/定位输入变化时重算（initialScrollIndex 只在挂载时生效，
-    // 列表以 key=activeChapterId:switchSeq 强制重挂载，见下）
-  }, [layout, bookId, activeChapterId, params]);
+  }, [params, activeChapterId, bookId, lastRead]);
 
-  const listKey = `${activeChapterId}:${switchSeq}`;
+  const initialLineIndex = useMemo(() => {
+    if (layout.lines.length === 0) {
+      return 0;
+    }
+    const within = lineAtCharOffset(layout.lines, initialCharOffset);
+    let withinIdx = within < 0 ? 0 : within;
+    // 章内行下标兜底：路由 segmentId（无 charOffset 时）
+    if (withinIdx === 0) {
+      const routeOwned = params?.chapterId === activeChapterId;
+      const routeSegmentId = routeOwned ? params?.segmentId : undefined;
+      if (routeSegmentId) {
+        const idx = layout.lines.findIndex((l) => l.segmentId === routeSegmentId);
+        if (idx >= 0) {
+          withinIdx = idx;
+        }
+      }
+    }
+    const clampWithin = Math.min(Math.max(withinIdx, 0), layout.lines.length - 1);
+    if (readerMode === 'scroll' && stitched.lines.length > 0) {
+      const first = stitched.firstLineOf.get(activeChapterId) ?? 0;
+      return first + clampWithin;
+    }
+    return clampWithin;
+    // initialScrollIndex 只在挂载时生效；滚动模式锚点滑动不重挂载（listKey 见下），
+    // 跨章连续性由补偿 effect 维持。
+  }, [layout, initialCharOffset, readerMode, stitched, activeChapterId, params]);
+
+  // scroll 模式锚点滑动不重挂载：listKey 不含 activeChapterId（保持 data 原地更新，
+  // 视觉位置由补偿 effect 维持）；跳章/切模式仍走 switchSeq 触发重挂载。
+  const listKey = readerMode === 'scroll' ? `scroll:${switchSeq}` : `page:${activeChapterId}:${switchSeq}`;
+
+  // 滚动位置实时记录（补偿 effect 用，避免依赖事件对象）
+  const scrollYRef = useRef(0);
+  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollYRef.current = e.nativeEvent.contentOffset.y;
+  }, []);
 
   // ── 滚动停止 → 位置真值持久化（码点，非像素）──
+  // page 模式：章内；scroll 模式：拼接序列，跨入邻章则切 store 章 + 记真值 + 滑窗锚点跟随。
   const handleScrollEnd = useCallback(
     (e: { nativeEvent: { contentOffset: { y: number } } }) => {
-      if (layout.lines.length === 0) {
+      const y = e.nativeEvent.contentOffset.y;
+      if (readerMode === 'page') {
+        if (layout.lines.length === 0) {
+          return;
+        }
+        const pos = charOffsetAtY(layout.lines, geometry, y);
+        const line = layout.lines[pos.lineIndex];
+        if (!line) {
+          return;
+        }
+        recordProgress(line.segmentId, undefined, line.charStart);
+        setSegment(line.segmentId);
+        // R3 互切：滚动位置 → 页号单源同步（翻页落点由同一 offset 系推导）
+        if (pagination.pageCount > 0) {
+          curPageRef.current = pageAtOffset(pagination, y);
+        }
         return;
       }
-      const y = e.nativeEvent.contentOffset.y;
-      const pos = charOffsetAtY(layout.lines, geometry, y);
-      const line = layout.lines[pos.lineIndex];
+      // scroll 模式：拼接列表
+      const lines = stitched.lines;
+      if (lines.length === 0) {
+        return;
+      }
+      const centerIdx = Math.min(Math.max(lineAtY(geometry, y + viewportH / 2), 0), lines.length - 1);
+      const line = lines[centerIdx];
       if (!line) {
         return;
       }
-      recordProgress(line.segmentId, undefined, line.charStart);
-      setSegment(line.segmentId);
-      // R3 互切：滚动位置 → 页号单源同步（翻页落点由同一 offset 系推导）
-      if (pagination.pageCount > 0) {
-        curPageRef.current = pageAtOffset(pagination, y);
+      const chId = line.chapterId;
+      if (chId === activeChapterId) {
+        recordProgress(line.segmentId, undefined, line.charStart);
+      } else {
+        // 跨入邻章：切 store 章（记精确码点真值）+ 滑窗锚点跟随（载其邻章、弃远端）
+        openChapter(bookId, chId, line.segmentId, undefined, line.charStart);
+        centerRef.current = chId;
+        setActiveChapterId(chId);
+        const retain = retainSetFor(chId);
+        setWin((w) => windowRecenter(w, chId, retain));
       }
+      setSegment(line.segmentId);
     },
-    [layout, geometry, recordProgress, setSegment, pagination],
+    [readerMode, layout, geometry, pagination, stitched, viewportH, activeChapterId, bookId, openChapter, recordProgress, setSegment, retainSetFor],
   );
+
+  // ── 跨章拼接滚动补偿（scroll 模式专属）──
+  // 渲染序变化（前插/前删邻章）导致锚章首行全局下标位移；补偿量 = 位移 × rowHeight，
+  // 经 scrollToOffset 维持视觉位置无缝。行数缓存跨「章被丢弃」保留（前删补偿正确）。
+  const prevOrderRef = useRef<string[]>([]);
+  const remountKeyRef = useRef<string>(`${readerMode}:${switchSeq}`);
+  const lineCountCacheRef = useRef<Map<string, number>>(new Map());
+  useLayoutEffect(() => {
+    for (const [cid, n] of stitched.lineCountOf) {
+      lineCountCacheRef.current.set(cid, n);
+    }
+    if (readerMode !== 'scroll') {
+      prevOrderRef.current = loadedChapters;
+      return;
+    }
+    const remountKey = `${readerMode}:${switchSeq}`;
+    if (remountKeyRef.current !== remountKey) {
+      remountKeyRef.current = remountKey;
+      prevOrderRef.current = loadedChapters;
+      return; // 跳章/切模式/重挂载：initialScrollIndex 已定位，不补偿
+    }
+    const prev = prevOrderRef.current;
+    const next = loadedChapters;
+    if (prev.length > 0 && next.length > 0) {
+      const d = compensationDelta(prev, next, lineCountCacheRef.current, activeChapterId, geometry.rowHeight);
+      if (d !== 0) {
+        innerListRef.current?.scrollToOffset({ offset: scrollYRef.current + d, animated: false });
+      }
+    }
+    prevOrderRef.current = next;
+  }, [loadedChapters, readerMode, switchSeq, geometry.rowHeight, stitched, activeChapterId]);
 
   // ── 查字入口：点按汉字 → DictLookup ──
   const handlePressChar = useCallback(
@@ -642,14 +836,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [loadChapterData, retainSetFor, prewarmChapter],
   );
 
-  // ── 行渲染 ──
+  // ── 行渲染（跨章：按 line.chapterId 取本篇章段/跨度/高亮/拼音字号）──
   const renderItem = useCallback(
-    ({ item }: { item: (typeof layout.lines)[number] }) => {
-      const seg = segments.find((s) => s.id === item.segmentId);
+    ({ item }: { item: Line }) => {
+      const seg = segmentsByChapter.get(item.chapterId)?.find((s) => s.id === item.segmentId);
       if (!seg) {
         return null;
       }
-      const span = segmentSpans.get(item.segmentId);
+      const span = segmentSpanByChapter.get(item.chapterId)?.get(item.segmentId);
       const segStart = span?.start ?? 0;
       return (
         <LineRow
@@ -658,32 +852,32 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           rowHeight={geometry.rowHeight}
           fontSize={fontSize}
           lineHeight={lineHeight}
-          unifiedPinyinFontSize={unifiedPinyinFontSize}
+          unifiedPinyinFontSize={unifiedPinyinFontSizeByChapter.get(item.chapterId) ?? unifiedPinyinFontSize}
           pinyinMode={pinyinMode}
           conversionMode={conversionMode}
-          workId={activeChapterId}
+          workId={item.chapterId}
           bookId={bookId}
           onPressChar={handlePressChar(seg.text)}
-          highlights={segmentHighlightMap.get(item.segmentId)}
-          onLongPressChar={handleLongPressChar(seg)}
+          highlights={segmentHighlightByChapter.get(item.chapterId)?.get(item.segmentId)}
+          onLongPressChar={handleLongPressChar(seg, item.chapterId)}
           onPressHighlight={handleViewHighlight}
         />
       );
     },
     [
-      segments,
-      segmentSpans,
+      segmentsByChapter,
+      segmentSpanByChapter,
       geometry.rowHeight,
       fontSize,
       lineHeight,
+      unifiedPinyinFontSizeByChapter,
       unifiedPinyinFontSize,
       pinyinMode,
       conversionMode,
-      activeChapterId,
       bookId,
       handlePressChar,
       handleLongPressChar,
-      segmentHighlightMap,
+      segmentHighlightByChapter,
       handleViewHighlight,
     ],
   );
@@ -718,7 +912,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
         </View>
-      ) : layout.lines.length === 0 ? (
+      ) : (readerMode === 'scroll' ? stitched.lines.length === 0 : layout.lines.length === 0) ? (
         <View style={styles.center}>
           <Text style={{ color: colors.textSecondary }}>本章暂无正文</Text>
         </View>
@@ -729,10 +923,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         >
         <FlatList
           key={listKey}
-          data={layout.lines}
+          data={readerMode === 'scroll' ? stitched.lines : layout.lines}
           renderItem={renderItem}
-          keyExtractor={(item) => `l${item.index}`}
+          keyExtractor={(item) => `${item.chapterId}#${item.index}`}
           getItemLayout={getItemLayout}
+          onScroll={handleScroll}
           initialScrollIndex={initialLineIndex > 0 ? initialLineIndex : undefined}
           onScrollToIndexFailed={(info) => {
             // getItemLayout 纯算式下理论不触发；兜底 = 开环 offset 直写
@@ -815,7 +1010,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         highlight={highlightSheet?.mode === 'view' ? highlightSheet.highlight : undefined}
         note={
           highlightSheet?.mode === 'view'
-            ? highlightNoteMap.get(highlightSheet.highlight.id)?.content ?? ''
+            ? notesByChapter.get(highlightSheet.highlight.chapterId)?.get(highlightSheet.highlight.id)?.content ?? ''
             : ''
         }
         onCreate={handleCreateHighlight}
