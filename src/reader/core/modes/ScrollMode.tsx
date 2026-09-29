@@ -67,6 +67,11 @@ export interface ScrollModeProps {
   onNineGrid?(zone: NineGridZone): void;
   /** 视口临近窗口已载边沿（未载方向）→ 上抛宿主续装邻章（库 onBoundary 语义的滚动近似） */
   onNearBoundary?(dir: BoundaryDirection): void;
+  /**
+   * 边沿邻章装载失败标记（宿主 ReaderScreen 传入）：next/prev = 该方向最近一次
+   * 邻章装载失败。仅改变占位文案（「加载失败，滑动重试」），不阻断重试。
+   */
+  loadError?: { next?: boolean; prev?: boolean };
   /** 重挂载键（ReaderCore 用作组件 key；切模式/跳章触发全新画布） */
   listKey?: string;
 }
@@ -137,6 +142,7 @@ const ScrollMode = forwardRef<ScrollReaderHandle, ScrollModeProps>(function Scro
     onTapChar,
     onLongPressChar,
     onNineGrid,
+    loadError,
   } = props;
 
   const rowH = Math.max(1, geometry.rowHeight);
@@ -587,7 +593,7 @@ const ScrollMode = forwardRef<ScrollReaderHandle, ScrollModeProps>(function Scro
               justifyContent: 'center',
             }}
           >
-            <Text>加载中…</Text>
+            <Text>{loadError?.prev ? '加载失败，滑动重试' : '加载中…'}</Text>
           </View>
         )}
         {winRows.map((r) => (
@@ -618,7 +624,7 @@ const ScrollMode = forwardRef<ScrollReaderHandle, ScrollModeProps>(function Scro
               justifyContent: 'center',
             }}
           >
-            <Text>继续滑动以加载下一章…</Text>
+            <Text>{loadError?.next ? '加载失败，滑动重试' : '继续滑动以加载下一章…'}</Text>
           </View>
         )}
       </Animated.View>

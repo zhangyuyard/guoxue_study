@@ -669,7 +669,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // ★ begin 必须基于 winRef 同步算好再 setWin：React 状态 updater 不保证同步执行，
   //   「updater 里置旗标、setWin 后立刻读」恒 false ⇒ 只 begin 不装载 ⇒
   //   章卡死 inflight、prewarm 也被 isLoading 闸门跳过（真机复测实录）。
-  const fillFailedRef = useRef<Set<string>>(new Set());
+  // 邻章装载失败集合（state，驱动占位 UI 显示「加载失败」）。★ 语义与旧版不同：
+  // 旧 fillFailedRef 是「永久黑名单」（失败后 has() 跳过 ⇒ 用户永久卡死、零反馈）；
+  // 现只作「失败态展示」，不阻断重试——重试去重仍由 windowBegin 闸门保证
+  // （失败已 windowFail 清 inflight ⇒ 下次滚动到边沿可重新 windowBegin）。
+  const [fillFailed, setFillFailed] = useState<ReadonlySet<string>>(new Set());
   const fillNeighbors = useCallback(
     (opts?: { forceNext?: boolean; forcePrev?: boolean }) => {
     if (readerMode !== 'scroll' || !geometry.rowHeight || !viewportH) {
@@ -690,13 +694,13 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     const first = loadedChapters[0];
     if (needNext && last) {
       const s = TextLibraryService.getSiblingChapters(last);
-      if (s.success && s.data?.next && !fillFailedRef.current.has(s.data.next.id)) {
+      if (s.success && s.data?.next) {
         targets.push(s.data.next.id);
       }
     }
     if (needPrev && first) {
       const s = TextLibraryService.getSiblingChapters(first);
-      if (s.success && s.data?.prev && !fillFailedRef.current.has(s.data.prev.id)) {
+      if (s.success && s.data?.prev) {
         targets.push(s.data.prev.id);
       }
     }
@@ -723,11 +727,25 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       for (const id of toLoad) {
         try {
           const data = await loadChapterData(id);
-          fillFailedRef.current.delete(id);
+          setFillFailed((prev) => {
+            if (!prev.has(id)) {
+              return prev;
+            }
+            const s = new Set(prev);
+            s.delete(id);
+            return s;
+          });
           setWin((w) => windowPut(w, id, data));
           prewarmChapter(data, id);
         } catch {
-          fillFailedRef.current.add(id);
+          setFillFailed((prev) => {
+            if (prev.has(id)) {
+              return prev;
+            }
+            const s = new Set(prev);
+            s.add(id);
+            return s;
+          });
           setWin((w) => windowFail(w, id));
         }
       }
@@ -767,6 +785,28 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     const s = TextLibraryService.getSiblingChapters(last);
     return s.success && !!s.data?.next;
   }, [loadedChapters]);
+  // 边沿邻章装载失败态（驱动 ScrollMode 占位显示「加载失败，滑动重试」）：
+  // next=true 表示窗口末章的 next 章已尝试且失败；prev 同理。失败不阻断重试
+  // （下次滚动到边沿会重新 windowBegin），仅改变占位文案。
+  const loadError = useMemo(() => {
+    const last = loadedChapters[loadedChapters.length - 1];
+    const first = loadedChapters[0];
+    let next = false;
+    let prev = false;
+    if (last) {
+      const s = TextLibraryService.getSiblingChapters(last);
+      if (s.success && s.data?.next) {
+        next = fillFailed.has(s.data.next.id);
+      }
+    }
+    if (first) {
+      const s = TextLibraryService.getSiblingChapters(first);
+      if (s.success && s.data?.prev) {
+        prev = fillFailed.has(s.data.prev.id);
+      }
+    }
+    return { next, prev };
+  }, [loadedChapters, fillFailed]);
   const handleScrollCommit = useCallback(
     (chapterId: string, firstLine: Line | undefined) => {
       if (!firstLine) {
@@ -1074,6 +1114,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             onLongPressChar: handleScrollLongPressChar,
             onNineGrid: handleNineGrid,
             onNearBoundary: handleNearBoundary,
+            loadError: loadError,
           }}
           page={{
             layout: layout,
