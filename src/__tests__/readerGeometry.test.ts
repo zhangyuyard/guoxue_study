@@ -85,8 +85,10 @@ describe('resolveGeometry：24 档穷举（12 档 × 注音开/关）', () => {
   });
 
   it('charsPerLine = max(1, floor(容器宽 / cellAdvance))；容器宽不足 1 格时钳 1', () => {
-    // 默认档：advance = 18 + 2×max(2, round(1.08)) = 18 + 4 = 22（注音开/关同 advance 公式）
+    // 默认档注音开：advance = 18 + 2×max(2, round(1.08)) = 18 + 4 = 22
     expect(resolveGeometry({ fontSize: 18, lineHeight: 1.6, pinyinEnabled: true, containerWidth: 320 }).charsPerLine).toBe(Math.floor(320 / 22));
+    // 注音关：charGap=0 ⇒ advance = fontSize = 18
+    expect(resolveGeometry({ fontSize: 18, lineHeight: 1.6, pinyinEnabled: false, containerWidth: 320 }).charsPerLine).toBe(Math.floor(320 / 18));
     expect(resolveGeometry({ fontSize: 18, lineHeight: 1.6, pinyinEnabled: true, containerWidth: 10 }).charsPerLine).toBe(1);
     expect(resolveGeometry({ fontSize: 18, lineHeight: 1.6, pinyinEnabled: false, containerWidth: 0 }).charsPerLine).toBe(1);
     // 显式 charGap 参与步进
@@ -146,7 +148,8 @@ describe('layoutChapter：行化切分（INV-G1 左半 + 精确值）', () => {
     const a = layoutChapter('c1', SEGMENTS, g);
     const b = layoutChapter('c1', SEGMENTS, g);
     expect(a).toEqual(b);
-    // 注音开关不改变行化结果（U7：几何不得等注音 —— 行数/码点切分与 pinyinEnabled 无关）
+    // 注音开关不改变行化结果（U7：几何不得等注音 —— 行数/码点切分与 pinyinEnabled 无关）；
+    // 此处显式固定 charGap=2 保证 advance 相同，排除 charGapFor('off')=0 带来的合法差异。
     const gOff = resolveGeometry({ fontSize: 18, lineHeight: 1.6, pinyinEnabled: false, containerWidth: 320, charGap: 2 });
     expect(layoutChapter('c1', SEGMENTS, gOff).lines).toEqual(a.lines);
   });
@@ -198,10 +201,10 @@ describe('position：位置模型（INV-P1 往返一致 + 边界）', () => {
 });
 
 describe('charGapFor：字距唯一真源（几何 cellAdvance 与渲染器 marginHorizontal 同源）', () => {
-  it('默认档定值：full=4（max(4, round(2.88))）、rare=2（max(2, round(1.08))）、off 同 rare', () => {
+  it('默认档定值：full=4（max(4, round(2.88))）、rare=2（max(2, round(1.08))）、off=0（纯文本无字格间距）', () => {
     expect(charGapFor('full', 18)).toBe(4);
     expect(charGapFor('rare', 18)).toBe(2);
-    expect(charGapFor('off', 18)).toBe(2);
+    expect(charGapFor('off', 18)).toBe(0);
   });
 
   it('大字号 full 档由公式主导（fs=24：round(3.84)=4）；小字号钳下限', () => {

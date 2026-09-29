@@ -28,9 +28,13 @@ export const PINYIN_SIZE_FLOOR = 9;
 /**
  * 字格水平间距（渲染器 marginHorizontal 与几何层 cellAdvance 同源，
  * 消除「两处字距公式各自漂移」）。与 PinyinText.tsx 原 charGap 公式逐字同值：
- * 全文注音模式加大避免相邻拼音相贴，其余模式保持紧凑。
+ * 全文注音模式加大避免相邻拼音相贴；生僻字注音模式保持紧凑；
+ * 注音关为纯文本渲染，无逐字字格与 marginHorizontal，字距取 0。
  */
 export function charGapFor(pinyinMode: 'full' | 'rare' | 'off', fontSize: number): number {
+  if (pinyinMode === 'off') {
+    return 0;
+  }
   return pinyinMode === 'full'
     ? Math.max(4, Math.round(fontSize * 0.16))
     : Math.max(2, Math.round(fontSize * 0.06));
@@ -118,7 +122,9 @@ export function resolveGeometry(input: ResolveGeometryInput): LineGeometry {
     ? pinyinRowMetrics(fontSize, lineHeight).rowHeight
     : lineHeightPx;
   const cellWidth = fontSize;
-  const charGap = input.charGap ?? Math.max(2, Math.round(fontSize * 0.06));
+  // 缺省字距与渲染器同源：注音关纯文本无字格间距；注音开默认取 rare（紧凑）档。
+  const charGap =
+    input.charGap ?? (pinyinEnabled ? Math.max(2, Math.round(fontSize * 0.06)) : 0);
   const cellAdvance = cellWidth + charGap * 2;
   const charsPerLine = Math.max(1, Math.floor(containerWidth / cellAdvance));
   return { fontSize, lineHeightPx, rowHeight, cellWidth, cellAdvance, charsPerLine, pinyinEnabled };
@@ -132,6 +138,8 @@ export interface Line {
   /** 章内码点偏移（章局、与排版无关的位置真值；段界处连续累加） */
   readonly charStart: number;
   readonly charEnd: number;
+  /** 拼接章标题行（scroll 模式章界处分隔，非正文行）；渲染层据此走标题样式 */
+  readonly isTitle?: boolean;
 }
 
 export interface ChapterSegment {
