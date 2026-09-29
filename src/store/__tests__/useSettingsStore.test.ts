@@ -17,7 +17,7 @@ describe('useSettingsStore.readerMode', () => {
     expect(useSettingsStore.getState().readerMode).toBe('scroll');
   });
 
-  test('setReaderMode 可在 滚动 / 仿真翻页 间切换', () => {
+  test('setReaderMode 可在 滚动 / 翻页 间切换', () => {
     useSettingsStore.getState().setReaderMode('page');
     expect(useSettingsStore.getState().readerMode).toBe('page');
     useSettingsStore.getState().setReaderMode('scroll');

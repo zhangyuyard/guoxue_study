@@ -224,8 +224,8 @@ export type PaperMode = 'default' | 'green' | 'sepia' | 'dark' | 'cyan';
 
 /**
  * 阅读翻页方式。
- * - scroll：纵向滚动（与注音行 / 长按选区 / 划线偏移兼容性最佳）。
- * - page：仿真翻页（横向分页 + 翻页阴影动画），对标微信读书 / 番茄小说。
+ * - scroll：纵向连续滚动（原生 FlatList，与注音行 / 长按选区 / 划线偏移兼容性最佳）。
+ * - page：逐页（原生 FlatList + 定行高分页 + 左右热区，见 reader/pagination.ts）。
  */
 export type ReaderMode = 'scroll' | 'page';
 
@@ -241,7 +241,7 @@ export interface ReaderSettings {
   theme: ThemeMode;
   /** 阅读纸张（阅读器专属背景换肤） */
   paper: PaperMode;
-  /** 翻页方式（滚动 / 仿真翻页） */
+  /** 翻页方式（滚动 / 逐页） */
   readerMode: ReaderMode;
   /** 注音模式 */
   pinyinMode: PinyinMode;

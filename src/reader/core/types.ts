@@ -8,7 +8,7 @@
  * 受控/边界语义，非代码复制。
  */
 
-/** 阅读模式（对齐库 FlipMode 思想；后续可扩展 cover/slide/simulation——依赖 Skia） */
+/** 阅读模式（参考库 FlipMode 思想；仅 scroll / page 两种，均原生 FlatList，无 Skia 依赖） */
 export type ReaderMode = 'scroll' | 'page';
 
 /** 章边界请求方向（库 onBoundaryPrev/onBoundaryNext 语义）：渲染模式触达窗口边沿时上抛 */

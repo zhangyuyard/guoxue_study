@@ -10,7 +10,7 @@
  * - **可达页域**：pageCount = floor(maxScroll / pageStride) + 1——末页 = 滚动
  *   到底（offset = maxScroll）。满页时末页也行对齐；不满页（余数行）时
  *   「往前翻到末页」与「滚到底」是同一落点，floor 语义下共享页号——这是
- *   模型性质而非缺陷（legado 同口径），T3 断言按此立。
+ *   模型性质而非缺陷，T3 断言按此立。
  * - T2 变异判据：pageAtOffset 用 round 会把页首前半屏误归下页 ⇒ 往返红。
  */
 import type { ChapterLayout, LineGeometry } from './geometry';
@@ -76,8 +76,8 @@ export function pageAtOffset(p: Pagination, y: number): number {
 }
 
 /**
- * 定长切块（R3-scroll 对齐 legado：滚动模式 = 离散页翻页，页 = 定长行区间）。
- * 末页 = 余数行（不足一页也成页，渲染顶对齐、底部留白——legado 同口径）。
+ * 定长切块：页 = 定长行区间。
+ * 末页 = 余数行（不足一页也成页，渲染顶对齐、底部留白）。
  * size ≤ 0 或空输入 → 空数组。
  */
 export function chunkLines<T>(lines: readonly T[], size: number): T[][] {

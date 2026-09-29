@@ -7,7 +7,7 @@
  *
  * 保留语义（与滚动实现无关）：
  * - 跨章提交：onScroll 里 contentOffset.y → 视口顶行 → line.chapterId，与 committed
- *   章比对，变了则 onChapterCommit（对齐 legado moveToNextChapter）；
+ *   章比对，变了则 onChapterCommit（跨章进度/预载回流）；
  * - 进度记账：滚动静止（MomentumEnd / DragEnd 静置）→ onLineChange（码点真值）；
  * - 边沿装载：onScroll 检测临近 contentSize 两端 → onNearBoundary（宿主续装邻章）。
  *
@@ -26,7 +26,7 @@ import type { BoundaryDirection } from '../types';
 export interface ScrollModeProps {
   /** 平铺行流（stitched.lines，含章标题行；数组序=书序） */
   lines: readonly Line[];
-  /** 书级边界（窗口外未载章方向）——legado hasPrevChapter/hasNextChapter */
+  /** 书级边界（窗口外未载章方向） */
   hasMorePrev: boolean;
   hasMoreNext: boolean;
   /** 初始章 id（= activeChapterId；跨章提交起点） */
@@ -42,9 +42,9 @@ export interface ScrollModeProps {
    */
   contentInsets: { left: number; right: number };
   renderLine(line: Line): React.ReactNode;
-  /** 跨章提交（legado moveToNextChapter → 进度/预载回流） */
+  /** 跨章提交（跨章进度/预载回流） */
   onChapterCommit(chapterId: string, firstLine: Line | undefined): void;
-  /** 滚动静止 → 进度上报（legado curPageChanged → saveRead） */
+  /** 滚动静止 → 进度上报（码点真值持久化） */
   onLineChange?(line: Line | undefined): void;
   /** 视口临近窗口已载边沿（未载方向）→ 上抛宿主续装邻章 */
   onNearBoundary?(dir: BoundaryDirection): void;
@@ -187,7 +187,7 @@ const ScrollMode = memo(function ScrollMode({
     [handleScrollEnd],
   );
 
-  // 点击翻页：滚一屏（legado 下翻=滚一屏保留一行、上翻=首可见行滚到视口底）
+  // 点击翻页：滚一屏（下翻前进一屏、上翻后退一屏）
   const flipNext = useCallback(() => {
     listRef.current?.scrollToOffset({ offset: (topLineRef.current + lpp) * rowH, animated: true });
   }, [lpp, rowH]);

@@ -2,7 +2,7 @@
  * 阅读器主页面（ReaderScreen）— R1：单章可读（几何层驱动）
  *
  * 架构：docs/reader-architecture-2026-09-22.md（L1 行化几何 / L2 位置模型 /
- * L3b 行级渲染器）；行为对齐 docs/reader-legado-alignment-2026-09-23.md。
+ * L3b 行级渲染器）。
  *
  * 旧实现教训（本文件遵守的红线）：
  * - 行高恒定常量（L1），`getItemLayout` 为无表纯算式 ⇒ 定位开环，
@@ -655,7 +655,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [highlightsByChapter, notesByChapter, removeNote],
   );
 
-  // ── R3-2 翻页（page 模式）：章分页 + 左右热区；scroll 模式零改动 ──
+  // ── 翻页（page 模式）：章分页 + 左右热区；scroll 模式零改动 ──
   const [viewportHMeasured, setViewportH] = useState(0);
   // Android「onLayout 仅在布局变化时派发」：二次挂载同尺寸 View 不再回调
   // ⇒ viewportHMeasured 恒 0、翻页死。兜底 = 窗高 − 顶栏(52) − 底栏(39)
@@ -756,7 +756,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   }, [fillNeighbors]);
 
   // ── 原生 FlatList 滚动模式（stitched.lines 平铺行流直接作 data）──
-  // 书级边界：窗口首/末章的相邻章存在性（legado hasPrevChapter/hasNextChapter）
+  // 书级边界：窗口首/末章的相邻章存在性
   const hasMorePrev = useMemo(() => {
     const first = loadedChapters[0];
     if (!first) return false;
@@ -797,8 +797,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         return;
       }
       if (chapterId !== activeChapterId) {
-        // 跨章提交（legado moveToNextChapter(false) → 槽轮转 + 进度）：
-        // 切 store 章（记精确码点真值）+ 滑窗锚点跟随 + 裁窗（预演 C：钳住哲学，无补偿）
+        // 跨章提交：切 store 章（记精确码点真值）+ 滑窗锚点跟随 + 裁窗（无补偿）
         openChapter(bookId, chapterId, firstLine.segmentId, undefined, firstLine.charStart);
         centerRef.current = chapterId;
         setActiveChapterId(chapterId);
@@ -806,8 +805,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       }
       recordProgress(firstLine.segmentId, undefined, firstLine.charStart);
       setSegment(firstLine.segmentId);
-      // 跨章即预载邻章（legado loadContent 三向预载等价；fillNeighbors 幂等，
-      // 「链首==锚章」保护在普通路径生效，force 仅触发一次装载尝试）
+      // 跨章即预载邻章（fillNeighbors 幂等，「链首==锚章」保护在普通路径生效，
+      // force 仅触发一次装载尝试）
       fillNeighborsRef.current({ forceNext: true, forcePrev: true });
     },
     [activeChapterId, bookId, openChapter, recordProgress, setSegment, retainSetFor],
@@ -950,7 +949,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // ── 行渲染（跨章：按 line.chapterId 取本篇章段/跨度/高亮/拼音字号）──
   const renderItem = useCallback(
     ({ item }: { item: Line }) => {
-      // 拼接章标题行：独立于正文 seg，走标题样式（legado 连读章界分隔）
+      // 拼接章标题行：独立于正文 seg，走标题样式（连读章界分隔）
       if (item.isTitle) {
         const title = chapterTitleByChapter.get(item.chapterId) ?? '';
         return (

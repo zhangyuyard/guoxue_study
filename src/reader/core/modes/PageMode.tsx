@@ -128,7 +128,7 @@ export const PageMode = React.memo(function PageMode({
     draggingRef.current = true;
   }, []);
 
-  // ── 翻页热区（R3-2 MVP）：左右 30% 翻页、中间 40% 保留点字查词/长按划线（legado 同款取舍）──
+  // ── 翻页热区（R3-2 MVP）：左右 30% 翻页、中间 40% 保留点字查词/长按划线 ──
   const curPageRef = useRef(0);
   const flipPage = useCallback((dir: 1 | -1) => {
     const pg = paginationRef.current;
