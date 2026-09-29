@@ -6,7 +6,7 @@
  * - M2 pageCount 用 ceil(lineCount/linesPerPage) ⇒ T3 红（末页 offset 超过
  *   maxScroll 滚不到 ⇒ 越界页永远无法抵达 = 死页）。
  */
-import { offsetOfPage, pageAtOffset, paginateChapter } from '@/reader/pagination';
+import { chunkLines, offsetOfPage, pageAtOffset, paginateChapter } from '@/reader/pagination';
 import { layoutChapter, resolveGeometry } from '@/reader/geometry';
 
 /** 默认档几何 + 注音开（ResolveGeometryInput 真值字段） */
@@ -82,5 +82,27 @@ describe('paginateChapter（R3-1 章分页）', () => {
       expect(nextY).toBeGreaterThanOrEqual(prevY);
       prevY = nextY;
     }
+  });
+});
+
+describe('chunkLines（R3-scroll 离散页切块）', () => {
+  it('定长切块；末页 = 余数行', () => {
+    const lines = Array.from({ length: 25 }, (_, i) => i);
+    const pages = chunkLines(lines, 10);
+    expect(pages.length).toBe(3);
+    expect(pages[0]).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(pages[2]).toEqual([20, 21, 22, 23, 24]);
+  });
+
+  it('整除 → 无余数页；size ≤ 0 / 空输入 → 空', () => {
+    expect(chunkLines([1, 2, 3, 4], 2).length).toBe(2);
+    expect(chunkLines([1], 0)).toEqual([]);
+    expect(chunkLines([], 10)).toEqual([]);
+  });
+
+  it('切块保序且不丢不重（拼接行全局恒等）', () => {
+    const lines = Array.from({ length: 103 }, (_, i) => i);
+    const pages = chunkLines(lines, 13);
+    expect(pages.flat()).toEqual(lines);
   });
 });

@@ -114,6 +114,17 @@ export interface ResolveGeometryInput {
   charGap?: number;
 }
 
+/**
+ * 单格步进唯一真源：cellWidth（= fontSize，1em）+ 2 × charGap。
+ *
+ * 两个消费方必须同源，否则「版心按 A 宽居中、渲染按 B 宽摆字」：
+ * - 几何层 `resolveGeometry`（切行：charsPerLine = floor(containerWidth / cellAdvance)）；
+ * - 版心层 `resolveContentLayout`（栅格宽 = charsPerLine × cellAdvance，用于精确居中）。
+ */
+export function cellAdvanceFor(fontSize: number, charGap: number): number {
+  return fontSize + charGap * 2;
+}
+
 /** 几何解析（纯函数）：档位 + 容器宽 → 行几何。12 档 × 注音开/关 = 24 个常量，可穷举单测。 */
 export function resolveGeometry(input: ResolveGeometryInput): LineGeometry {
   const { fontSize, lineHeight, pinyinEnabled, containerWidth } = input;
@@ -125,7 +136,7 @@ export function resolveGeometry(input: ResolveGeometryInput): LineGeometry {
   // 缺省字距与渲染器同源：注音关纯文本无字格间距；注音开默认取 rare（紧凑）档。
   const charGap =
     input.charGap ?? (pinyinEnabled ? Math.max(2, Math.round(fontSize * 0.06)) : 0);
-  const cellAdvance = cellWidth + charGap * 2;
+  const cellAdvance = cellAdvanceFor(cellWidth, charGap);
   const charsPerLine = Math.max(1, Math.floor(containerWidth / cellAdvance));
   return { fontSize, lineHeightPx, rowHeight, cellWidth, cellAdvance, charsPerLine, pinyinEnabled };
 }

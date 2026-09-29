@@ -32,6 +32,16 @@ import {
   DAILY_GOAL_MAX,
   DAILY_GOAL_MIN,
 } from '@/utils/dailyGoal';
+import {
+  PAGE_MARGIN_DEFAULT,
+  PAGE_MARGIN_MAX,
+  PAGE_MARGIN_MIN,
+} from '@/theme/typography';
+
+/** 左右边距 clamp（设置写入 / 备份恢复统一口径） */
+function clampPageMargin(v: number): number {
+  return Math.min(PAGE_MARGIN_MAX, Math.max(PAGE_MARGIN_MIN, Math.round(v)));
+}
 
 /** 繁简转换模式（与 ReaderSettings.conversionMode 保持一致） */
 type ConversionMode = 'simplified' | 'traditional';
@@ -196,6 +206,11 @@ interface SettingsState extends ReaderSettings {
   /** 正文朗读语速（P2-02）：0.5–2.0，默认 1.0 */
   speechRate: number;
   /**
+   * 正文左右边距（dp，用户自定义；默认 PAGE_MARGIN_DEFAULT）。
+   * 只影响版心宽与水平居中，不参与分页行高计算；clamp 到 [MIN, MAX]。
+   */
+  pageMargin: number;
+  /**
    * 性能档位（r38 T01）：'auto'（默认，设备探测）/ low / mid / high。
    * 写入 setReaderPerfTier 时同步调用 DeviceTierService.setOverride()，
    * 装配/缓存/注音等全部预算与窗口参数随之切换（读档位失败回落 mid）。
@@ -224,6 +239,8 @@ interface SettingsState extends ReaderSettings {
   setLibraryLayout: (layout: 'grid' | 'list') => void;
   /** 更新朗读语速（P2-02，取值 0.5–2.0） */
   setSpeechRate: (rate: number) => void;
+  /** 更新正文左右边距（clamp 到 PAGE_MARGIN_MIN–MAX） */
+  setPageMargin: (margin: number) => void;
   /**
    * 更新性能档位（r38 T01）：写入即调 DeviceTierService.setOverride()
    *（'auto' → null 恢复自动探测）；非法值静默回落 'auto'。
@@ -264,6 +281,8 @@ export const useSettingsStore = create<SettingsState>()(
       bookmarkGroupedView: false,
       libraryLayout: 'grid',
       speechRate: 1.0,
+      // 正文左右边距（用户自定义；版心水平居中）
+      pageMargin: PAGE_MARGIN_DEFAULT,
       // r38 T01 性能档位：默认自动探测（写入设置页时覆盖）
       readerPerfTier: DEFAULT_READER_PERF_TIER,
       ...DEFAULT_REMINDER_SETTINGS,
@@ -300,6 +319,10 @@ export const useSettingsStore = create<SettingsState>()(
       setLibraryLayout: (libraryLayout) => set({ libraryLayout }),
 
       setSpeechRate: (speechRate) => set({ speechRate }),
+
+      // 左右边距：clamp（防御越界/非法输入；UI 只传合法档位）
+      setPageMargin: (pageMargin) =>
+        set({ pageMargin: clampPageMargin(Number.isFinite(pageMargin) ? pageMargin : PAGE_MARGIN_DEFAULT) }),
 
       // r38 T01 性能档位：设置页覆盖 → DeviceTierService 为档位真源，
       // 本字段仅作 UI 镜像与跨会话持久化（非法值回落 'auto'）
@@ -380,6 +403,7 @@ export const useSettingsStore = create<SettingsState>()(
           recitationHintGranularity: 'whole',
           bookmarkGroupedView: false,
           speechRate: 1.0,
+          pageMargin: PAGE_MARGIN_DEFAULT,
           readerPerfTier: DEFAULT_READER_PERF_TIER,
           ...DEFAULT_REMINDER_SETTINGS,
           dailyGoalEnabled: true,
@@ -456,6 +480,11 @@ export const useSettingsStore = create<SettingsState>()(
           const speechRate = num(d.speechRate);
           if (speechRate !== undefined) {
             patch.speechRate = Math.min(2.0, Math.max(0.5, speechRate));
+          }
+          // 左右边距 clamp 到合法区间（与 setPageMargin 口径一致）
+          const pageMargin = num(d.pageMargin);
+          if (pageMargin !== undefined) {
+            patch.pageMargin = clampPageMargin(pageMargin);
           }
           // translation 嵌套对象：与现值合并（备份缺的字段保持现值）
           if (d.translation && typeof d.translation === 'object' && !Array.isArray(d.translation)) {

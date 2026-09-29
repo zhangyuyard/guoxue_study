@@ -108,6 +108,54 @@ describe('buildStitchedLines', () => {
   });
 });
 
+describe('buildStitchedLines — 章标题行（scroll 模式章界分隔）', () => {
+  const layouts: Record<string, ChapterLayout> = {
+    A: makeLayout('A', 3),
+    B: makeLayout('B', 2),
+    C: makeLayout('C', 4),
+  };
+  const layoutOf = (id: string) => layouts[id];
+  const titleOf = (id: string) => ({ A: '第一章', B: '第二章', C: '第三章' }[id]);
+
+  it('每章前插标题行，行数/首行下标含标题', () => {
+    const r = buildStitchedLines(['A', 'B'], layoutOf, titleOf);
+    // A: 标题 + 3 = 4；B: 标题 + 2 = 3；合计 7
+    expect(r.lines.length).toBe(7);
+    expect(r.lines[0].isTitle).toBe(true);
+    expect(r.lines[0].chapterId).toBe('A');
+    expect(r.firstLineOf.get('A')).toBe(0);
+    expect(r.firstLineOf.get('B')).toBe(4);
+    expect(r.lineCountOf.get('A')).toBe(4);
+    expect(r.lineCountOf.get('B')).toBe(3);
+    expect(r.lines[4].isTitle).toBe(true);
+    expect(r.lines[4].chapterId).toBe('B');
+  });
+
+  it('拼接行 index = 全局下标，key（chapterId#index）全局唯一', () => {
+    // 回归：标题行原用全局 index、正文行用章内局部 index ⇒ 锚章 title 与
+    // 其首条正文同 key（c1#0#c1#0）⇒ React 复用错 cell（标题重复/正文被顶）。
+    const r = buildStitchedLines(['A', 'B', 'C'], layoutOf, titleOf);
+    r.lines.forEach((l, i) => expect(l.index).toBe(i));
+    const keys = r.lines.map((l) => `${l.chapterId}#${l.index}`);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('不传 titleOf → 不插标题', () => {
+    const r = buildStitchedLines(['A', 'B'], layoutOf);
+    expect(r.lines.every((l) => !l.isTitle)).toBe(true);
+    expect(r.lines.length).toBe(5);
+  });
+
+  it('titleOf 返回 undefined → 该章不插标题', () => {
+    const r = buildStitchedLines(['A', 'B'], layoutOf, (id) => (id === 'A' ? undefined : '第二章'));
+    // A 无标题(3)；B 标题+2=3；合计 6
+    expect(r.lines.length).toBe(6);
+    expect(r.lines[0].isTitle).toBeUndefined();
+    expect(r.lines[3].isTitle).toBe(true);
+    expect(r.firstLineOf.get('B')).toBe(3);
+  });
+});
+
 describe('compensationDelta', () => {
   const counts = new Map<string, number>([
     ['A', 3],

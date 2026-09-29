@@ -98,6 +98,7 @@ export const SETTINGS_BACKUP_KEYS = [
   'dailyGoalEnabled',
   'dailyGoalCount',
   'speechRate',
+  'pageMargin',
 ] as const;
 
 /**

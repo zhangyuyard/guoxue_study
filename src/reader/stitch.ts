@@ -78,6 +78,8 @@ export interface StitchedResult {
 export function buildStitchedLines(
   order: readonly string[],
   layoutOf: (id: string) => ChapterLayout | undefined,
+  /** scroll 模式：章界插入标题行（返回该章标题；undefined 不插）。page 模式不传 */
+  titleOf?: (id: string) => string | undefined,
 ): StitchedResult {
   const lines: Line[] = [];
   const firstLineOf = new Map<string, number>();
@@ -88,10 +90,23 @@ export function buildStitchedLines(
       continue;
     }
     firstLineOf.set(id, lines.length);
-    lineCountOf.set(id, lay.lines.length);
-    for (const ln of lay.lines) {
-      lines.push(ln);
+    let count = 0;
+    if (titleOf) {
+      const t = titleOf(id);
+      if (t !== undefined) {
+        lines.push({ index: lines.length, chapterId: id, segmentId: '__title__', charStart: 0, charEnd: 0, isTitle: true } as Line);
+        count += 1;
+      }
     }
+    for (const ln of lay.lines) {
+      // ★ 全局重编 index：layoutChapter 的 index 是章内局部（每章从 0 起），
+      //   与标题行的全局 index 在 keyExtractor（chapterId#index）上必然撞 key
+      //   ⇒ React 复用错 cell（标题重复/正文被顶/内容错位）。拼接序列内
+      //   index 一律 = 全局下标；渲染层定位全走数组位置/charOffset，不依赖旧值。
+      lines.push({ ...ln, index: lines.length });
+      count += 1;
+    }
+    lineCountOf.set(id, count);
   }
   return { lines, firstLineOf, lineCountOf };
 }

@@ -12,12 +12,9 @@
  * - 注音数据就绪与否不改变行数与行高（U7，PinyinText 已删降级换结构支）；
  * - 一次只动一个变量：本轮只做单章 + 章间按钮导航，跨章滑窗/分片在 R2。
  */
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
   Pressable,
   StyleSheet,
   Text,
@@ -26,6 +23,7 @@ import {
 } from 'react-native';
 
 import LineRow from '@/components/reader/LineRow';
+import { ReaderCore, type NineGridZone } from '@/reader/core';
 import HighlightActionSheet from '@/components/reader/HighlightActionSheet';
 import { TextLibraryService } from '@/services/TextLibraryService';
 import { StorageService } from '@/services/StorageService';
@@ -34,13 +32,11 @@ import { useReaderStore } from '@/store/useReaderStore';
 import { useNoteStore } from '@/store/useNoteStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getColors, type ThemeColors } from '@/theme';
-import { charGapFor, getItemLayoutOf, layoutChapter, resolveGeometry, unifiedPinyinFontSizeFor, type Line } from '@/reader/geometry';
-import { lineAtCharOffset, lineAtY } from '@/reader/position';
-import { charOffsetAtY } from '@/reader/position';
-import { offsetOfPage, pageAtOffset, paginateChapter } from '@/reader/pagination';
+import { cellAdvanceFor, charGapFor, layoutChapter, resolveGeometry, unifiedPinyinFontSizeFor, type Line } from '@/reader/geometry';
+import { resolveContentLayout } from '@/reader/contentLayout';
+import { lineAtCharOffset } from '@/reader/position';
 import {
   buildStitchedLines,
-  compensationDelta,
   orderedRenderChapters,
 } from '@/reader/stitch';
 import { buildSegmentHighlight } from '@/reader/highlightFactory';
@@ -80,9 +76,14 @@ interface LoadedChapter {
   segments: TextSegment[];
 }
 
-/** 页边距：注音模式收窄边距给行宽让位（用户裁定 T1=C1）；off 模式常规边距 */
-const PAGE_MARGIN_PINYIN = 12;
-const PAGE_MARGIN_PLAIN = 20;
+/**
+ * 版心（左右边距 + 水平居中）：
+ * - margin = 用户在「我的-阅读设置」里选的左右边距（下限）；
+ * - contentWidth = 版心宽（= 窗宽 − 2×margin；行化 containerWidth 与渲染容器宽的唯一来源，
+ *   二者必须同值，否则行化切出的末字被容器裁掉 = 丢字）；
+ * - left/right = 版心壳偏移（left + right ≡ 2×margin；差值 2×shift 把整字数文字块摆到正中）。
+ * 见 reader/contentLayout.ts。
+ */
 
 function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Element {
   const params = route?.params;
@@ -96,14 +97,21 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const pinyinMode = useSettingsStore((s) => s.pinyinMode);
   const conversionMode = useSettingsStore((s) => s.conversionMode);
   const readerMode = useSettingsStore((s) => s.readerMode);
+  /** 正文左右边距（用户自定义，全局层；clamp 在 store 与 resolveContentLayout 双保险） */
+  const pageMarginSetting = useSettingsStore((s) => s.pageMargin);
   const colors: ThemeColors = getColors(theme);
-
-  const innerListRef = useRef<FlatList | null>(null);
 
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const pinyinOn = pinyinMode !== 'off';
-  const pageMargin = pinyinOn ? PAGE_MARGIN_PINYIN : PAGE_MARGIN_PLAIN;
-  const containerWidth = Math.max(0, windowWidth - pageMargin * 2);
+  // 字距 → 单格步进（cellAdvanceFor 唯一真源，与几何层同源）
+  const charGap = charGapFor(pinyinMode, fontSize);
+  const cellAdvance = cellAdvanceFor(fontSize, charGap);
+  // 版心：左右边距由用户设定；文字列按整字数栅格居中（宽屏下版心不超上限、两侧留白均分）
+  const content = useMemo(
+    () => resolveContentLayout(windowWidth, pageMarginSetting, cellAdvance),
+    [windowWidth, pageMarginSetting, cellAdvance],
+  );
+  const containerWidth = content.contentWidth;
 
   // ── 几何（L1）：档位 + 容器宽 → 行几何；字距与渲染器同源（charGapFor）──
   const geometry = useMemo(
@@ -113,9 +121,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         lineHeight,
         pinyinEnabled: pinyinOn,
         containerWidth,
-        charGap: charGapFor(pinyinMode, fontSize),
+        charGap,
       }),
-    [fontSize, lineHeight, pinyinOn, pinyinMode, containerWidth],
+    [fontSize, lineHeight, pinyinOn, containerWidth, charGap],
   );
 
   // ── 章滑窗状态（R2b2）：窗缓存全部章数据；activeChapterId = 当前中心章 ──
@@ -319,6 +327,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     return m;
   }, [win]);
   const segments = segmentsByChapter.get(activeChapterId) ?? EMPTY_SEGMENTS;
+  // 章 id → 标题（拼接标题行渲染用；避免 renderItem 闭包持旧 win）
+  const chapterTitleByChapter = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const [cid, d] of win.data) {
+      m.set(cid, d.chapter.title ?? '');
+    }
+    return m;
+  }, [win]);
   const layout = useMemo(
     () => layoutChapter(activeChapterId, segments, geometry),
     [activeChapterId, segments, geometry],
@@ -343,10 +359,34 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [win, activeChapterId],
   );
   const stitched = useMemo(
-    () => buildStitchedLines(loadedChapters, (id) => layoutOfMap.get(id)),
-    [loadedChapters, layoutOfMap],
+    () =>
+      buildStitchedLines(
+        loadedChapters,
+        (id) => layoutOfMap.get(id),
+        // scroll 模式：章界插标题行（取窗内该章 title）；page 模式不插（翻页头另渲染）。
+        // ① 首段含章名；② 首段自带章首标题形状（EPUB TOC 常为粗粒度「序/卷名」，
+        //    真实章名在正文首段）——都不另插，防「序」类错标题泛滥。
+        readerMode === 'scroll'
+          ? (id) => {
+              const data = win.data.get(id);
+              if (!data) {
+                return undefined;
+              }
+              const t = data.chapter.title?.trim();
+              const first = data.segments[0]?.text?.trim();
+              if (
+                t &&
+                first &&
+                (first === t || first.includes(t) || t.includes(first) || firstSegmentIsHeading(first))
+              ) {
+                return undefined;
+              }
+              return data.chapter.title;
+            }
+          : undefined,
+      ),
+    [loadedChapters, layoutOfMap, readerMode, win],
   );
-  const getItemLayout = useMemo(() => getItemLayoutOf(geometry), [geometry]);
 
   // ── 拼音字号全章统一（架构 §7.2 观感统一）：按章内最长拼音算一次，
   // 全章同一值，消除逐字自适应造成的同行大小/字重不齐（24px 档 gé=12px 混 yǒu=8px）。
@@ -621,27 +661,152 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // ⇒ viewportHMeasured 恒 0、翻页死。兜底 = 窗高 − 顶栏(52) − 底栏(39)
   // （52/39 为本轮真机实测稳定值）；onLayout 真值到达时覆盖兜底。
   const viewportH = viewportHMeasured || Math.round(windowHeight) - 52 - 39;
+
+  // ── 填满视口 + 前瞻装载（R3-stitch 补强）：
+  // 短章书 stitched 总高 < 视口 ⇒ 无可滚距离、handleScrollEnd 不触发 ⇒ 邻章永不装载 ⇒ 末章后空白断档；
+  // 长章书在接近章界前把下一章 body 预载进窗，避免边界空白。
+  // 触发：①win/stitched 变更（初始填满）；②每次滚动停止（临近链尾/链首续装）。
+  // ★ begin 必须基于 winRef 同步算好再 setWin：React 状态 updater 不保证同步执行，
+  //   「updater 里置旗标、setWin 后立刻读」恒 false ⇒ 只 begin 不装载 ⇒
+  //   章卡死 inflight、prewarm 也被 isLoading 闸门跳过（真机复测实录）。
+  const fillFailedRef = useRef<Set<string>>(new Set());
+  const fillNeighbors = useCallback(
+    (opts?: { forceNext?: boolean; forcePrev?: boolean }) => {
+    if (readerMode !== 'scroll' || !geometry.rowHeight || !viewportH) {
+      return;
+    }
+    const rowH = geometry.rowHeight;
+    const totalH = stitched.lines.length * rowH;
+    // 需求：①总量不足 2 屏（初始填满）②距链尾不足 1 屏（前瞻，画布模式由 onNearBoundary
+    //   上抛 force——画布内部知道滚动位置）③链首==锚章（上方无章可看时装 1 个 prev；
+    //   按「链首==锚章」判而非滚动位置——否则 prepend+补偿恒把锚章顶回视口顶 ⇒ 无限向前装载整本书）
+    const needNext = opts?.forceNext === true || totalH < viewportH * 2;
+    const needPrev = opts?.forcePrev === true || loadedChapters[0] === activeChapterId;
+    if (!needNext && !needPrev) {
+      return;
+    }
+    const targets: string[] = [];
+    const last = loadedChapters[loadedChapters.length - 1];
+    const first = loadedChapters[0];
+    if (needNext && last) {
+      const s = TextLibraryService.getSiblingChapters(last);
+      if (s.success && s.data?.next && !fillFailedRef.current.has(s.data.next.id)) {
+        targets.push(s.data.next.id);
+      }
+    }
+    if (needPrev && first) {
+      const s = TextLibraryService.getSiblingChapters(first);
+      if (s.success && s.data?.prev && !fillFailedRef.current.has(s.data.prev.id)) {
+        targets.push(s.data.prev.id);
+      }
+    }
+    if (targets.length === 0) {
+      return;
+    }
+    let nw = winRef.current;
+    const toLoad: string[] = [];
+    for (const id of targets) {
+      if (windowHas(nw, id) || windowIsLoading(nw, id)) {
+        continue;
+      }
+      const b = windowBegin(nw, id);
+      if (b) {
+        nw = b;
+        toLoad.push(id);
+      }
+    }
+    if (toLoad.length === 0) {
+      return;
+    }
+    setWin(nw);
+    void (async () => {
+      for (const id of toLoad) {
+        try {
+          const data = await loadChapterData(id);
+          fillFailedRef.current.delete(id);
+          setWin((w) => windowPut(w, id, data));
+          prewarmChapter(data, id);
+        } catch {
+          fillFailedRef.current.add(id);
+          setWin((w) => windowFail(w, id));
+        }
+      }
+    })();
+  }, [readerMode, geometry.rowHeight, viewportH, stitched, loadedChapters, activeChapterId, loadChapterData, prewarmChapter]);
+  useEffect(() => {
+    fillNeighbors();
+  }, [fillNeighbors]);
+
+  // ── legado 式滚动模式（ScrollReader：三页块纵拼 + pageOffset 自由滚动 + 同帧换页）──
+  // 依据 docs/reader-legado-full-analysis-2026-09-24.md 与
+  // docs/scroll-reader-implementation-plan-2026-09-24.md（逐行依据见组件内注释）。
+  const linesPerPage = useMemo(
+    () => Math.max(1, Math.floor(viewportH / geometry.rowHeight)),
+    [viewportH, geometry.rowHeight],
+  );
+  // 已载章窗口 → 页流章序列（stitch 切章；每章 lines 含章首标题行）
+  const scrollChapters = useMemo(() => {
+    return loadedChapters
+      .map((id) => {
+        const start = stitched.firstLineOf.get(id) ?? 0;
+        const count = stitched.lineCountOf.get(id) ?? 0;
+        return { chapterId: id, lines: stitched.lines.slice(start, start + count) };
+      })
+      .filter((c) => c.lines.length > 0);
+  }, [stitched, loadedChapters]);
+  // 书级边界：窗口首/末章的相邻章存在性（legado hasPrevChapter/hasNextChapter）
+  const hasMorePrev = useMemo(() => {
+    const first = loadedChapters[0];
+    if (!first) return false;
+    const s = TextLibraryService.getSiblingChapters(first);
+    return s.success && !!s.data?.prev;
+  }, [loadedChapters]);
+  const hasMoreNext = useMemo(() => {
+    const last = loadedChapters[loadedChapters.length - 1];
+    if (!last) return false;
+    const s = TextLibraryService.getSiblingChapters(last);
+    return s.success && !!s.data?.next;
+  }, [loadedChapters]);
+  const handleScrollCommit = useCallback(
+    (chapterId: string, firstLine: Line | undefined) => {
+      if (!firstLine) {
+        return;
+      }
+      if (chapterId !== activeChapterId) {
+        // 跨章提交（legado moveToNextChapter(false) → 槽轮转 + 进度）：
+        // 切 store 章（记精确码点真值）+ 滑窗锚点跟随 + 裁窗（预演 C：钳住哲学，无补偿）
+        openChapter(bookId, chapterId, firstLine.segmentId, undefined, firstLine.charStart);
+        centerRef.current = chapterId;
+        setActiveChapterId(chapterId);
+        setWin((w) => windowRecenter(w, chapterId, retainSetFor(chapterId)));
+      }
+      recordProgress(firstLine.segmentId, undefined, firstLine.charStart);
+      setSegment(firstLine.segmentId);
+      // 跨章即预载邻章（legado loadContent 三向预载等价；fillNeighbors 幂等，
+      // 「链首==锚章」保护在普通路径生效，force 仅触发一次装载尝试）
+      fillNeighborsRef.current({ forceNext: true, forcePrev: true });
+    },
+    [activeChapterId, bookId, openChapter, recordProgress, setSegment, retainSetFor],
+  );
+  const handleScrollLongPressChar = useCallback(
+    (line: Line) => {
+      const seg = segmentsByChapter.get(line.chapterId)?.find((s) => s.id === line.segmentId);
+      if (!seg) {
+        return;
+      }
+      handleLongPressChar(seg, line.chapterId)();
+    },
+    [segmentsByChapter, handleLongPressChar],
+  );
+  // 九宫格中列 = 菜单（legado clickActionMC 默认 0）；本仓菜单入口暂由顶/底栏承担，
+  // mc 动作预留接线（onNineGrid 其余分区已在 ScrollReader 内映射翻页）
+  const handleNineGrid = useCallback((_zone: NineGridZone) => undefined, []);
+
+
   // 热区 bottom 让位底栏：热区 absolute 于 listWrap，若压到 footer 两端按钮，
   // 章间导航被透明层吞 tap（真机实证：footer 按钮在热区 bounds 内全程无响应）
   const [footerH, setFooterH] = useState(0);
   const footerHEff = footerH || 39;
-  const pagination = useMemo(
-    () => paginateChapter(layout, geometry, viewportH),
-    [layout, geometry, viewportH],
-  );
-  const curPageRef = useRef(0);
-
-  const flipPage = useCallback(
-    (dir: 1 | -1) => {
-      if (pagination.pageCount === 0) {
-        return;
-      }
-      const next = Math.min(Math.max(curPageRef.current + dir, 0), pagination.pageCount - 1);
-      innerListRef.current?.scrollToOffset({ offset: offsetOfPage(pagination, next), animated: true });
-      curPageRef.current = next;
-    },
-    [pagination],
-  );
 
   // ── 续读定位（L2，开环）：路由 charOffset > 持久化 charOffset > segmentId > 章首 ──
   // scroll 模式：定位落在「拼接序列」中锚章首行 + 章内行下标；page 模式：章内行下标。
@@ -691,94 +856,33 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     // 跨章连续性由补偿 effect 维持。
   }, [layout, initialCharOffset, readerMode, stitched, activeChapterId, params]);
 
+  const scrollInitialPage = useMemo(
+    () => Math.floor((initialLineIndex > 0 ? initialLineIndex : 0) / linesPerPage),
+    [initialLineIndex, linesPerPage],
+  );
+
   // scroll 模式锚点滑动不重挂载：listKey 不含 activeChapterId（保持 data 原地更新，
   // 视觉位置由补偿 effect 维持）；跳章/切模式仍走 switchSeq 触发重挂载。
   const listKey = readerMode === 'scroll' ? `scroll:${switchSeq}` : `page:${activeChapterId}:${switchSeq}`;
 
-  // 滚动位置实时记录（补偿 effect 用，避免依赖事件对象）
-  const scrollYRef = useRef(0);
-  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    scrollYRef.current = e.nativeEvent.contentOffset.y;
-  }, []);
-
-  // ── 滚动停止 → 位置真值持久化（码点，非像素）──
-  // page 模式：章内；scroll 模式：拼接序列，跨入邻章则切 store 章 + 记真值 + 滑窗锚点跟随。
-  const handleScrollEnd = useCallback(
-    (e: { nativeEvent: { contentOffset: { y: number } } }) => {
-      const y = e.nativeEvent.contentOffset.y;
-      if (readerMode === 'page') {
-        if (layout.lines.length === 0) {
-          return;
-        }
-        const pos = charOffsetAtY(layout.lines, geometry, y);
-        const line = layout.lines[pos.lineIndex];
-        if (!line) {
-          return;
-        }
-        recordProgress(line.segmentId, undefined, line.charStart);
-        setSegment(line.segmentId);
-        // R3 互切：滚动位置 → 页号单源同步（翻页落点由同一 offset 系推导）
-        if (pagination.pageCount > 0) {
-          curPageRef.current = pageAtOffset(pagination, y);
-        }
-        return;
-      }
-      // scroll 模式：拼接列表
-      const lines = stitched.lines;
-      if (lines.length === 0) {
-        return;
-      }
-      const centerIdx = Math.min(Math.max(lineAtY(geometry, y + viewportH / 2), 0), lines.length - 1);
-      const line = lines[centerIdx];
+  // scroll 模式章内进度（ScrollMode onLineChange：页变化去重后上报）
+  const handleScrollLineChange = useCallback(
+    (line: Line | undefined) => {
       if (!line) {
         return;
       }
-      const chId = line.chapterId;
-      if (chId === activeChapterId) {
-        recordProgress(line.segmentId, undefined, line.charStart);
-      } else {
-        // 跨入邻章：切 store 章（记精确码点真值）+ 滑窗锚点跟随（载其邻章、弃远端）
-        openChapter(bookId, chId, line.segmentId, undefined, line.charStart);
-        centerRef.current = chId;
-        setActiveChapterId(chId);
-        const retain = retainSetFor(chId);
-        setWin((w) => windowRecenter(w, chId, retain));
-      }
+      recordProgress(line.segmentId, undefined, line.charStart);
       setSegment(line.segmentId);
     },
-    [readerMode, layout, geometry, pagination, stitched, viewportH, activeChapterId, bookId, openChapter, recordProgress, setSegment, retainSetFor],
+    [recordProgress, setSegment],
   );
 
-  // ── 跨章拼接滚动补偿（scroll 模式专属）──
-  // 渲染序变化（前插/前删邻章）导致锚章首行全局下标位移；补偿量 = 位移 × rowHeight，
-  // 经 scrollToOffset 维持视觉位置无缝。行数缓存跨「章被丢弃」保留（前删补偿正确）。
-  const prevOrderRef = useRef<string[]>([]);
-  const remountKeyRef = useRef<string>(`${readerMode}:${switchSeq}`);
-  const lineCountCacheRef = useRef<Map<string, number>>(new Map());
-  useLayoutEffect(() => {
-    for (const [cid, n] of stitched.lineCountOf) {
-      lineCountCacheRef.current.set(cid, n);
-    }
-    if (readerMode !== 'scroll') {
-      prevOrderRef.current = loadedChapters;
-      return;
-    }
-    const remountKey = `${readerMode}:${switchSeq}`;
-    if (remountKeyRef.current !== remountKey) {
-      remountKeyRef.current = remountKey;
-      prevOrderRef.current = loadedChapters;
-      return; // 跳章/切模式/重挂载：initialScrollIndex 已定位，不补偿
-    }
-    const prev = prevOrderRef.current;
-    const next = loadedChapters;
-    if (prev.length > 0 && next.length > 0) {
-      const d = compensationDelta(prev, next, lineCountCacheRef.current, activeChapterId, geometry.rowHeight);
-      if (d !== 0) {
-        innerListRef.current?.scrollToOffset({ offset: scrollYRef.current + d, animated: false });
-      }
-    }
-    prevOrderRef.current = next;
-  }, [loadedChapters, readerMode, switchSeq, geometry.rowHeight, stitched, activeChapterId]);
+  // 边沿前瞻（ScrollMode onNearBoundary）：临近窗口已载边沿 → 续装邻章
+  const fillNeighborsRef = useRef(fillNeighbors);
+  fillNeighborsRef.current = fillNeighbors;
+  const handleNearBoundary = useCallback((dir: 'prev' | 'next') => {
+    fillNeighborsRef.current(dir === 'next' ? { forceNext: true } : { forcePrev: true });
+  }, []);
 
   // ── 查字入口：点按汉字 → DictLookup ──
   const handlePressChar = useCallback(
@@ -789,6 +893,21 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       }
     },
     [navigation],
+  );
+
+  // 列命中 → 语义分流（legado ContentTextView.touch：命中列 → 字符语义）
+  const handleScrollTapChar = useCallback(
+    (line: Line, col: number) => {
+      const seg = segmentsByChapter.get(line.chapterId)?.find((s) => s.id === line.segmentId);
+      if (!seg) {
+        return;
+      }
+      const span = segmentSpanByChapter.get(line.chapterId)?.get(line.segmentId);
+      const segStart = span?.start ?? 0;
+      const index = line.charStart - segStart + col; // 段内码点索引
+      handlePressChar(seg.text)(index);
+    },
+    [segmentsByChapter, segmentSpanByChapter, handlePressChar],
   );
 
   // ── 章间导航（R2b2：滑窗就地切换，不再路由重导航）──
@@ -839,6 +958,17 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // ── 行渲染（跨章：按 line.chapterId 取本篇章段/跨度/高亮/拼音字号）──
   const renderItem = useCallback(
     ({ item }: { item: Line }) => {
+      // 拼接章标题行：独立于正文 seg，走标题样式（legado 连读章界分隔）
+      if (item.isTitle) {
+        const title = chapterTitleByChapter.get(item.chapterId) ?? '';
+        return (
+          <View style={[styles.stitchTitleRow, { height: geometry.rowHeight }]}>
+            <Text style={[styles.stitchTitleText, { color: colors.text }]} numberOfLines={1} allowFontScaling={false}>
+              {title}
+            </Text>
+          </View>
+        );
+      }
       const seg = segmentsByChapter.get(item.chapterId)?.find((s) => s.id === item.segmentId);
       if (!seg) {
         return null;
@@ -867,6 +997,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [
       segmentsByChapter,
       segmentSpanByChapter,
+      chapterTitleByChapter,
       geometry.rowHeight,
       fontSize,
       lineHeight,
@@ -921,44 +1052,44 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           style={styles.listWrap}
           onLayout={(e) => setViewportH(e.nativeEvent.layout.height)}
         >
-        <FlatList
-          key={listKey}
-          data={readerMode === 'scroll' ? stitched.lines : layout.lines}
-          renderItem={renderItem}
-          keyExtractor={(item) => `${item.chapterId}#${item.index}`}
-          getItemLayout={getItemLayout}
-          onScroll={handleScroll}
-          initialScrollIndex={initialLineIndex > 0 ? initialLineIndex : undefined}
-          onScrollToIndexFailed={(info) => {
-            // getItemLayout 纯算式下理论不触发；兜底 = 开环 offset 直写
-            innerListRef.current?.scrollToOffset({ offset: info.index * geometry.rowHeight, animated: false });
+        {/* ReaderCore：容器/模式路由（分层对齐 @tangfeifan/react-native-reader） */}
+        <ReaderCore
+          mode={readerMode}
+          chapterId={activeChapterId}
+          scroll={{
+            listKey: listKey,
+            chapters: scrollChapters,
+            hasMorePrev: hasMorePrev,
+            hasMoreNext: hasMoreNext,
+            initialChapterId: activeChapterId,
+            initialPage: scrollInitialPage,
+            linesPerPage: linesPerPage,
+            geometry: geometry,
+            viewportH: viewportH,
+            contentInsets: { left: content.left, right: content.right },
+            renderLine: (line) => renderItem({ item: line }),
+            onChapterCommit: handleScrollCommit,
+            onLineChange: handleScrollLineChange,
+            onTapChar: handleScrollTapChar,
+            onLongPressChar: handleScrollLongPressChar,
+            onNineGrid: handleNineGrid,
+            onNearBoundary: handleNearBoundary,
           }}
-          onMomentumScrollEnd={handleScrollEnd}
-          onScrollEndDrag={handleScrollEnd}
-          scrollEventThrottle={16}
-          initialNumToRender={24}
-          maxToRenderPerBatch={24}
-          windowSize={9}
-          contentContainerStyle={{ paddingHorizontal: pageMargin }}
-          style={styles.list}
-          ref={innerListRef}
+          page={{
+            layout: layout,
+            geometry: geometry,
+            viewportH: viewportH,
+            contentInsets: { left: content.left, right: content.right },
+            footerInset: footerHEff,
+            renderItem: (line) => renderItem({ item: line }),
+            initialLineIndex: initialLineIndex,
+            listKey: listKey,
+            onProgressCommit: (line) => {
+              recordProgress(line.segmentId, undefined, line.charStart);
+              setSegment(line.segmentId);
+            },
+          }}
         />
-        {readerMode === 'page' && pagination.pageCount > 0 ? (
-          <>
-            {/* 翻页热区（R3-2 MVP）：左右 30% 翻页、中间 40% 保留点字查词/长按划线。
-                legado 同款取舍；手势仿真翻页（覆盖动画）为 R3 后续步。 */}
-            <Pressable
-              style={[styles.tapZoneL, { bottom: footerHEff }]}
-              accessibilityLabel="上一页"
-              onPress={() => flipPage(-1)}
-            />
-            <Pressable
-              style={[styles.tapZoneR, { bottom: footerHEff }]}
-              accessibilityLabel="下一页"
-              onPress={() => flipPage(1)}
-            />
-          </>
-        ) : null}
         </View>
       )}
 
@@ -1023,6 +1154,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
 const EMPTY_SEGMENTS: TextSegment[] = [];
 
+/** 章首标题形状（EPUB TOC 标题粗粒度时以正文自带章名为准） */
+const HEADING_RE = /^\s*(第\s*[0-9一二两三四五六七八九十百千零〇]+\s*[章回节卷篇话则场折]|序章?|楔子|前言|序言|引言|后记|後記|番外|尾声|終章|终章|附录|附錄|导语|導讀|导读|题记|題記|说明)/;
+/** 首段是否自带章首标题：短行 + 常见章首形状 ⇒ 不另插（可能粗粒度的）TOC 标题行 */
+function firstSegmentIsHeading(text: string): boolean {
+  const t = text.trim();
+  return t.length > 0 && t.length <= 30 && HEADING_RE.test(t);
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1032,6 +1171,18 @@ const styles = StyleSheet.create({
   },
   listWrap: {
     flex: 1,
+  },
+  // 拼接章标题行（scroll 模式章界分隔；高=rowHeight 保 INV-G1 固定行高不变式）
+  stitchTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  stitchTitleText: {
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 1,
   },
   header: {
     flexDirection: 'row',

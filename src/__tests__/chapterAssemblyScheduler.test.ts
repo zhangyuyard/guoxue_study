@@ -705,9 +705,9 @@ describe('⑦ 流式装配状态机（carry 跨批 + 非空行=段落 + 行级�
     expect(src).toMatch(/const chapterAssemblyHost: AsmHost = \{/);
     expect(src).toMatch(/readinessOf: builtinChapterReadiness,/);
     expect(src).toMatch(/registerAssemblyHost\(chapterAssemblyHost\);/);
-    expect(src).toMatch(/^  assembleChapterStreaming,$/m);
-    expect(src).toMatch(/^  assembleChapterToFull,$/m);
-    expect(src).toMatch(/^  onChapterReady,$/m);
+    expect(src).toMatch(/^ {2}assembleChapterStreaming,$/m);
+    expect(src).toMatch(/^ {2}assembleChapterToFull,$/m);
+    expect(src).toMatch(/^ {2}onChapterReady,$/m);
   });
 });
 

@@ -46,7 +46,8 @@ import {
   type ParsedBackup,
 } from '@/utils/backup';
 import { ACHIEVEMENT_TOTAL } from '@/utils/achievements';
-import { getColors, FONT_SIZE_OPTIONS, LINE_HEIGHT_OPTIONS, PAGE_TITLE_FONT_SIZE } from '@/theme';
+import { getColors, FONT_SIZE_RANGE, LINE_HEIGHT_RANGE, PAGE_MARGIN_RANGE, PAGE_TITLE_FONT_SIZE } from '@/theme';
+import { SliderField } from '@/components/SliderField';
 
 type Props = NativeStackScreenProps<T04StackParamList, 'Profile'>;
 
@@ -190,6 +191,9 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
   // 【D5】性能档位（r38 T01）：设置页最小入口；'auto' = 设备自动探测
   const readerPerfTier = useSettingsStore((s) => s.readerPerfTier);
   const setReaderPerfTier = useSettingsStore((s) => s.setReaderPerfTier);
+  // 正文左右边距（版心宽度 + 水平居中；滑块网格见 PAGE_MARGIN_RANGE）
+  const pageMargin = useSettingsStore((s) => s.pageMargin);
+  const setPageMargin = useSettingsStore((s) => s.setPageMargin);
 
   /** 翻译设置弹层 */
   const [translationModal, setTranslationModal] = useState(false);
@@ -432,24 +436,34 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
       {/* 阅读设置 */}
       <SectionTitle title="阅读设置" colors={colors} />
       <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <View style={styles.settingRow}>
-          <Text style={[styles.settingLabel, { color: colors.text }]}>字号</Text>
-          <SegmentedRow
-            options={FONT_SIZE_OPTIONS.map((v) => ({ value: v, label: `${v}px` }))}
-            value={fontSize}
-            onChange={setFontSize}
-            colors={colors}
-          />
-        </View>
-        <View style={[styles.settingRow, { borderTopColor: colors.border }]}>
-          <Text style={[styles.settingLabel, { color: colors.text }]}>行距</Text>
-          <SegmentedRow
-            options={LINE_HEIGHT_OPTIONS.map((v) => ({ value: v, label: String(v) }))}
-            value={lineHeight}
-            onChange={setLineHeight}
-            colors={colors}
-          />
-        </View>
+        {/* 字号 / 行距 / 左右边距 = 进度条（滑块）：网格与步进见 theme/typography.ts 的 ★ 滑块网格块 */}
+        <SliderField
+          label="字号"
+          value={fontSize}
+          spec={FONT_SIZE_RANGE}
+          onChange={setFontSize}
+          format={(v) => `${v}px`}
+          colors={colors}
+        />
+        <SliderField
+          divider
+          label="行距"
+          value={lineHeight}
+          spec={LINE_HEIGHT_RANGE}
+          onChange={setLineHeight}
+          format={(v) => v.toFixed(1)}
+          colors={colors}
+        />
+        {/* 左右边距：控制版心宽，正文恒水平居中（宽屏时多余留白两侧均分） */}
+        <SliderField
+          divider
+          label="左右边距"
+          value={pageMargin}
+          spec={PAGE_MARGIN_RANGE}
+          onChange={setPageMargin}
+          format={(v) => `${v}px`}
+          colors={colors}
+        />
         <View style={[styles.settingRow, { borderTopColor: colors.border }]}>
           <Text style={[styles.settingLabel, { color: colors.text }]}>主题</Text>
           <SegmentedRow

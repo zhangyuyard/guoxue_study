@@ -203,18 +203,36 @@ describe('useSettingsStore.restoreFromBackup', () => {
     expect(after.conversionMode).toBe('traditional');
   });
 
-  test('越界数值 clamp：提醒时刻 0-23/0-59、目标量 1-99、语速 0.5-2.0', () => {
+  test('越界数值 clamp：提醒时刻 0-23/0-59、目标量 1-99、语速 0.5-2.0、左右边距 0-120', () => {
     useSettingsStore.getState().restoreFromBackup({
       reminderHour: 30,
       reminderMinute: -5,
       dailyGoalCount: 5000,
       speechRate: 9.9,
+      pageMargin: 9999,
     });
     const after = useSettingsStore.getState();
     expect(after.reminderHour).toBe(23);
     expect(after.reminderMinute).toBe(0);
     expect(after.dailyGoalCount).toBe(99);
     expect(after.speechRate).toBe(2.0);
+    expect(after.pageMargin).toBe(120);
+  });
+
+  test('左右边距：备份恢复保留合法值、越界回收；setPageMargin 同口径 clamp', () => {
+    // 合法档位原样恢复（版心宽随之变化）
+    useSettingsStore.getState().restoreFromBackup({ pageMargin: 32 });
+    expect(useSettingsStore.getState().pageMargin).toBe(32);
+    // 负值 → 下限；非有限值 → 保持现值（类型不符跳过语义）
+    useSettingsStore.getState().restoreFromBackup({ pageMargin: -8 });
+    expect(useSettingsStore.getState().pageMargin).toBe(0);
+    useSettingsStore.getState().restoreFromBackup({ pageMargin: Number.NaN });
+    expect(useSettingsStore.getState().pageMargin).toBe(0);
+    // setter 同口径：clamp + 取整
+    useSettingsStore.getState().setPageMargin(41.6);
+    expect(useSettingsStore.getState().pageMargin).toBe(42);
+    useSettingsStore.getState().setPageMargin(9999);
+    expect(useSettingsStore.getState().pageMargin).toBe(120);
   });
 
   test('translation 嵌套对象与现值合并，缺失键保持现值', () => {

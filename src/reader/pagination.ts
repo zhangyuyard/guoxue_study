@@ -74,3 +74,19 @@ export function pageAtOffset(p: Pagination, y: number): number {
   const page = Math.floor(Math.max(0, y) / p.pageStride);
   return Math.min(page, p.pageCount - 1);
 }
+
+/**
+ * 定长切块（R3-scroll 对齐 legado：滚动模式 = 离散页翻页，页 = 定长行区间）。
+ * 末页 = 余数行（不足一页也成页，渲染顶对齐、底部留白——legado 同口径）。
+ * size ≤ 0 或空输入 → 空数组。
+ */
+export function chunkLines<T>(lines: readonly T[], size: number): T[][] {
+  if (size <= 0 || lines.length === 0) {
+    return [];
+  }
+  const out: T[][] = [];
+  for (let i = 0; i < lines.length; i += size) {
+    out.push(lines.slice(i, i + size));
+  }
+  return out;
+}

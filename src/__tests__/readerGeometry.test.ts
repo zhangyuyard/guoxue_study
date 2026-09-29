@@ -15,6 +15,7 @@ import {
   PINYIN_UNIFIED_FLOOR,
   PINYIN_UNIFIED_RATIO,
   LATIN_WIDTH_K,
+  cellAdvanceFor,
   charGapFor,
   getItemLayoutOf,
   layoutChapter,
@@ -211,6 +212,25 @@ describe('charGapFor：字距唯一真源（几何 cellAdvance 与渲染器 marg
     expect(charGapFor('full', 24)).toBe(4);
     expect(charGapFor('full', 32)).toBe(5);
     expect(charGapFor('rare', 12)).toBe(2);
+  });
+
+  it('cellAdvanceFor 同源：几何 cellAdvance 逐值等于字符宽 + 2×字距（版心栅格宽据此居中）', () => {
+    for (const fontSize of FONT_SIZES) {
+      for (const mode of ['full', 'rare', 'off'] as const) {
+        const gap = charGapFor(mode, fontSize);
+        const g = resolveGeometry({
+          fontSize,
+          lineHeight: 1.6,
+          pinyinEnabled: mode !== 'off',
+          containerWidth: 320,
+          charGap: gap,
+        });
+        expect(g.cellAdvance).toBe(cellAdvanceFor(fontSize, gap));
+        expect(g.cellAdvance).toBe(fontSize + gap * 2);
+        // 栅格宽 = charsPerLine × cellAdvance 必须 ≤ 容器宽（版心按栅格居中不溢出）
+        expect(g.charsPerLine * g.cellAdvance).toBeLessThanOrEqual(320);
+      }
+    }
   });
 });
 
