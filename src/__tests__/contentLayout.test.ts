@@ -194,13 +194,11 @@ describe('版心接线：几何算出的版心必须真的被渲染层用上（�
   const pageSrc = stripComments(readFileSync(PAGE_MODE_PATH, 'utf8'));
   const readerSrc = stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
 
-  it('ScrollMode：行容器左右分别取 contentInsets.left / .right（各 1 次命中）', () => {
-    expect(countOf(scrollSrc, 'left: contentInsets.left,')).toBe(1);
-    expect(countOf(scrollSrc, 'right: contentInsets.right,')).toBe(1);
-  });
-
-  it('ScrollMode：列命中与渲染同一左偏移（locationX − contentInsets.left）', () => {
-    expect(countOf(scrollSrc, '(locationX - contentInsets.left)')).toBe(1);
+  it('ScrollMode：FlatList 内容容器左右内边距分别取 contentInsets.left / .right', () => {
+    // 2026-09-29 重构：由绝对定位行（left/right）改为原生 FlatList 平铺，
+    // 版心偏移经 contentContainer 水平内边距注入（与 PageMode 同口径）。
+    expect(countOf(scrollSrc, 'paddingLeft: contentInsets.left,')).toBe(1);
+    expect(countOf(scrollSrc, 'paddingRight: contentInsets.right,')).toBe(1);
   });
 
   it('PageMode：FlatList 内容容器左右内边距分别取 contentInsets.left / .right', () => {

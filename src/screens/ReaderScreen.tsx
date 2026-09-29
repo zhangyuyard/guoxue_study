@@ -23,7 +23,7 @@ import {
 } from 'react-native';
 
 import LineRow from '@/components/reader/LineRow';
-import { ReaderCore, type NineGridZone } from '@/reader/core';
+import { ReaderCore } from '@/reader/core';
 import HighlightActionSheet from '@/components/reader/HighlightActionSheet';
 import { TextLibraryService } from '@/services/TextLibraryService';
 import { StorageService } from '@/services/StorageService';
@@ -755,23 +755,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     fillNeighbors();
   }, [fillNeighbors]);
 
-  // ── legado 式滚动模式（ScrollReader：三页块纵拼 + pageOffset 自由滚动 + 同帧换页）──
-  // 依据 docs/reader-legado-full-analysis-2026-09-24.md 与
-  // docs/scroll-reader-implementation-plan-2026-09-24.md（逐行依据见组件内注释）。
-  const linesPerPage = useMemo(
-    () => Math.max(1, Math.floor(viewportH / geometry.rowHeight)),
-    [viewportH, geometry.rowHeight],
-  );
-  // 已载章窗口 → 页流章序列（stitch 切章；每章 lines 含章首标题行）
-  const scrollChapters = useMemo(() => {
-    return loadedChapters
-      .map((id) => {
-        const start = stitched.firstLineOf.get(id) ?? 0;
-        const count = stitched.lineCountOf.get(id) ?? 0;
-        return { chapterId: id, lines: stitched.lines.slice(start, start + count) };
-      })
-      .filter((c) => c.lines.length > 0);
-  }, [stitched, loadedChapters]);
+  // ── 原生 FlatList 滚动模式（stitched.lines 平铺行流直接作 data）──
   // 书级边界：窗口首/末章的相邻章存在性（legado hasPrevChapter/hasNextChapter）
   const hasMorePrev = useMemo(() => {
     const first = loadedChapters[0];
@@ -828,20 +812,6 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     },
     [activeChapterId, bookId, openChapter, recordProgress, setSegment, retainSetFor],
   );
-  const handleScrollLongPressChar = useCallback(
-    (line: Line) => {
-      const seg = segmentsByChapter.get(line.chapterId)?.find((s) => s.id === line.segmentId);
-      if (!seg) {
-        return;
-      }
-      handleLongPressChar(seg, line.chapterId)();
-    },
-    [segmentsByChapter, handleLongPressChar],
-  );
-  // 九宫格中列 = 菜单（legado clickActionMC 默认 0）；本仓菜单入口暂由顶/底栏承担，
-  // mc 动作预留接线（onNineGrid 其余分区已在 ScrollReader 内映射翻页）
-  const handleNineGrid = useCallback((_zone: NineGridZone) => undefined, []);
-
 
   // 热区 bottom 让位底栏：热区 absolute 于 listWrap，若压到 footer 两端按钮，
   // 章间导航被透明层吞 tap（真机实证：footer 按钮在热区 bounds 内全程无响应）
@@ -896,16 +866,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     // 跨章连续性由补偿 effect 维持。
   }, [layout, initialCharOffset, readerMode, stitched, activeChapterId, params]);
 
-  const scrollInitialPage = useMemo(
-    () => Math.floor((initialLineIndex > 0 ? initialLineIndex : 0) / linesPerPage),
-    [initialLineIndex, linesPerPage],
-  );
-
   // scroll 模式锚点滑动不重挂载：listKey 不含 activeChapterId（保持 data 原地更新，
   // 视觉位置由补偿 effect 维持）；跳章/切模式仍走 switchSeq 触发重挂载。
   const listKey = readerMode === 'scroll' ? `scroll:${switchSeq}` : `page:${activeChapterId}:${switchSeq}`;
 
-  // scroll 模式章内进度（ScrollMode onLineChange：页变化去重后上报）
+  // scroll 模式章内进度（ScrollMode onLineChange：滚动静止后上报，码点真值）
   const handleScrollLineChange = useCallback(
     (line: Line | undefined) => {
       if (!line) {
@@ -935,20 +900,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [navigation],
   );
 
-  // 列命中 → 语义分流（legado ContentTextView.touch：命中列 → 字符语义）
-  const handleScrollTapChar = useCallback(
-    (line: Line, col: number) => {
-      const seg = segmentsByChapter.get(line.chapterId)?.find((s) => s.id === line.segmentId);
-      if (!seg) {
-        return;
-      }
-      const span = segmentSpanByChapter.get(line.chapterId)?.get(line.segmentId);
-      const segStart = span?.start ?? 0;
-      const index = line.charStart - segStart + col; // 段内码点索引
-      handlePressChar(seg.text)(index);
-    },
-    [segmentsByChapter, segmentSpanByChapter, handlePressChar],
-  );
+  // 列命中 → 语义分流已下沉到 renderItem 的 LineRow.onPressChar（原生 FlatList 版）。
 
   // ── 章间导航（R2b2：滑窗就地切换，不再路由重导航）──
   const siblings = useMemo(() => {
@@ -1098,21 +1050,17 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           chapterId={activeChapterId}
           scroll={{
             listKey: listKey,
-            chapters: scrollChapters,
+            lines: stitched.lines,
             hasMorePrev: hasMorePrev,
             hasMoreNext: hasMoreNext,
             initialChapterId: activeChapterId,
-            initialPage: scrollInitialPage,
-            linesPerPage: linesPerPage,
+            initialLineIndex: initialLineIndex,
             geometry: geometry,
             viewportH: viewportH,
             contentInsets: { left: content.left, right: content.right },
             renderLine: (line) => renderItem({ item: line }),
             onChapterCommit: handleScrollCommit,
             onLineChange: handleScrollLineChange,
-            onTapChar: handleScrollTapChar,
-            onLongPressChar: handleScrollLongPressChar,
-            onNineGrid: handleNineGrid,
             onNearBoundary: handleNearBoundary,
             loadError: loadError,
           }}
