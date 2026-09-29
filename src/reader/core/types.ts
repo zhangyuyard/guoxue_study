@@ -8,8 +8,8 @@
  * 受控/边界语义，非代码复制。
  */
 
-/** 阅读模式（参考库 FlipMode 思想；仅 scroll / page 两种，均原生 FlatList，无 Skia 依赖） */
-export type ReaderMode = 'scroll' | 'page';
+/** 阅读模式（对齐库 FlipMode：scroll=上下 / page=逐页 / cover=覆盖 / slide=平移 / none=无动画；仿真 simulation 待 RN 升级） */
+export type ReaderMode = 'scroll' | 'page' | 'cover' | 'slide' | 'none';
 
 /** 章边界请求方向（库 onBoundaryPrev/onBoundaryNext 语义）：渲染模式触达窗口边沿时上抛 */
 export type BoundaryDirection = 'prev' | 'next';

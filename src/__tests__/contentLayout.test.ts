@@ -206,9 +206,10 @@ describe('版心接线：几何算出的版心必须真的被渲染层用上（�
     expect(countOf(pageSrc, 'paddingRight: contentInsets.right,')).toBe(1);
   });
 
-  it('ReaderScreen：版心宽喂几何、左右偏移成对喂两种模式、单格步进喂版心', () => {
+  it('ReaderScreen：版心宽喂几何、左右偏移成对喂三种模式、单格步进喂版心', () => {
     expect(countOf(readerSrc, 'const containerWidth = content.contentWidth;')).toBe(1);
-    expect(countOf(readerSrc, 'contentInsets: { left: content.left, right: content.right },')).toBe(2);
+    // scroll / page / flip（cover/slide/none）三种模式各 1 处 = 3
+    expect(countOf(readerSrc, 'contentInsets: { left: content.left, right: content.right },')).toBe(3);
     // 版心解析必须拿到与几何同源的 cellAdvance（缺此实参 ⇒ 退化为 shift=0 = 右侧残差回归）
     expect(
       countOf(readerSrc, 'resolveContentLayout(windowWidth, pageMarginSetting, cellAdvance)'),

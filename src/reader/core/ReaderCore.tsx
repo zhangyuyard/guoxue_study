@@ -13,11 +13,14 @@ import type { ReaderMode } from './types';
 import { useChapterChange } from './useChapterChange';
 import { ScrollMode, type ScrollModeProps } from './modes/ScrollMode';
 import { PageMode, type PageModeProps } from './modes/PageMode';
+import { FlipMode, type FlipModeProps } from './modes/FlipMode';
 
 export interface ReaderCoreProps {
   mode: ReaderMode;
   scroll?: ScrollModeProps;
   page?: PageModeProps;
+  /** 横向翻页（cover 覆盖 / slide 平移 / none 无动画；animation 由 mode 派生；simulation 依赖 Skia 延后） */
+  flip?: Omit<FlipModeProps, 'animation'>;
   /** 当前章 id（章变化监听输入；null/undefined 时监听不生效） */
   chapterId?: string | null;
   /** 首个可读章（onPrepare）/ 后续章变化（onChapterChange） */
@@ -31,6 +34,7 @@ export const ReaderCore = memo(function ReaderCore({
   mode,
   scroll,
   page,
+  flip,
   chapterId,
   onChapterPrepare,
   onChapterChange,
@@ -46,6 +50,9 @@ export const ReaderCore = memo(function ReaderCore({
   if (mode === 'scroll') {
     // key = listKey：切章/跳章/切模式重挂载语义由上层 listKey 驱动（scroll 模式不含章 id）
     return scroll ? <ScrollMode key={scroll.listKey} {...scroll} /> : null;
+  }
+  if (mode === 'cover' || mode === 'slide' || mode === 'none') {
+    return flip ? <FlipMode key={flip.listKey} {...flip} animation={mode} /> : null;
   }
   return page ? <PageMode key={page.listKey} {...page} /> : null;
 });

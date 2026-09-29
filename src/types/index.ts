@@ -223,11 +223,16 @@ export type ThemeMode = 'light' | 'dark';
 export type PaperMode = 'default' | 'green' | 'sepia' | 'dark' | 'cyan';
 
 /**
- * 阅读翻页方式。
+ * 阅读翻页方式（对齐 @tangfeifan/react-native-reader 的 FlipMode 五模式）。
  * - scroll：纵向连续滚动（原生 FlatList，与注音行 / 长按选区 / 划线偏移兼容性最佳）。
  * - page：逐页（原生 FlatList + 定行高分页 + 左右热区，见 reader/pagination.ts）。
+ * - cover：覆盖（横向翻页，新页从右滑入盖住当前页）。
+ * - slide：平移（横向翻页，前后页同步平移）。
+ * - none：无动画（横向切页，点击直接切换）。
+ * ⚠ 仿真（simulation/Skia 卷页）依赖 RN≥0.78 + 新架构，延后——见
+ *   docs/reader-flip-modes-migration-assessment-2026-09-29.md。
  */
-export type ReaderMode = 'scroll' | 'page';
+export type ReaderMode = 'scroll' | 'page' | 'cover' | 'slide' | 'none';
 
 /** 阅读器设置 */
 export interface ReaderSettings {

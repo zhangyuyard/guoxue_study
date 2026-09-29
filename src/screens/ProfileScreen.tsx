@@ -477,12 +477,16 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
           />
         </View>
         {/* 【D5】性能档位：装配/缓存/注音预算的手动覆盖（默认自动探测） */}
-        <View style={[styles.settingRow, { borderTopColor: colors.border }]}>
+        {/* 翻页模式 5 档（滚动/翻页/覆盖/平移/无动画）横向一行放不下 ⇒ 此行上下排 */}
+        <View style={[styles.settingRow, styles.settingRowCol, { borderTopColor: colors.border }]}>
           <Text style={[styles.settingLabel, { color: colors.text }]}>翻页模式</Text>
           <SegmentedRow
             options={[
               { value: 'scroll' as const, label: '滚动' },
               { value: 'page' as const, label: '翻页' },
+              { value: 'cover' as const, label: '覆盖' },
+              { value: 'slide' as const, label: '平移' },
+              { value: 'none' as const, label: '无动画' },
             ]}
             value={readerMode}
             onChange={setReaderMode}
@@ -793,6 +797,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderTopWidth: 0,
     gap: 12,
+  },
+  /** 翻页模式 5 档横排放不下 ⇒ 此行上下排（label 一行、分段控件一行） */
+  settingRowCol: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
   },
   settingLabel: {
     fontSize: 15,

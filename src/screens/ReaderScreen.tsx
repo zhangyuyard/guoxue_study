@@ -866,8 +866,16 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   }, [layout, initialCharOffset, readerMode, stitched, activeChapterId, params]);
 
   // scroll 模式锚点滑动不重挂载：listKey 不含 activeChapterId（保持 data 原地更新，
-  // 视觉位置由补偿 effect 维持）；跳章/切模式仍走 switchSeq 触发重挂载。
-  const listKey = readerMode === 'scroll' ? `scroll:${switchSeq}` : `page:${activeChapterId}:${switchSeq}`;
+  // 视觉位置由补偿 effect 维持）；其余模式跳章/切模式走 switchSeq 触发重挂载。
+  const listKey = readerMode === 'scroll' ? `scroll:${switchSeq}` : `${readerMode}:${activeChapterId}:${switchSeq}`;
+
+  // flip 模式（cover/slide/none）挂载定位页号：章内行下标 → 页号（与 FlipMode 内
+  // paginateChapter 同式：linesPerPage = floor(viewportH / rowHeight)）
+  const flipInitialPage = useMemo(() => {
+    const rowH = Math.max(1, geometry.rowHeight);
+    const linesPerPage = Math.max(1, Math.floor(viewportH / rowH));
+    return Math.floor((initialLineIndex > 0 ? initialLineIndex : 0) / linesPerPage);
+  }, [initialLineIndex, viewportH, geometry.rowHeight]);
 
   // scroll 模式章内进度（ScrollMode onLineChange：滚动静止后上报，码点真值）
   const handleScrollLineChange = useCallback(
@@ -945,6 +953,18 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     },
     [loadChapterData, retainSetFor, prewarmChapter],
   );
+
+  // flip 模式边界 → 章间导航（react-native-reader onBoundaryPrev/Next 语义）
+  const handleFlipBoundaryPrev = useCallback(() => {
+    if (siblings.prev) {
+      jumpTo(siblings.prev.id);
+    }
+  }, [siblings.prev, jumpTo]);
+  const handleFlipBoundaryNext = useCallback(() => {
+    if (siblings.next) {
+      jumpTo(siblings.next.id);
+    }
+  }, [siblings.next, jumpTo]);
 
   // ── 行渲染（跨章：按 line.chapterId 取本篇章段/跨度/高亮/拼音字号）──
   const renderItem = useCallback(
@@ -1076,6 +1096,24 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
               recordProgress(line.segmentId, undefined, line.charStart);
               setSegment(line.segmentId);
             },
+          }}
+          flip={{
+            layout: layout,
+            geometry: geometry,
+            viewportH: viewportH,
+            viewportW: windowWidth,
+            contentInsets: { left: content.left, right: content.right },
+            footerInset: footerHEff,
+            pageBackgroundColor: colors.background,
+            renderItem: (line) => renderItem({ item: line }),
+            initialPage: flipInitialPage,
+            listKey: listKey,
+            onProgressCommit: (line) => {
+              recordProgress(line.segmentId, undefined, line.charStart);
+              setSegment(line.segmentId);
+            },
+            onBoundaryPrev: handleFlipBoundaryPrev,
+            onBoundaryNext: handleFlipBoundaryNext,
           }}
         />
         </View>
