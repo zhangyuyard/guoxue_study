@@ -4,6 +4,7 @@
 import {
   DEFAULT_READER_PERF_TIER,
   READER_PERF_TIER_OPTIONS,
+  resolveReaderSetting,
   useSettingsStore,
 } from '@/store/useSettingsStore';
 import { DeviceTierService } from '@/services/DeviceTierService';
@@ -215,5 +216,46 @@ describe('useSettingsStore.readerPerfTier（r38 T01 / G6：档位入口行为与
     useSettingsStore.getState().reset();
     expect(useSettingsStore.getState().readerPerfTier).toBe('auto');
     expect(setOverrideSpy).toHaveBeenLastCalledWith(null);
+  });
+});
+
+describe('useSettingsStore.pageMargin 书籍级覆盖（PER_BOOK_SETTING_KEYS）', () => {
+  test('pageMargin 在白名单内，setPerBookSettings 可写入书籍层覆盖', () => {
+    useSettingsStore.getState().reset();
+    const bookId = 'book-xyz';
+
+    // 全局默认 20；书籍层写入 48 后 resolveReaderSetting 应返回 48
+    expect(useSettingsStore.getState().pageMargin).toBe(20);
+    useSettingsStore.getState().setPerBookSettings(bookId, { pageMargin: 48 });
+    expect(
+      resolveReaderSetting(useSettingsStore.getState(), 'pageMargin', bookId),
+    ).toBe(48);
+    // 其他书仍跟随全局
+    expect(
+      resolveReaderSetting(useSettingsStore.getState(), 'pageMargin', 'other-book'),
+    ).toBe(20);
+  });
+
+  test('书籍层缺 pageMargin 覆盖时回落全局层', () => {
+    useSettingsStore.getState().reset();
+    useSettingsStore.getState().setPageMargin(32);
+    expect(
+      resolveReaderSetting(useSettingsStore.getState(), 'pageMargin', 'no-override-book'),
+    ).toBe(32);
+  });
+
+  test('备份恢复：per-book 条目里的 pageMargin 数值被保留，非数值被丢弃', () => {
+    useSettingsStore.getState().reset();
+    useSettingsStore.getState().restoreFromBackup({
+      perBookSettings: {
+        b1: { pageMargin: 48, fontSize: 18 },
+        b2: { pageMargin: 'bad' },
+      } as unknown as Record<string, unknown>,
+    });
+    const per = useSettingsStore.getState().perBookSettings;
+    expect(per.b1?.pageMargin).toBe(48);
+    expect(per.b1?.fontSize).toBe(18);
+    // 非法 pageMargin（字符串）被 sanitize 丢弃，b2 为空覆盖
+    expect(per.b2?.pageMargin).toBeUndefined();
   });
 });

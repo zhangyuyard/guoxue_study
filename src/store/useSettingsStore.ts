@@ -66,6 +66,7 @@ const mmkvStorage: StateStorage = {
 const DEFAULT_SETTINGS: ReaderSettings = {
   fontSize: 18,
   lineHeight: 1.6,
+  pageMargin: PAGE_MARGIN_DEFAULT,
   theme: 'light',
   paper: 'default',
   readerMode: 'scroll',
@@ -128,6 +129,7 @@ export const DEFAULT_REMINDER_SETTINGS: RecitationReminderSettings = {
 export const PER_BOOK_SETTING_KEYS = [
   'fontSize',
   'lineHeight',
+  'pageMargin',
   'paper',
   'readerMode',
   'pinyinMode',
@@ -173,6 +175,8 @@ function sanitizePerBookEntry(input: unknown): PerBookSettings {
   if (fontSize !== undefined) out.fontSize = fontSize;
   const lineHeight = num(d.lineHeight);
   if (lineHeight !== undefined) out.lineHeight = lineHeight;
+  const pageMargin = num(d.pageMargin);
+  if (pageMargin !== undefined) out.pageMargin = pageMargin;
   const paper = str(d.paper);
   if (paper !== undefined) out.paper = paper as PaperMode;
   const readerMode = str(d.readerMode);
@@ -551,6 +555,7 @@ export interface UseReaderBookSettingsResult {
   /** 解析后的生效值（书籍层覆盖 → 全局默认） */
   fontSize: number;
   lineHeight: number;
+  pageMargin: number;
   paper: PaperMode;
   readerMode: ReaderMode;
   pinyinMode: PinyinMode;
@@ -558,6 +563,7 @@ export interface UseReaderBookSettingsResult {
   /** 写入 setter：有 bookId 时写书籍层（perBookSettings），否则写全局层（防御旧路由） */
   setFontSize: (v: number) => void;
   setLineHeight: (v: number) => void;
+  setPageMargin: (v: number) => void;
   setPaper: (v: PaperMode) => void;
   setReaderMode: (v: ReaderMode) => void;
   setPinyinMode: (v: PinyinMode) => void;
@@ -592,6 +598,7 @@ export function useReaderBookSettings(
   // 全局层基准值
   const gFontSize = useSettingsStore((s) => s.fontSize);
   const gLineHeight = useSettingsStore((s) => s.lineHeight);
+  const gPageMargin = useSettingsStore((s) => s.pageMargin);
   const gPaper = useSettingsStore((s) => s.paper);
   const gReaderMode = useSettingsStore((s) => s.readerMode);
   const gPinyinMode = useSettingsStore((s) => s.pinyinMode);
@@ -601,6 +608,7 @@ export function useReaderBookSettings(
   const clearPerBook = useSettingsStore((s) => s.clearPerBookSettings);
   const gSetFontSize = useSettingsStore((s) => s.setFontSize);
   const gSetLineHeight = useSettingsStore((s) => s.setLineHeight);
+  const gSetPageMargin = useSettingsStore((s) => s.setPageMargin);
   const gSetPaper = useSettingsStore((s) => s.setPaper);
   const gSetReaderMode = useSettingsStore((s) => s.setReaderMode);
   const gSetPinyinMode = useSettingsStore((s) => s.setPinyinMode);
@@ -609,6 +617,7 @@ export function useReaderBookSettings(
   // 解析生效值：覆盖优先，缺键回落全局
   const fontSize = override?.fontSize ?? gFontSize;
   const lineHeight = override?.lineHeight ?? gLineHeight;
+  const pageMargin = override?.pageMargin ?? gPageMargin;
   const paper = override?.paper ?? gPaper;
   const readerMode = override?.readerMode ?? gReaderMode;
   const pinyinMode = override?.pinyinMode ?? gPinyinMode;
@@ -622,6 +631,7 @@ export function useReaderBookSettings(
       } else {
         if (patch.fontSize !== undefined) gSetFontSize(patch.fontSize);
         if (patch.lineHeight !== undefined) gSetLineHeight(patch.lineHeight);
+        if (patch.pageMargin !== undefined) gSetPageMargin(patch.pageMargin);
         if (patch.paper !== undefined) gSetPaper(patch.paper);
         if (patch.readerMode !== undefined) gSetReaderMode(patch.readerMode);
         if (patch.pinyinMode !== undefined) gSetPinyinMode(patch.pinyinMode);
@@ -633,6 +643,7 @@ export function useReaderBookSettings(
       setPerBook,
       gSetFontSize,
       gSetLineHeight,
+      gSetPageMargin,
       gSetPaper,
       gSetReaderMode,
       gSetPinyinMode,
@@ -642,6 +653,7 @@ export function useReaderBookSettings(
 
   const setFontSize = useCallback((v: number) => write({ fontSize: v }), [write]);
   const setLineHeight = useCallback((v: number) => write({ lineHeight: v }), [write]);
+  const setPageMargin = useCallback((v: number) => write({ pageMargin: v }), [write]);
   const setPaper = useCallback((v: PaperMode) => write({ paper: v }), [write]);
   const setReaderMode = useCallback((v: ReaderMode) => write({ readerMode: v }), [write]);
   const setPinyinMode = useCallback((v: PinyinMode) => write({ pinyinMode: v }), [write]);
@@ -664,12 +676,14 @@ export function useReaderBookSettings(
   return {
     fontSize,
     lineHeight,
+    pageMargin,
     paper,
     readerMode,
     pinyinMode,
     conversionMode,
     setFontSize,
     setLineHeight,
+    setPageMargin,
     setPaper,
     setReaderMode,
     setPinyinMode,

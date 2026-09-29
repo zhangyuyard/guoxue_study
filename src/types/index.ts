@@ -235,6 +235,8 @@ export interface ReaderSettings {
   fontSize: number;
   /** 行距倍数（1.4/1.6/1.8） */
   lineHeight: number;
+  /** 正文左右边距（dp，用户自定义；只影响版心宽与水平居中，不参与分页行高计算） */
+  pageMargin: number;
   /** 主题（全局 UI 暗色开关） */
   theme: ThemeMode;
   /** 阅读纸张（阅读器专属背景换肤） */

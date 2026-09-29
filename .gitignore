@@ -23,6 +23,9 @@ node_modules/
 .history/
 *.log
 
+# 项目本地工作记忆 / 工作区元数据（含 agent 记忆、过程账本；不随仓共享）
+.workbuddy/
+
 # TS 增量构建信息
 *.tsbuildinfo
 
