@@ -3,7 +3,8 @@
  * - pickDictFile：document-picker 选文件（copyTo cachesDirectory 拿稳定本地路径）
  * - createChunkReader：RNFS.read（base64 分块）→ Uint8Array，供 parser ctx 注入
  */
-import DocumentPicker from 'react-native-document-picker';
+import * as DocumentPicker from '@react-native-documents/picker';
+import { isErrorWithCode, errorCodes } from '@react-native-documents/picker';
 import RNFS from 'react-native-fs';
 import type { ServiceResult } from '@/types';
 import { isLocalPath, toLocalPath } from '@/utils/localPath';
@@ -103,7 +104,7 @@ export const DictFileService = {
         },
       };
     } catch (e) {
-      if (DocumentPicker.isCancel(e)) {
+      if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
         return { success: false, error: '已取消选择文件' };
       }
       return { success: false, error: `选择文件失败：${(e as Error).message}` };
@@ -156,7 +157,7 @@ export const DictFileService = {
       }
       return { success: true, data: out };
     } catch (e) {
-      if (DocumentPicker.isCancel(e)) {
+      if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
         return { success: false, error: '已取消选择文件' };
       }
       return { success: false, error: `选择文件失败：${(e as Error).message}` };

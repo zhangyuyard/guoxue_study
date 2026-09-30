@@ -22,7 +22,7 @@ jest.mock('react-native', () => ({
   InteractionManager: { runAfterInteractions: () => null },
 }));
 
-jest.mock('react-native-quick-sqlite', () => ({
+jest.mock('@/services/sqliteClient', () => ({
   open: () => ({ execute: () => ({ rows: { _array: [], length: 0 } }) }),
 }));
 
@@ -116,10 +116,10 @@ jest.mock('react-native-fs', () => {
   };
 });
 
-jest.mock('react-native-document-picker', () => ({
+jest.mock('@react-native-documents/picker', () => ({
   pick: jest.fn(),
   types: { allFiles: 0, plainText: 1 },
-  isCancel: () => false,
+  isErrorWithCode: () => false, errorCodes: { OPERATION_CANCELED: 'OPERATION_CANCELED' },
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires

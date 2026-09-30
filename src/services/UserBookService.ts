@@ -18,10 +18,11 @@
  * 与字典域隔离：独立 db 文件 user_books.db，严禁触碰 user_dict.db；
  * guoxue.db 仅经 StorageService 公共 API 写入 segments_fts 搜索索引行。
  */
-import DocumentPicker from 'react-native-document-picker';
+import * as DocumentPicker from '@react-native-documents/picker';
+import { isErrorWithCode, errorCodes } from '@react-native-documents/picker';
 import RNFS from 'react-native-fs';
 import { InteractionManager } from 'react-native';
-import { open } from 'react-native-quick-sqlite';
+import { open } from '@/services/sqliteClient';
 import type { Book, ServiceResult } from '@/types';
 import { getBuiltinSpec, BUILTIN_CATALOG, type BuiltinBookSpec } from '@/data/builtinCatalog';
 import {
@@ -3627,7 +3628,7 @@ export async function pickBookFile(): Promise<ServiceResult<PickedBookFile>> {
       data: { uri: chosen, fileName, size: f.size ?? 0 },
     };
   } catch (e) {
-    if (DocumentPicker.isCancel(e)) {
+    if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
       return { success: false, error: '已取消选择文件' };
     }
     return { success: false, error: `选择文件失败：${(e as Error).message}` };
@@ -4840,7 +4841,7 @@ async function loadAndRegisterAllInternal(): Promise<ServiceResult<LibrarySyncSu
                   row ? row.created_at : Date.now(),
                   parsed.sourcePath,
                   parsed.fileSig,
-                  parsed.contentHash,
+                  parsed.contentHash ?? null,
                 ],
               );
             }
@@ -5269,7 +5270,7 @@ export async function importBook(
   if (parsed.contentHash) {
     const dupId = await findDuplicateBook(
       instance,
-      parsed.contentHash,
+      parsed.contentHash ?? null,
       sizeFromFileSig(parsed.fileSig),
     );
     // 同 id 豁免：同名文件（stableBookId 相同）= 幂等覆盖（重导/半截修复
@@ -5301,7 +5302,7 @@ export async function importBook(
           Date.now(),
           parsed.sourcePath,
           parsed.fileSig,
-          parsed.contentHash,
+          parsed.contentHash ?? null,
         ],
       );
     } else {

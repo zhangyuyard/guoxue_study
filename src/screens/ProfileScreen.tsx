@@ -16,7 +16,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import DocumentPicker from 'react-native-document-picker';
+import * as DocumentPicker from '@react-native-documents/picker';
+import { isErrorWithCode, errorCodes } from '@react-native-documents/picker';
 import RNFS from 'react-native-fs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -351,7 +352,7 @@ export default function ProfileScreen({ navigation }: Props): React.JSX.Element 
         text = await RNFS.readFile(first.uri, 'utf8');
       } catch (e) {
         // 用户取消选择：静默返回
-        if (DocumentPicker.isCancel(e)) {
+        if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
           return;
         }
         Alert.alert('导入失败', `读取备份文件时出错：${(e as Error).message ?? '未知错误'}`);
