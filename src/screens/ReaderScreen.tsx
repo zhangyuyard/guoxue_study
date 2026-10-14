@@ -259,11 +259,24 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     const retain = retainSetFor(chapterId);
     const before = winRef.current;
     const cached = windowGet(before, chapterId);
-    const needLoad = !cached && !windowIsLoading(before, chapterId);
+    // ★★ V5（2026-10-14真机复现）：与 `jumpTo` 同一修法——**retain 里的邻章也要装载**。
+    //   原实现只装中心章 ⇒ 窗口首帧只有一章 ⇒ `needPrev`（`chain0==active` 为真）
+    //   随后补 prev ⇒ prepend ⇒ 实测 `delta=47100px` 整章位移 =闪 + 回弹。
+    const targets: string[] = [];
+    for (const id of [chapterId, ...retain]) {
+      if (!windowHas(before, id) && !windowIsLoading(before, id)) {
+        targets.push(id);
+      }
+    }
+    const needLoad = targets.length > 0;
     setWin((w) => {
       const rw = windowRecenter(w, chapterId, retain);
       // updater 幂等：StrictMode 双调下 begin 结果一致（recenter 只裁剪不新增）
-      return needLoad ? (windowBegin(rw, chapterId) ?? rw) : rw;
+      let nw = rw;
+      for (const id of targets) {
+        nw = windowBegin(nw, id) ?? nw;
+      }
+      return nw;
     });
     // ★ 续读真值保序：openChapter 不带 charOffset 会把持久化偏移覆盖为空
     // （store 语义：lastRead 整体重写）⇒ 必须把本轮定位用的偏移原样传入，
@@ -286,20 +299,29 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       finalize(cached);
     } else if (needLoad) {
       void (async () => {
-        try {
-          const data = await loadChapterData(chapterId);
-          if (cancelled) {
-            return;
+        // 逐章装载（中心章在前 ⇒ 首帧优先显示目标章）。
+        // ★★ V5：邻章与中心章**同批**装载，避免「先只有中心章 → 事后补 prev → prepend」。
+        for (const id of targets) {
+          try {
+            const data = await loadChapterData(id);
+            if (cancelled) {
+              return;
+            }
+            setWin((w) => windowPut(w, id, data));
+            // ★ 续读真值只由**中心章**触发（`finalize` 含 openChapter 覆盖语义）
+            if (id === chapterId) {
+              finalize(data);
+            }
+            prewarmChapter(data, id);
+          } catch (e) {
+            if (cancelled) {
+              return;
+            }
+            setWin((w) => windowFail(w, id));
+            if (id === chapterId) {
+              setError((e as Error).message ?? '加载失败');
+            }
           }
-          setWin((w) => windowPut(w, chapterId, data));
-          finalize(data);
-          prewarmChapter(data, chapterId);
-        } catch (e) {
-          if (cancelled) {
-            return;
-          }
-          setWin((w) => windowFail(w, chapterId));
-          setError((e as Error).message ?? '加载失败');
         }
       })();
     }
@@ -1158,6 +1180,17 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    * 就地切换章：命中窗缓存零加载直切；未命中 recenter（清窗+陈旧丢弃）后
    * 经 begin 闸门装载。目标未就绪期间渲染 spinner（不清屏旧章内容由
    * loaded=null 分支统一处理），预取命中时用户无感。
+   *
+   * ★★ V5（2026-10-14 真机复现「跳章后上滚闪一次、下滚闪一次＋回弹」）：
+   *   `retain` 只**保留**已在窗内的章，**不装载**它们。原实现只 `windowBegin(cid)`
+   *   一章 ⇒ 跳章后窗口**只有中心章**（实测 `chain=tongjian-c14`，2660 行）
+   *   ⇒ 随后 `fillNeighbors` 的 `needPrev` 因 `chain0==active` 为真而补 prev
+   *   ⇒ `windowPut(prev)` 落在中心章**之上** = prepend
+   *   ⇒ 实测 `delta=47100px`（整章 c13=942 行）一次性下投 ⇒ **闪 + 回弹**。
+   *   ⇒ 修法：**跳章时把 retain 里所有未命中的章一并 begin + 装载**，
+   *     让窗口**一次到位**（center+prev+next 同时在窗），
+   *     事后 `fillNeighbors` 因 `chain0≠active` 与 `windowHas` 双拦而不再补 prev。
+   *   ⚠ 不得改回「只装中心章」：那等于把 prepend 从「跳章后」挪回「滚动时」。
    */
   const jumpTo = useCallback(
     (cid: string) => {
@@ -1170,19 +1203,33 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       setSwitchSeq((s) => s + 1);
       // 装载判定用合并前窗：recenter 只裁剪不新增，begin 判定结果与合并后一致
       const before = winRef.current;
-      const needLoad = !windowHas(before, cid) && !windowIsLoading(before, cid);
+      // ★★ V5：目标集合＝retain ∪ {cid}（retain 已含 cid，这里只补防御）
+      const targets: string[] = [];
+      for (const id of [cid, ...retain]) {
+        if (!windowHas(before, id) && !windowIsLoading(before, id)) {
+          targets.push(id);
+        }
+      }
+      const needLoad = targets.length > 0;
       setWin((w) => {
         const rw = windowRecenter(w, cid, retain);
-        return needLoad ? (windowBegin(rw, cid) ?? rw) : rw;
+        let nw = rw;
+        for (const id of targets) {
+          nw = windowBegin(nw, id) ?? nw;
+        }
+        return nw;
       });
       if (needLoad) {
         void (async () => {
-          try {
-            const data = await loadChapterData(cid);
-            setWin((w) => windowPut(w, cid, data));
-            prewarmChapter(data, cid);
-          } catch {
-            setWin((w) => windowFail(w, cid));
+          // 逐章装载（中心章在前 ⇒ 首帧优先显示目标章）
+          for (const id of targets) {
+            try {
+              const data = await loadChapterData(id);
+              setWin((w) => windowPut(w, id, data));
+              prewarmChapter(data, id);
+            } catch {
+              setWin((w) => windowFail(w, id));
+            }
           }
         })();
       }

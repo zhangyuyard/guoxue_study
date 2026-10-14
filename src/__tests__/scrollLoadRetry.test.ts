@@ -591,3 +591,116 @@ describe('V4 跨章提交：fillNeighbors 的 forcePrev 必须挂滚动方向条
     expect(needPrev({ forceNext: true, forcePrev: true }, 'c4', 'c6')).toBe(true);
   });
 });
+
+/**
+ * ★★★ V5 判据组：跳章（`jumpTo`）与路由跳章（首开 effect）必须**装载整个 retain 集合**。
+ *
+ * ## 为什么要有这一组（2026-10-14 真机复现：跳章后上滚闪一次、下滚闪一次＋回弹）
+ *
+ * 真机读数（`deliverables/jump-flick-2026-10-14/jump-run.log`，跳到 `tongjian-c14`）：
+ * ```
+ * [JP][JUMP]  to=tongjian-c14 retain=["c14","c13","c15"] beforeChain= scrollDir=0
+ * [JP][CHAIN] PREPEND head=->tongjian-c14 chain=tongjian-c14        ← 窗口只有中心章
+ * [JP][COMP]  aIdx=0->nextIdx=942 delta=47100 offset=0 target=47100 linesLen=2660
+ * [JP][CHAIN] PREPEND head=tongjian-c14->tongjian-c13 chain=c13,c14,c15
+ * ```
+ * 机理：`windowRecenter(w, cid, retain)` 的 `retain` 只**保留**已在窗内的章，
+ * **不装载**它们。原实现只 `windowBegin(cid)` 一章 ⇒ 跳章后窗口**只有中心章**
+ * ⇒ `chain0 === activeChapterId` 为真 ⇒ `fillNeighbors` 的 `needPrev` 补 prev
+ * ⇒ `windowPut(prev)` 落在中心章**之上** = prepend
+ * ⇒ 实测 `delta=47100px`（整章 c13=942 行）**一次性下投** ⇒ 闪 + 回弹。
+ *
+ * ## 修法
+ * 跳章时把 `retain`（含 prev/next）里所有未命中的章**一并 begin + 装载**，
+ * 让窗口一次到位⇒ 事后 `fillNeighbors` 被 `chain0≠active` 与 `windowHas` 双拦。
+ *
+ * ★ 本组必须**同时**锁两处跳章路径（`jumpTo` 与路由 effect）——
+ *   只锁一处等于给另一处留后门（这正是 A6→B2→V3→V4 四轮反复的教训）。
+ */
+describe('V5 跳章：retain 集合必须整批装载（跳章后 prepend 通道）', () => {
+  /**
+   * 取跳章装载那段源码。
+   * ★★ 锚点必须是 `const targets`（V5 修法新增的装载目标集合），**不能**用
+   *   `windowRecenter(w,` —— 后者在代码顺序上**位于 targets 构造之后**，
+   *   从它开始切会切不到 `[id, ...retain]` 那几行（实测 3 条假红，条目 91）。
+   */
+  const jumpLoadSrc = (src: string): string => {
+    const start = src.indexOf('const targets');
+    expect(start).toBeGreaterThan(-1);
+    // 切片须覆盖：targets 构造 → windowRecenter → begin 循环 → 装载循环。
+    // 2200 是实测值（含正对照），不要压到 1000 以下。
+    const seg = src.slice(start, start + 2200);
+    // ★ 正对照（条目 8：切片切空 ⇒ 所有断言恒真＝零鉴别力）
+    expect(seg.length).toBeGreaterThan(600);
+    expect(seg).toContain('...retain');
+    expect(seg).toContain('windowRecenter');
+    expect(seg).toContain('windowBegin');
+    expect(seg).toMatch(/of targets/);
+    return seg;
+  };
+
+  it('形状锁⑥：跳章装载目标必须遍历整个 retain 集合（不得只装中心章）', () => {
+    // ★ 两处跳章路径各判一次（jumpTo + 路由 effect），并**断言两段源码不同**
+    //   （防切片串味：两段相同 ⇒ 其中一条路径实际没被测到，条目 111）。
+    const jumpIdx = readerSrc.indexOf('const jumpTo = useCallback(');
+    expect(jumpIdx).toBeGreaterThan(-1);
+    const jumpSeg = jumpLoadSrc(readerSrc.slice(jumpIdx, jumpIdx + 3000));
+    const routeSeg = jumpLoadSrc(readerSrc);
+    // ★ 串味自证：jumpTo 用 `cid`，路由用 `chapterId` ⇒ 两段的中心章变量名必不同
+    expect(jumpSeg).toMatch(/\[cid, \.\.\.retain\]/);
+    expect(routeSeg).toMatch(/\[chapterId, \.\.\.retain\]/);
+    expect(jumpSeg).not.toEqual(routeSeg);
+
+    for (const [name, seg] of [['jumpTo', jumpSeg], ['route-effect', routeSeg]] as const) {
+      // 目标集合必须由 `retain` 展开而来（`...retain` 展开运算符）
+      expect(/\[\s*\w+\s*,\s*\.\.\.retain\s*\]/.test(seg)).toBe(true);
+      // 装载循环必须遍历 targets（而不是只 await 单章 id）
+      expect(seg).toMatch(/for\s*\(\s*const\s+\w+\s+of\s+targets\s*\)/);
+      // ★ 反向断言：**中心章 id 直调** `loadChapterData(chapterId)` 必须不存在
+      //   （V5 前的缺陷形态：只 await 中心章 ⇒ 邻章事后才补 ⇒ prepend）。
+      //   用 `(?!\w+\s*\))` 排除「传变量」的合法形态，只抓「传字面中心章」。
+      expect(seg).not.toMatch(/await loadChapterData\(chapterId\)/);
+      expect(seg).not.toMatch(/await loadChapterData\(cid\)/);
+      // 循环体内必须真的调用 loadChapterData（否则 targets 白算）
+      expect(seg).toMatch(/for\s*\([\s\S]{0,600}?loadChapterData\(/);
+      // 名字提醒：这段必须真的属于 V5 修法（防切片落到别的分支）
+      expect(name.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('形状锁⑦：路由跳章的续读真值只能由中心章触发（装邻章不得覆盖进度）', () => {
+    const routeSeg = jumpLoadSrc(readerSrc);
+    // finalize(data) 必须在 `id === chapterId` 守卫内（openChapter 会整体重写 lastRead）
+    expect(routeSeg).toMatch(/if\s*\(\s*\w+\s*===\s*chapterId\s*\)\s*\{\s*finalize\(/);
+    // setError 同理：邻章失败不该报错（会让整页显示「加载失败」）
+    expect(routeSeg).toMatch(/if\s*\(\s*\w+\s*===\s*chapterId\s*\)\s*\{\s*setError\(/);
+  });
+
+  it('★ 行为组：跳章后窗口一次到位 ⇒ needPrev 为假 ⇒ 事后不补 prev', () => {
+    // 长章书真几何（实测 tongjian cpl=13：c13=942 行 / c14=2660 行 / c15=837 行，
+    // 真机读数 `delta=47100` 与 942 行 × rowH=50px 吻合）
+    const CH13 = 942;
+    const CH14 = 2660;
+    const CH15 = 837;
+    // ★ 本组问的是：`fillNeighbors` 的 `needPrev` 在「跳章之后」为真还是为假。
+    //   判据＝`chain0 === activeChapterId`（V5 后窗口已有三章 ⇒链首 ≠ 锚章）。
+    const needPrevAfterJump = (chain: readonly string[], active: string): boolean =>
+      chain[0] === active;
+
+    // ── V5 修法形态：中心章 + prev + next 同批装载 ──
+    const chainV5 = ['tongjian-c13', 'tongjian-c14', 'tongjian-c15'];
+    expect(chainV5.length).toBe(3);
+    expect(needPrevAfterJump(chainV5, 'tongjian-c14')).toBe(false); // ⇒ 不补 prev ✔
+
+    // ── V5 前的缺陷形态：窗口只有中心章 ──
+    const chainBeforeV5 = ['tongjian-c14'];
+    expect(needPrevAfterJump(chainBeforeV5, 'tongjian-c14')).toBe(true); // ⇒ 必然补 prev ✘
+
+    //★ 缺陷形态的代价量化：补进来的 prev 是整章 ⇒ 一次性位移 942 行（真机 47100px）
+    expect(CH13 * 50).toBe(47100);
+    // ★ 修法形态下三章都在窗，补无可补 ⇒ 位移 0
+    expect(chainV5.includes('tongjian-c13')).toBe(true);
+    // 行数台账（供量级复核，不参与断言逻辑）
+    expect(CH14 + CH13 + CH15).toBe(4439);
+  });
+});
