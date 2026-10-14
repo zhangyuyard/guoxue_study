@@ -1017,21 +1017,77 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     return s.success && !!s.data?.prev;
   }, [loadedChapters]);
 
-  // ★★ V9（2026-10-14 rootfix · 占位等高）：prev 章的**预估行数**。
+  // ══════════════════════════════════════════════════════════════════
+  // ★★ V9-b（2026-10-14 真机回归修复）：占位等高的三个前置条件
+  // ══════════════════════════════════════════════════════════════════
   //
-  //   作用：让头部预留空间 ≈ prev 章真实高度 ⇒ prev 落地前后 `contentSize`
-  //   **恒定** ⇒ 原生无需调 offset ⇒ 补偿器不被触发 ⇒ 不闪、不回弹。
+  // ★★ 回归读数（`deliverables/mvcp-rootfix-2026-10-14/v9-boot-repro.log`）：
+  // ```
+  // 16:59:18.962 [V9][HEADER] est=874 act=874 reserved=0    headerH=44
+  // 16:59:21.415 [V9][HEADER] est=874 act=815 reserved=2950 headerH=2950
+  // 16:59:21.458 [MVCP][COMP] delta=43656 offset=0 fresh=false
+  // 16:59:23.964 [V9][HEADER] est=1038 act=815 reserved=11150
+  // ```
+  // 用户报告：「初次进入资治通鉴，恢复上次阅读进度到汉纪三，顶部显示『上章』，
+  // 无任何动作，几秒后变**白屏**，稍后显示内容」。
   //
-  //   预估口径＝**当前窗口内已装章行数的最大值**（同类章上界）：
-  //   - 下界要求：必须 `≥` 真实值，否则预留不足 ⇒ contentSize 突变（退化）。
-  //     `max` 天然满足（若 prev 恰是窗口里最长的那章，取其真值＝相等）。
-  //   - 上界要求：不能过大，否则顶部留一大片空白。真机实测 tongjian
-  //     单章 442–1018 行（p50=880）⇒ 上界与真值同量级，空白可接受。
-  //   - 无已装章时回退 0（不预留）⇒ 等价旧行为，不制造几何错误。
-  const prevEstimatedLines = useMemo(() => {
+  // ★ 三个叠加缺陷（都是我第一版的错）：
+  //① `prevActualLines` 语义错：把**锚章自己**当成了「已落地的 prev」
+  //   ⇒ 冷启动时 `act =锚章行数` ⇒ `reserved = 0` ⇒ **完全没预留**
+  //   ⇒ 与旧行为等价（仍闪）。真机 `est=874 act=874 reserved=0` 自证。
+  //② `est` 取「窗口内max」⇒ **随窗口变化而抖动**（874→1038）
+  //   ⇒ 预留高度自己就在变⇒ 每次都产生新的 contentSize 突变
+  //   （真机 `reserved` 2950→11150）。
+  //③ `bootScrollIndex` 在 `initialLineIndex===0` 时返回 `undefined`
+  //   ⇒ 原生停在 offset=0，而 offset 0 **就是预留空白** ⇒ **白屏**。
+  //
+  // ↓ 下面三个量按「同一次补装周期内必须恒定」重写。
+
+  /**
+   * 本轮预留是为**哪一章**设的（prev 章落地后它自己就是链首）。
+   * ★必须记 id：否则无法区分「链首是锚章」与「链首是已落地的 prev」
+   *   —— 这正是缺陷①的根源（冷启动链首=锚章，被误当成已落地的 prev）。
+   */
+  const reservedForRef = useRef<string | null>(null);
+  /** 本次预留的**锁定**行数（补装周期内恒定 ⇒ 预留高度不抖动） */
+  const reservedLinesRef = useRef(0);
+  /** 用户是否已发生过真实滚动（ScrollMode 回传）。
+   *  ★ 首屏/续读定位时为 false ⇒ **不预留** ⇒ 从根上避免「巨额空白 + 白屏」。 */
+  const [userScrolled, setUserScrolled] = useState(false);
+
+  /** 本轮要预留的 prev 章 id（链首的prev），无则 null */
+  const pendingPrevId = useMemo(() => {
     if (!hasMorePrev) {
+      return null;
+    }
+    const first = loadedChapters[0];
+    if (!first) {
+      return null;
+    }
+    const sib = TextLibraryService.getSiblingChapters(first);
+    const prevId = sib.success && sib.data?.prev ? sib.data.prev.id : null;
+    // 链首的 prev **已在窗内** ⇒ 无需预留（它已经作为 body 渲染）
+    return prevId && !loadedChapters.includes(prevId) ? prevId : null;
+  }, [hasMorePrev, loadedChapters]);
+
+  /**
+   * 预留行数：**只在「开始补 prev」的那一刻锁定一次**，之后到落地为止恒定。
+   *
+   * ★ 为什么必须锁定（缺陷②）：预留高度一变，contentSize 就变 ⇒ 又要补偿
+   *   ⇒ 又闪。窗口会随装章增减 ⇒ 「窗口 max」会漂移（实测 874→1038）。
+   *
+   * ★ 为什么首屏不预留（缺陷③的同源问题）：首屏/续读定位时原生 offset 未必
+   *   已在预留区之下 ⇒ 一片空白 ⇒ 白屏。首屏也不存在「prepend 即将发生」。
+   */
+  const prevEstimatedLines = useMemo(() => {
+    if (!userScrolled || !pendingPrevId) {
       return 0;
     }
+    if (reservedForRef.current === pendingPrevId && reservedLinesRef.current > 0) {
+      // 本轮已锁定 ⇒ 沿用（★ 这就是「恒定」的实现点）
+      return reservedLinesRef.current;
+    }
+    // 首次为该 prev 设预留：取**同类章上界**（窗口内 max，天然 ≥ 真值）
     let max = 0;
     for (const cid of loadedChapters) {
       const n = stitched.lineCountOf.get(cid) ?? 0;
@@ -1039,31 +1095,34 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         max = n;
       }
     }
+    if (max <= 0) {
+      return 0;
+    }
+    reservedForRef.current = pendingPrevId;
+    reservedLinesRef.current = max;
     return max;
-  }, [hasMorePrev, loadedChapters, stitched.lineCountOf]);
+  }, [userScrolled, pendingPrevId, loadedChapters, stitched.lineCountOf]);
 
-  // ★ prev 章**已落地**的行数（从预留里扣掉 ⇒ 预留归零 ⇒ contentSize 不变）。
-  //
-  //   ⚠ 语义澄清（初版写错过一次，条目 91）：prev 章落地后**它自己就是链首**
-  //   （`loadedChapters[0]` 变成 prev）⇒ 所以「链首的行数」就是 prev 的行数。
-  //   ⇒ 直接取 `lineCountOf.get(loadedChapters[0])` 即可。
+  /** 已落地 prev 的行数（从预留里扣掉 ⇒ 预留归零 ⇒ contentSize 恒定） */
   const prevActualLines = useMemo(() => {
-    if (!hasMorePrev) {
+    const id = reservedForRef.current;
+    if (!id) {
       return 0;
     }
-    const first = loadedChapters[0];
-    if (!first) {
-      return 0;
+    if (!loadedChapters.includes(id)) {
+      return 0; //还没落地 ⇒ 全靠预留
     }
-    const s = TextLibraryService.getSiblingChapters(first);
-    const prevId = s.success && s.data?.prev ? s.data.prev.id : undefined;
-    // 若链首自己**还有** prev（说明链首之上还有一章未进窗口），那链首并不是
-    // 「已落地的 prev」⇒ 它未落地 ⇒ 实际行数按 0 计（整条都靠预留）。
-    if (!prevId || loadedChapters.includes(prevId)) {
-      return 0;
+    // ★ 已落地：扣掉它的真值行数。
+    //   注意这里用 `id`（预留对象）而不是 `loadedChapters[0]`——
+    //   后者在冷启动时是**锚章**，会误扣（缺陷①）。
+    const n = stitched.lineCountOf.get(id) ?? 0;
+    // 落地后本轮预留使命完成 ⇒ 清锁定，下一章重新起算
+    if (n > 0) {
+      reservedForRef.current = null;
+      reservedLinesRef.current = 0;
     }
-    return stitched.lineCountOf.get(first) ?? 0;
-  }, [hasMorePrev, loadedChapters, stitched.lineCountOf]);
+    return n;
+  }, [loadedChapters, stitched.lineCountOf]);
 
   const hasMoreNext = useMemo(() => {
     const last = loadedChapters[loadedChapters.length - 1];
@@ -1263,6 +1322,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // 边沿前瞻（ScrollMode onNearBoundary）：临近窗口已载边沿 → 续装邻章
   const fillNeighborsRef = useRef(fillNeighbors);
   fillNeighborsRef.current = fillNeighbors;
+  // ★★ V9-b：ScrollMode 首次真实滚动 ⇒ 开闸（此后才预留 prev 空间）
+  const handleUserScrolledOnce = useCallback(() => {
+    setUserScrolled(true);
+  }, []);
+
   const handleNearBoundary = useCallback((dir: 'prev' | 'next') => {
     fillNeighborsRef.current(dir === 'next' ? { forceNext: true } : { forcePrev: true });
   }, []);
@@ -1549,6 +1613,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             // ★★ V9（占位等高）：prev 章预留空间的两端数据
             prevEstimatedLines: prevEstimatedLines,
             prevActualLines: prevActualLines,
+            // ★★ V9-b：首次真实滚动上抛 ⇒ 才开始预留（首屏不预留，根治白屏）
+            onUserScrolledOnce: handleUserScrolledOnce,
             loadError: loadError,
           }}
           page={{
