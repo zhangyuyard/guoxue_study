@@ -793,7 +793,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    *        ← ★★ 无条件 forcePrev ⇒ A 被补回，插在 B 上方 = prepend
    * ```
    *
-   * ★★ **真因是上面那个无条件 `forcePrev`**，不是「保留集退化」：
+   * ⚠⚠⚠ **本段「真因＝无条件 forcePrev」已被推翻（2026-10-14 V3）——真因是邻章预取
+   * effect（见下方 scrollDirRef 处）**：它由 `activeChapterId` 变化驱动，
+   * `windowPut(prev)` 落在锚章之上，**绕过 `fillNeighbors` 的所有判据**。
+   * 下面这段推理保留只为可追溯，**不要再当依据引用**：
+   *   ~~真因是上面那个无条件 `forcePrev`，不是「保留集退化」：~~
    *   B2 实测 `chainEqActive = (loadedChapters[0] === activeChapterId)` 在**加下限之前
    *   那一版就已经是 false**（那一版 `keep=2`，覆盖集已保住前章）⇒
    * 「链首==锚章 ⇒ needPrev 恒真」这条根因**在本载体上从来没成立过**。
