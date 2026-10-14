@@ -23,7 +23,10 @@ target 'guoxue_study_app' do
   use_react_native!(
     :path => config[:reactNativePath],
     # An absolute path to your application root.
-    :app_path => "#{Pod::Config.instance.installation_root}/.."
+    :app_path => "#{Pod::Config.instance.installation_root}/..",
+    # 新架构：与 android/gradle.properties 的 newArchEnabled=true 对齐。
+    # op-sqlite / react-native-mmkv v4 均为 TurboModule，需新架构启用。
+    :new_arch_enabled => true
   )
 
   target 'guoxue_study_appTests' do

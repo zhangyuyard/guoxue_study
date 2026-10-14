@@ -8,6 +8,11 @@ android/build/
 android/.gradle/
 android/captures/
 android/local.properties
+# NDK/CMake 原生构建目录（2026-10-14 实测 151MB：Debug/RelWithDebInfo/tools）
+# ⚠ 此前漏配 ⇒ `git status` 里以未跟踪项出现，`git add -A` 会把它入库。
+# 判据＝`git check-ignore -v --no-index android/app/.cxx/` 应有输出（须带正对照：
+# 同命令对 src/ 下路径应 exit=1）——空输出易读成「已忽略」（假 0）。
+android/app/.cxx/
 ios/Pods/
 ios/build/
 ios/*.xcworkspace/xcuserdata/
