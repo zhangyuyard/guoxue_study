@@ -404,3 +404,88 @@ export function retainIdsForViewport(
 export function shouldFillPrevOnCommit(scrollDir: number): boolean {
   return scrollDir < 0;
 }
+
+// ════════════════════════════════════════════════════════════════════
+// V9（2026-10-14）占位等高：根治「整章 prepend ⇒ 整章位移 ⇒ 闪 + 回弹」
+// ════════════════════════════════════════════════════════════════════
+//
+// ## 问题（真机读数，非推断）
+// MVCP 实验（deliverables/mvcp-rootfix-2026-10-14/mvcp-run.log）：
+//   [MVCP][COMP] delta=43700 target=94740 fresh=false lines=4572
+//   [MVCP][CHAIN] PREPEND head=tongjian-c12->tongjian-c11
+// prev 章落地 ⇒ `lines` 增 1038 行 ⇒ 锚点下标位移 874 行 ⇒ 需补偿 43700px；
+// 但 `fresh=false` ⇒ `shouldDeliverCompensation` **跳过本次投递**
+// ⇒ 那一帧**没有任何补偿** ⇒ 内容整体跳 ⇒ 闪 + 回弹。
+//
+// ## 为什么前九轮都不够（纸上验算，见日日志）
+// 官方 `maintainVisibleContentPosition`（RN ≥0.72 Android 原生支持，本项目 0.83）
+// 有硬限制：一次从顶部插入超过 `(windowSize-1)/2` 个 item 就丢锚点。
+// 我们 prepend 单位 = **整章 1038 行**，`windowSize=9` ⇒ 阈值 4 ⇒ 超 259 倍。
+//
+// ## 解法：让 contentSize 在数据落地前后**恒定**
+// 头部占位不再只是 44px 提示条，而是**prev 章的预留空间**：
+// ```
+// headerH = reservedPrevHeight(estimatedPrevLines, actualPrevLines, rowH)
+// ```
+// 数据落地前actual=0 ⇒ headerH = 预估行数 × rowH（一片空白）
+// 数据落地后 actual=行数 ⇒ headerH = max(0, 预估 − 实际) × rowH（只补差值）
+// 而 body 同时多了 实际 行 ⇒ **总高度恒定** ⇒ 原生无需调 offset
+// ⇒ 补偿器整条链路**不被触发** ⇒ 不闪、不回弹。
+//
+// ★**关键性质：`contentSize` 的变化量恒为 0，与预估准不准无关**
+//   （见 `reservedHeaderKeepsContentSize` 的证明与直测）。
+//   预估偏大只会留下「顶部一段空白」，不会造成位移——而空白可以渲染成
+//   「上章加载中」提示，语义合理。
+
+/** 头部预留占位里那条提示的最小高度（dp）—— 纯空白时至少留这么高给提示文字。 */
+export const PREV_HINT_MIN_H = 44;
+
+/**
+ * 头部占位高度（dp）＝ prev 章**尚未落地**的那部分高度。
+ *
+ * @param estimatedPrevLines prev 章预估行数（0/负数 ⇒ 无 prev，占位为 0）
+ * @param actualPrevLines prev 章**已落地**的行数（未落地 ⇒ 0）
+ * @param rowH 行高（px）
+ * @returns 占位高度（px）
+ */
+export function reservedPrevHeight(
+  estimatedPrevLines: number,
+  actualPrevLines: number,
+  rowH: number,
+): number {
+  if (!(estimatedPrevLines > 0) || !(rowH > 0)) {
+    return 0;
+  }
+  const actual = actualPrevLines > 0 ? actualPrevLines : 0;
+  // ★ 预估不足（actual > estimated）时**不返回负值**：
+  //   那会让 headerH 缩水 ⇒ contentSize 变化 ⇒ 位移。
+  //   取 0 ⇒ 退回「无预留」＝旧行为（闪），但**不会负高度**（几何安全）。
+  return Math.max(0, estimatedPrevLines - actual) * rowH;
+}
+
+/**
+ * 证明（且可直测）：`contentSize` 在 prev 章落地前后**恒定**。
+ *
+ * 设：已装body 行数 `bodyLines`、prev 预估 `est`、prev 实际 `act`、行高 `rowH`。
+ * - 落地前：contentSize = reserve(est, 0) + (bodyLines + 0) × rowH = est×rowH + bodyLines×rowH
+ * - 落地后：contentSize = reserve(est, act) + (bodyLines + act) × rowH
+ *          = max(0, est−act)×rowH + bodyLines×rowH + act×rowH
+ *          = (est − act) × rowH + bodyLines × rowH + act × rowH   （est ≥ act 时）
+ *          = est × rowH + bodyLines × rowH                ★与落地前相等
+ * ⇒ ΔcontentSize = 0。
+ * ★`est ≥ act` 是前提；`est < act` 时退化为旧行为（见上函数的注释）。
+ *
+ * @returns ΔcontentSize（px）；须为 0 才算根治成立
+ */
+export function reservedHeaderDeltaContentSize(
+  estimatedPrevLines: number,
+  actualPrevLines: number,
+  bodyLines: number,
+  rowH: number,
+): number {
+  const est = estimatedPrevLines > 0 ? estimatedPrevLines : 0;
+  const act = actualPrevLines > 0 ? actualPrevLines : 0;
+  const before = reservedPrevHeight(est, 0, rowH) + bodyLines * rowH;
+  const after = reservedPrevHeight(est, act, rowH) + (bodyLines + act) * rowH;
+  return after - before;
+}

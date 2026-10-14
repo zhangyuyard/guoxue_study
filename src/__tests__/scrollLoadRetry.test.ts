@@ -14,7 +14,15 @@
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-import { retainIdsByBudget, retainIdsForViewport, chaptersInRowRange, shouldFillPrevOnCommit } from '../reader/chapterWindow';
+import {
+  retainIdsByBudget,
+  retainIdsForViewport,
+  chaptersInRowRange,
+  shouldFillPrevOnCommit,
+  reservedPrevHeight,
+  reservedHeaderDeltaContentSize,
+  PREV_HINT_MIN_H,
+} from '../reader/chapterWindow';
 import { indexOfLineKey, lineKeyOf, type AnchorLineLike } from '../reader/core/modes/scrollAnchor';
 
 function stripComments(src: string): string {
@@ -58,9 +66,16 @@ describe('滚动邻章装载失败可重试：接线断言', () => {
     expect(countOf(readerSrc, 'setFillFailed((prev)')).toBe(2);
   });
 
-  it('占位在失败时显示「加载失败，滑动重试」（next/prev 各 1 处）', () => {
-    expect(countOf(scrollSrc, "loadError?.next ? '加载失败，滑动重试'")).toBe(1);
-    expect(countOf(scrollSrc, "loadError?.prev ? '加载失败，滑动重试'")).toBe(1);
+  it('占位在失败时显示失败态文案（next/prev 各 1 处）', () => {
+    // ★★ V9（2026-10-14 占位等高）契约变更：头部占位的**正常态**文案由
+    //   「上一章加载中…」改成「上章」（用户裁定：预留空白里放「上章」提示），
+    //   失败态随之改成「上章加载失败，滑动重试」。
+    //   ★断言按「写法会变」写（条目 101）：只锁「失败分支存在且两侧各一」，
+    //     **不锁死具体字面量** —— 文案是产品决策，不是契约。
+    expect(countOf(scrollSrc, 'loadError?.next ?')).toBe(1);
+    expect(countOf(scrollSrc, 'loadError?.prev ?')).toBe(1);
+    //失败分支必须真的带「重试」语义（否则用户不知道还能再滑）
+    expect(countOf(scrollSrc, '重试')).toBe(2);
   });
 
   it('loadError 接线：ReaderScreen 计算并传入 ScrollMode', () => {
@@ -70,12 +85,13 @@ describe('滚动邻章装载失败可重试：接线断言', () => {
     expect(countOf(scrollSrc, 'loadError?: { next?: boolean; prev?: boolean };')).toBe(1);
   });
 
-  it('阴性对照：旧文案仍保留正常态（继续滑动 / 加载中），工具有效', () => {
-    // 同范围正对照：失败文案在场 ⇒ 计数工具本身有效（防「grep 打偏 = 假 0」）
-    expect(countOf(scrollSrc, '加载失败，滑动重试')).toBeGreaterThan(0);
-    // 正常态文案仍在（失败时才切换成失败文案）
+  it('阴性对照：正常态文案仍在（失败时才切失败态），且计数工具本身有效', () => {
+    // 同范围正对照：「重试」二字在场 ⇒ 计数工具本身有效（防「grep 打偏 = 假 0」）
+    expect(countOf(scrollSrc, '重试')).toBeGreaterThan(0);
+    // 尾部占位正常态文案（未改，仍锁字面量：它与V9 无关）
     expect(countOf(scrollSrc, '继续滑动以加载下一章…')).toBe(1);
-    expect(countOf(scrollSrc, '加载中…')).toBe(1);
+    // ★头部占位正常态：V9 改为「上章」+ **贴底**渲染
+    expect(countOf(scrollSrc, "'上章'")).toBe(1);
   });
 
   /**
@@ -823,5 +839,104 @@ describe('V6 跳章续读：跳转必须重写 lastRead 为目标章章首', () 
     expect(initialCharOffset(false, undefined, afterV6, bookId, 'c-h7')).toBe(0);
     // 阴性对照：charOffset=0 是合法章首，不得被真值判断吃掉
     expect(initialCharOffset(false, undefined, { bookId, chapterId: 'c-h7', charOffset: 0 }, bookId, 'c-h7')).toBe(0);
+  });
+});
+
+/**
+ * ★★★ V9 判据组：占位等高（Reserved-Space Header）—— 闪烁的根治方案。
+ *
+ * ## 机理（为什么它能根治）
+ *
+ * 旧行为：头部占位是**固定 44px 提示条**。prev 章落地时：
+ * ```
+ * contentSize 前 = 44 + body×rowH
+ * contentSize 后 = 0+ (body + prev) × rowH
+ * ΔcontentSize   = prev×rowH − 44 ★实测51812px
+ * ```
+ * 而补偿恰逢 `fresh=false`（内容高陈旧）⇒ `shouldDeliverCompensation` **跳过投递**
+ * ⇒ 那一帧无补偿 ⇒ 整章跳过去（闪 + 回弹）。
+ *
+ * 新行为：头部占位＝**prev 章的预留空间**
+ * ```
+ * headerH = reservedPrevHeight(est, act, rowH) = max(0, est − act) × rowH
+ * ```
+ * ⇒ `contentSize` 在落地前后**恒定** ⇒ 原生无需调 offset
+ * ⇒ **补偿器整条链路不被触发** ⇒ 不闪、不回弹。
+ *
+ * ★**关键性质：只要 `est ≥ act`，ΔcontentSize 恒为 0，与预估准不准无关。**
+ *   预估偏大只会留「顶部空白」（可渲染成「上章」提示），不会造成位移。
+ */
+describe('V9 占位等高：prev 落地前后 contentSize 恒定', () => {
+  const rowH = 50; // 真机实测
+
+  it('★ 核心：ΔcontentSize 恒为 0（真机长章书几何的多组样本）', () => {
+    // 真机读数（jump-v8-run.log / mvcp-run.log）：
+    //   prev=c11/c12/c13 行数 1038/874/1038；已装 body 1980/4572 行
+    const samples: Array<[number, number, number]> = [
+      // [est, act, bodyLines]
+      [1038, 1038, 1980], // 预估恰等于真值
+      [1038, 874, 1980],  // 预估偏大（窗口里最长的章比实际长）
+      [1200, 1038, 4572], // 预估明显偏大
+      [1000, 1000, 0],    // 空body（边界）
+      [1, 1, 1],          // 极小
+    ];
+    for (const [est, act, body] of samples) {
+      const delta = reservedHeaderDeltaContentSize(est, act, body, rowH);
+      expect(delta).toBe(0);
+    }
+  });
+
+  it('★ 反向对照：旧行为（固定 44px 占位）ΔcontentSize ≠ 0 —— 工具能区分', () => {
+    // 同一样本，旧行为的 Δ = act×rowH − 44
+    const est = 1038;
+    const act = 1038;
+    const body = 1980;
+    const oldBefore = PREV_HINT_MIN_H + body * rowH;
+    const oldAfter = 0 + (body + act) * rowH;
+    const oldDelta = oldAfter - oldBefore;
+    expect(oldDelta).not.toBe(0);
+    // 新行为必须显著更小（这正是「不闪」的量化定义）
+    const newDelta = reservedHeaderDeltaContentSize(est, act, body, rowH);
+    expect(Math.abs(newDelta)).toBeLessThan(Math.abs(oldDelta));
+  });
+
+  it('形状锁⑭：ScrollMode 的 headerH 必须用 reservedPrevHeight（不得回到常量）', () => {
+    const s = stripComments(readFileSync(SCROLL_MODE_PATH, 'utf8'));
+    // 必须调纯函数
+    expect(s).toMatch(/reservedPrevHeight\(/);
+    // ★ 反向断言：**不得**再出现 `hasMorePrev ? BOUNDARY_HINT_H : 0`
+    //   （那是旧行为 = 闪烁根因本身）
+    expect(s).not.toMatch(/const headerH = hasMorePrev \? BOUNDARY_HINT_H : 0/);
+    // 必须保留提示下限（用户裁定：预留空白里放「上章」文字）
+    expect(s).toMatch(/Math\.max\(\s*reservedPrevH\s*,\s*BOUNDARY_HINT_H\s*\)/);
+  });
+
+  it('形状锁⑮：宿主必须把 prev 的预估/实际行数接进 props', () => {
+    const r = stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
+    expect(r).toMatch(/const prevEstimatedLines = useMemo\(/);
+    expect(r).toMatch(/const prevActualLines = useMemo\(/);
+    expect(r).toMatch(/prevEstimatedLines: prevEstimatedLines,/);
+    expect(r).toMatch(/prevActualLines: prevActualLines,/);
+    // ★ 预估必须取**窗口内已装章行数的 max**（同类章上界，天然 ≥ 真值）
+    expect(r).toMatch(/stitched\.lineCountOf\.get\(cid\)/);
+    expect(r).toMatch(/if \(n > max\)/);
+  });
+
+  it('★ 行为组：reservedPrevHeight 的边界与几何安全性', () => {
+    // 无 prev ⇒ 0
+    expect(reservedPrevHeight(0, 0, rowH)).toBe(0);
+    // 未落地（act=0）⇒ 全额预留
+    expect(reservedPrevHeight(1038, 0, rowH)).toBe(1038 * rowH);
+    // 已落地（act=est）⇒ 预留归零
+    expect(reservedPrevHeight(1038, 1038, rowH)).toBe(0);
+    // act > est（预估不足）⇒ **不得返回负高度**（几何安全，退回旧行为）
+    expect(reservedPrevHeight(500, 800, rowH)).toBe(0);
+    // rowH 非法⇒ 0（防 0/负高度把 getItemLayout 算崩）
+    expect(reservedPrevHeight(1038, 0, 0)).toBe(0);
+    expect(reservedPrevHeight(1038, 0, -50)).toBe(0);
+    // ★ 恒非负（不变量）
+    for (const [e, a] of [[1, 999], [999, 1], [500, 500], [0, 100]]) {
+      expect(reservedPrevHeight(e, a, rowH)).toBeGreaterThanOrEqual(0);
+    }
   });
 });

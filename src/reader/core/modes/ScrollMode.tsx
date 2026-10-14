@@ -53,6 +53,9 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 
 import type { Line, LineGeometry } from '../../geometry';
 import { getItemLayoutOf } from '../../geometry';
+// ★★ V9（2026-10-14 rootfix）：占位等高—— 头部预留高度与 ΔcontentSize 的
+//   可直测纯函数（证明在 chapterWindow.ts 的函数注释里）。
+import { reservedPrevHeight, PREV_HINT_MIN_H } from '../../chapterWindow';
 import type { BoundaryDirection } from '../types';
 import {
   anchorCompensationDelta,
@@ -96,6 +99,14 @@ export interface ScrollModeProps {
    * 会把上一章插到锚章之上 = prepend = 整章位移闪烁（本仓三轮真机判决的闪烁真因）。
    */
   onScrollDirChange?(dir: number): void;
+  /**
+   * ★★ V9（2026-10-14）：prev 章的**预估行数**（rootfix：占位等高）。
+   * 宿主从 `stitched.lineCountOf` 的同类章上界估出来传入；prev 章落地后
+   * 由 `actualPrevLines` 扣减掉 ⇒ `contentSize` 恒定 ⇒ 无位移。
+   */
+  prevEstimatedLines?: number;
+  /** prev 章**已落地**的行数（未落地 ⇒ 0） */
+  prevActualLines?: number;
   /** 边沿邻章装载失败标记（仅改变占位文案，不阻断重试） */
   loadError?: { next?: boolean; prev?: boolean };
   /** 重挂载键（切模式/跳章触发全新列表） */
@@ -103,8 +114,10 @@ export interface ScrollModeProps {
 }
 
 /** 章界提示条高度（dp）。★ 旧值 = 视口高（整屏），见文件头 ②：占位高度直接
- *  决定 getItemLayout 的头部补偿量，整屏占位会把偏移算错一个整屏。 */
-const BOUNDARY_HINT_H = 44;
+ *  决定 getItemLayout 的头部补偿量，整屏占位会把偏移算错一个整屏。
+ *  ★★ V9：头部占位改为「prev 章预留空间」，此常量降级为**预留空间的下限**
+ *  （纯空白时至少留这么高给「上章」提示文字）。尾部占位仍用它。 */
+const BOUNDARY_HINT_H = PREV_HINT_MIN_H;
 /** 补偿抑制上限（ms）：超时强制解除，防「补偿永不落定 ⇒ 跨章记账被永久抑制」 */
 const COMP_PENDING_MAX_MS = 500;
 /**
@@ -188,6 +201,8 @@ const ScrollMode = memo(function ScrollMode({
   onScrollDirChange,
   loadError,
   listKey,
+  prevEstimatedLines,
+  prevActualLines,
 }: ScrollModeProps) {
   const listRef = useRef<FlatList<Line> | null>(null);
   const rowH = Math.max(1, geometry.rowHeight);
@@ -195,7 +210,21 @@ const ScrollMode = memo(function ScrollMode({
   // ── 占位高度（头部占位计入内容几何，见文件头 ②）──
   // 尾部占位在全部 item 之下 ⇒ 不影响任何 item 的 offset，无需进算式；
   // 头部占位在 item 之上 ⇒ 必须进 getItemLayout 与 y↔行号 换算。
-  const headerH = hasMorePrev ? BOUNDARY_HINT_H : 0;
+  //
+  // ★★ V9（2026-10-14 rootfix）：占位从「固定 44px 提示条」改成
+  //   **prev 章的预留空间**（`reservedPrevHeight`）。
+  //   根治机理：prev 章落地前后 `contentSize` **恒定**
+  //   （证明见 `chapterWindow.reservedHeaderDeltaContentSize`）⇒
+  //   原生**无需调整 offset** ⇒ 补偿器整条链路不被触发 ⇒ 不闪、不回弹。
+  //   ★旧行为（44px）下：prev 落地 ⇒ contentSize 突变 51812px
+  //     ⇒ 补偿又恰逢 `fresh=false` 被跳过 ⇒ 内容整章跳过去。
+  const reservedPrevH = hasMorePrev
+    ? reservedPrevHeight(prevEstimatedLines ?? 0, prevActualLines ?? 0, rowH)
+    : 0;
+  // ★ 预留空间里要放「上章」提示文字（用户裁定）：故取「预留高度」与
+  //   「提示条最小高度」的较大者。提示文字渲染在占位底部（`justifyContent: flex-end`），
+  //   落在「prev 章末尾」所在的位置，语义正确。
+  const headerH = hasMorePrev ? Math.max(reservedPrevH, BOUNDARY_HINT_H) : 0;
 
   // ── 跨章记账真值源（ref；onScroll 高频更新，不触发重渲染）──
   const committedRef = useRef(initialChapterId);
@@ -572,6 +601,12 @@ const ScrollMode = memo(function ScrollMode({
       return;
     }
     const target = Math.max(0, offsetRef.current + delta);
+    // ★★ MVCP-PROBE（可移除）：补偿投递前取证。`fresh=false` 说明内容高陈旧
+    //   ⇒ shouldDeliverCompensation 会**跳过本次投递** ⇒ 那一帧完全没有补偿
+    //   ⇒ 正是「闪 + 回弹」的高发窗口（官方 MVCP 若生效，正好覆盖这里）。
+    console.info(
+      `[MVCP][COMP] aIdx=${a.index}->nextIdx=${nextIndex} delta=${Math.round(delta)} offset=${Math.round(offsetRef.current)} target=${Math.round(target)} fresh=${contentLinesRef.current === lines.length} lines=${lines.length}`,
+    );
     // ★ 记**意图值**（clampScrollTarget 的入参），不是实落点：onContentSizeChange
     //   的目标态化复投要比「是否已真正到位」，用实落点会立刻判成已落定而不再复投。
     compTargetRef.current = target;
@@ -769,9 +804,16 @@ const ScrollMode = memo(function ScrollMode({
         windowSize={9}
         ListHeaderComponent={
           hasMorePrev ? (
-            <View style={[styles.hint, { height: BOUNDARY_HINT_H }]}>
+            // ★★ V9：占位高度＝prev 章的预留空间（可能是几千行），
+            //   提示文字**贴底**渲染 ⇒ 落在「prev 章末尾」所在的位置。
+            //   `pointerEvents="none"`：预留区可能很大，必须让下方的
+            //   触摸（热区/章间导航）穿过它，不吃掉 tap。
+            <View
+              style={[styles.hint, { height: headerH }]}
+              pointerEvents="none"
+            >
               <Text style={styles.hintText}>
-                {loadError?.prev ? '加载失败，滑动重试' : '上一章加载中…'}
+                {loadError?.prev ? '上章加载失败，滑动重试' : '上章'}
               </Text>
             </View>
           ) : null
@@ -799,7 +841,9 @@ const ScrollMode = memo(function ScrollMode({
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   list: { flex: 1 },
-  hint: { alignItems: 'center', justifyContent: 'center' },
+  // ★ V9：头部占位可能是几千行的预留空间 ⇒ 提示**贴底**（`flex-end`），
+  //   落在「prev 章末尾」的位置。尾部占位只有 44dp，`center` 与`flex-end` 等价。
+  hint: { alignItems: 'center', justifyContent: 'flex-end' },
   hintText: { color: '#888', fontSize: 13 },
 });
 

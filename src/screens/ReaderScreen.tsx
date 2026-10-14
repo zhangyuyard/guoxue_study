@@ -443,6 +443,20 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     }),
     [win, activeChapterId],
   );
+  // ★★ MVCP-PROBE（可移除）：章链序（prepend 的零假 0 判据＝链首是否变化）。
+  useEffect(() => {
+    const g = globalThis as unknown as { __mvcpChain?: string };
+    const chain = loadedChapters.join(',');
+    const prev = g.__mvcpChain;
+    g.__mvcpChain = chain;
+    if (prev === undefined) return;
+    const arr = prev.split(',').filter(Boolean);
+    const grew = loadedChapters.length > arr.length;
+    const p0 = arr[0] ?? '';
+    const c0 = loadedChapters[0] ?? '';
+    const kind = !grew ? 'SAME' : p0 !== c0 ? 'PREPEND' : 'APPEND/INNER';
+    console.info(`[MVCP][CHAIN] kind=${kind} head=${p0}->${c0} active=${activeChapterId} chain=${chain}`);
+  }, [loadedChapters, activeChapterId]);
   const stitched = useMemo(
     () =>      buildStitchedLines(
         loadedChapters,
@@ -1002,6 +1016,55 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     const s = TextLibraryService.getSiblingChapters(first);
     return s.success && !!s.data?.prev;
   }, [loadedChapters]);
+
+  // ★★ V9（2026-10-14 rootfix · 占位等高）：prev 章的**预估行数**。
+  //
+  //   作用：让头部预留空间 ≈ prev 章真实高度 ⇒ prev 落地前后 `contentSize`
+  //   **恒定** ⇒ 原生无需调 offset ⇒ 补偿器不被触发 ⇒ 不闪、不回弹。
+  //
+  //   预估口径＝**当前窗口内已装章行数的最大值**（同类章上界）：
+  //   - 下界要求：必须 `≥` 真实值，否则预留不足 ⇒ contentSize 突变（退化）。
+  //     `max` 天然满足（若 prev 恰是窗口里最长的那章，取其真值＝相等）。
+  //   - 上界要求：不能过大，否则顶部留一大片空白。真机实测 tongjian
+  //     单章 442–1018 行（p50=880）⇒ 上界与真值同量级，空白可接受。
+  //   - 无已装章时回退 0（不预留）⇒ 等价旧行为，不制造几何错误。
+  const prevEstimatedLines = useMemo(() => {
+    if (!hasMorePrev) {
+      return 0;
+    }
+    let max = 0;
+    for (const cid of loadedChapters) {
+      const n = stitched.lineCountOf.get(cid) ?? 0;
+      if (n > max) {
+        max = n;
+      }
+    }
+    return max;
+  }, [hasMorePrev, loadedChapters, stitched.lineCountOf]);
+
+  // ★ prev 章**已落地**的行数（从预留里扣掉 ⇒ 预留归零 ⇒ contentSize 不变）。
+  //
+  //   ⚠ 语义澄清（初版写错过一次，条目 91）：prev 章落地后**它自己就是链首**
+  //   （`loadedChapters[0]` 变成 prev）⇒ 所以「链首的行数」就是 prev 的行数。
+  //   ⇒ 直接取 `lineCountOf.get(loadedChapters[0])` 即可。
+  const prevActualLines = useMemo(() => {
+    if (!hasMorePrev) {
+      return 0;
+    }
+    const first = loadedChapters[0];
+    if (!first) {
+      return 0;
+    }
+    const s = TextLibraryService.getSiblingChapters(first);
+    const prevId = s.success && s.data?.prev ? s.data.prev.id : undefined;
+    // 若链首自己**还有** prev（说明链首之上还有一章未进窗口），那链首并不是
+    // 「已落地的 prev」⇒ 它未落地 ⇒ 实际行数按 0 计（整条都靠预留）。
+    if (!prevId || loadedChapters.includes(prevId)) {
+      return 0;
+    }
+    return stitched.lineCountOf.get(first) ?? 0;
+  }, [hasMorePrev, loadedChapters, stitched.lineCountOf]);
+
   const hasMoreNext = useMemo(() => {
     const last = loadedChapters[loadedChapters.length - 1];
     if (!last) return false;
@@ -1483,6 +1546,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             onLineChange: handleScrollLineChange,
             onNearBoundary: handleNearBoundary,
             onScrollDirChange: handleScrollDir,  // ★ V3：滚动方向→邻章预取的 prev 条件
+            // ★★ V9（占位等高）：prev 章预留空间的两端数据
+            prevEstimatedLines: prevEstimatedLines,
+            prevActualLines: prevActualLines,
             loadError: loadError,
           }}
           page={{
