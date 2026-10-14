@@ -90,6 +90,12 @@ export interface ScrollModeProps {
   onLineChange?(line: Line | undefined): void;
   /** 视口临近窗口已载边沿（未载方向）→ 上抛宿主续装邻章 */
   onNearBoundary?(dir: BoundaryDirection): void;
+  /**
+   * ★★ V3（2026-10-14）：用户滚动方向变化（+1 向下 / -1 向上）。
+   * ReaderScreen 用它决定「邻章预取是否补 prev」—— 向下跨章时补 prev
+   * 会把上一章插到锚章之上 = prepend = 整章位移闪烁（本仓三轮真机判决的闪烁真因）。
+   */
+  onScrollDirChange?(dir: number): void;
   /** 边沿邻章装载失败标记（仅改变占位文案，不阻断重试） */
   loadError?: { next?: boolean; prev?: boolean };
   /** 重挂载键（切模式/跳章触发全新列表） */
@@ -179,6 +185,7 @@ const ScrollMode = memo(function ScrollMode({
   onChapterCommit,
   onLineChange,
   onNearBoundary,
+  onScrollDirChange,
   loadError,
   listKey,
 }: ScrollModeProps) {
@@ -288,6 +295,15 @@ const ScrollMode = memo(function ScrollMode({
    * 之后的窗口增长都会正常挂载（实测 len 54→64→79 均正常）。
    */
   const userScrolledRef = useRef(false);
+  /**
+   * ★★ V3（2026-10-14）：用户滚动方向（+1 向下 / -1 向上 / 0 未知）。
+   * 用途：邻章预取**只在用户真的往上滚时**才补 prev —— 向下跨章时补prev
+   * 会把上一章 `windowPut` 到锚章**之上** = prepend = 整章位移闪烁。
+   * ★ 为什么必须实测方向而不能用「链首==锚章」代替：真机B2 实测该判据
+   *   **从来没为真过**（chainEqActive 恒 false），三轮改`fillNeighbors` 全白改。
+   *   ⇒ 真因在邻章预取 effect（它由 activeChapterId 变化驱动，绕过全部 fillNeighbors 判据）。
+   */
+  const scrollDirRef = useRef(0);
   /** 已按哪个窗口长度做过首帧重挂载（避免无谓重挂载） */
   const bootMountedLenRef = useRef(lines.length);
   const bootAttemptsRef = useRef(0);
@@ -311,6 +327,10 @@ const ScrollMode = memo(function ScrollMode({
   lineChangeRef.current = onLineChange;
   const nearBoundaryRef = useRef(onNearBoundary);
   nearBoundaryRef.current = onNearBoundary;
+  // ★★ V3：方向回调同样 ref 化（onScroll 高频，防 stale closure）
+  const scrollDirCbRef = useRef(onScrollDirChange);
+  scrollDirCbRef.current = onScrollDirChange;
+  const lastNotifiedDirRef = useRef(0);
 
   // ── 挂载锚点初始化（initialScrollIndex 的落点 = 该行的内容 y）──
   // ★ 必须在首个 onScroll 之前落定，否则「打开即被邻章前插」这次补偿没有基准行。
@@ -391,6 +411,18 @@ const ScrollMode = memo(function ScrollMode({
    */
   const handleScroll = useCallback(
     (y: number) => {
+      // ★★ V3：先记方向（必须在任何早退之前，否则空列表时不更新）
+      const prevY = offsetRef.current;
+      if (Math.abs(y - prevY) > 0.5) {
+        const dir = y > prevY ? 1 : -1;
+        scrollDirRef.current = dir;
+        // ★ 只在**方向翻转**时回调（onScroll 每 16ms 一次，逐帧回调会把
+        //   ReaderScreen 的 ref 写爆在无意义的位置上；翻转才是有信息量的时刻）
+        if (dir !== lastNotifiedDirRef.current) {
+          lastNotifiedDirRef.current = dir;
+          scrollDirCbRef.current?.(dir);
+        }
+      }
       offsetRef.current = y;
       const cur = linesRef.current;
       if (cur.length === 0) return;

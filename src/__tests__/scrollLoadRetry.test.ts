@@ -29,8 +29,10 @@ const APP_ROOT = resolve(__dirname, '..');
 const READER_SCREEN_PATH = resolve(APP_ROOT, 'screens/ReaderScreen.tsx');
 const SCROLL_MODE_PATH = resolve(APP_ROOT, 'reader/core/modes/ScrollMode.tsx');
 
+// ★ 模块级（V3 判据组要用；原在下一describe 内属局部作用域）
+const readerSrc = stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
+
 describe('滚动邻章装载失败可重试：接线断言', () => {
-  const readerSrc = stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
   const scrollSrc = stripComments(readFileSync(SCROLL_MODE_PATH, 'utf8'));
 
   it('黑名单跳过逻辑已移除（fillFailedRef 及 fillNeighbors 内的 has() 跳过判据不残留）', () => {
@@ -331,5 +333,144 @@ describe('滚动邻章装载失败可重试：接线断言', () => {
     // 阴性对照：进区去重仍在（区间判据不许被 atEnd 取代）
     expect(countOf(scrollSrc, 'nearNext !== nearStateRef.current.next')).toBe(1);
     expect(countOf(scrollSrc, 'nearPrev !== nearStateRef.current.prev')).toBe(1);
+  });
+});
+
+/**
+ * ★★★ V3 判据组：跨章滚动**不得**触发「邻章预取」的 prev 方向。
+ *
+ * ## 为什么要有这一组（A6/B2 三轮都改错了地方）
+ *
+ * B2 实测：`chainEqActive`（`loadedChapters[0]===activeChapterId`）在**加三章下限之前
+ * 那一版就已经是 false** ⇒ 判据「链首==锚章 ⇒ needPrev」**从来没为真过**
+ * ⇒ 却仍出 prepend ⇒ **prepend 不是从 `fillNeighbors` 来的**。
+ *
+ * 纸上验算（用实测 tongjian 几何：lpp=13 budget=78 单章 880 行 294 章）也指向同一结论：
+ * ```
+ *   保留集含旧章 ⇒ 链首≠锚章 ⇒ 判据A 为假
+ *   5 次连续跨章：forcePrev=true ⇒ 补装 5 次；不传 forcePrev ⇒ 补装 0 次
+ * ```
+ * ⇒ 「去掉 forcePrev」本身有效，但真机上仍 prepend ⇒ **必是另一条通道**。
+ *
+ * ★ 真因（2026-10-14 定位，此前三轮从未查过）：ReaderScreen 里**邻章预取 effect**
+ *   （依赖 `[loaded, activeChapterId, loadChapterData]`）：
+ *   ```
+ *   for (const nid of [sib.data.prev?.id, sib.data.next?.id]) {   ← 无条件两个方向
+ *     setWin(w => windowBegin(w, nid)); // … windowPut(w, nid, data)
+ *   }
+ *   ```
+ *   跨章提交必调 `setActiveChapterId` ⇒ **必然触发** ⇒ `windowPut(prev)` 落在新章
+ *   **之前** = prepend，**完全绕过 `fillNeighbors` 的全部判据**。
+ *   ⇒ 这就是「三轮都在盯`fillNeighbors`」却不见效的原因（条目 97的镜像：
+ *   判别通道选错 ⇒ 改判据永远无效）。
+ *
+ * ★ 本组用**形状锁 + 行为组双层**：形状锁钉「prev 方向必须有条件」，
+ *   行为组钉「下滚跨章时 prev 不进窗口」。层间不可互相遮蔽（条目 113）。
+ */
+describe('V3 邻章预取：跨章滚动不得补 prev（闪烁真因通道）', () => {
+  /** 取「邻章预取 effect」那段源码（按注释锚点切，避开位置漂移） */
+  const neighborPrefetchSrc = (src: string): string => {
+    // ★ 锚点必须在**代码**里（src 已 stripComments ⇒ 注释锚点必然 -1，
+    //   这是「判据自身的构造错误」，条目 91）。用邻章预取的唯一代码特征：
+    //   `getSiblingChapters(activeChapterId)`。
+    const start = src.indexOf('getSiblingChapters(activeChapterId)');
+    expect(start).toBeGreaterThan(-1);
+    // 下一个 useEffect 声明即本effect 结束
+    const end = src.indexOf('useEffect', start + 10);
+    const seg = src.slice(start, end === -1 ? start + 2000 : end);
+    // ★ 正对照（条目 8：切片函数可能整体切空 ⇒ 所有 not.toMatch 恒真＝零鉴别力）
+    expect(seg.length).toBeGreaterThan(200);
+    expect(seg).toContain('getSiblingChapters');
+    return seg;
+  };
+
+  it('形状锁①：prev 进targets 必须带条件（语义级，不钉字面写法）', () => {
+    const seg = neighborPrefetchSrc(readerSrc);
+    // ★★ 上一版用 `not.toMatch(/for(of [prev,next])/)` ⇒ **零鉴别力**（实测 M1–M4 全绿）：
+    //   修法只是把字面量换成 `for (of prefetchTargets)`，字面量就消失了 ⇒ 无缺陷也绿。
+    //   ⇒ 改为**语义级**：找「prev 被放进 targets 的那个表达式」，
+    //     断言它**处在一个条件表达式里**（`cond ? ... : ...` / `cond && ...`）。
+    //   先取 targets 的定义：
+    const defIdx = seg.search(/const\s+\w+\s*=\s*scrollDirRef\.current\s*[<>=]/);
+    // 允许两种等价修法：① 条件表达式 ② 用 filter/if 守卫prev
+    const hasCondTernary = /\?\s*\[[^\]]*\.prev/.test(seg);
+    const hasCondGuard = /(if\s*\([^)]*(scrollDir|scrollDirection|userScrollingUp|atScrollTop|scrollingUp)[^)]*\)[\s\S]{0,200}?\.prev)/.test(seg);
+    const hasFilterGuard = /\.filter\([^)]*scrollDir/.test(seg);
+    // 三种守卫形态任一成立即算「prev 有条件」
+    expect(hasCondTernary || hasCondGuard || hasFilterGuard).toBe(true);
+    // ★ 反向断言：**无条件**形态必须不存在（这才是缺陷本身）
+    //   「无条件」＝ prev 出现在 targets 里且**整段没有方向判据**
+    const anyDir = /(scrollDir|scrollDirection|userScrollingUp|atScrollTop|scrollingUp)/.test(seg);
+    expect(anyDir).toBe(true);
+    // prev 必须真的还在预取列表里（否则是「另一种错」：把功能删了）
+    expect(seg).toMatch(/\.prev\?*\.id/);
+    // 若 targets 定义用了 scrollDirRef，则该定义必须在片段内（防切片截断导致恒真）
+    if (defIdx >= 0) {
+      expect(defIdx).toBeLessThan(seg.length);
+    }
+  });
+
+  it('形状锁②：prev 预取必须挂在「用户是否真在往上滚」的判据上', () => {
+    const seg = neighborPrefetchSrc(readerSrc);
+    // 必须出现「滚动方向」判据（任一命名）
+    expect(seg).toMatch(/scrollDir|scrollDirection|userScrollingUp|atScrollTop|scrollingUp/);
+    // ★★ 反向断言（条目 101）：判据名**在场**不够——变异「声明一个恒真/死变量」
+    //   就能把它骗过去（实测 V2：`const scrollDir = 1` + `void scrollDir` 全绿）。
+    //   ⇒ 必须**用在 prev 的筛选条件里**：出现 `…prev…(cond)` 或 `if (cond) …prev`
+    //   形态，且条件里含该判据名。
+    expect(seg).toMatch(
+      /\.prev\?*\.id[^\n]*\?[^\n]*(scrollDir|scrollDirection|userScrollingUp|atScrollTop|scrollingUp)|(scrollDir|scrollDirection|userScrollingUp|atScrollTop|scrollingUp)[^\n]*\n?[^\n]*\.prev/,
+    );
+    // ★ 且该判据**不得是常量**（真机实测方向会变；恒定方向＝恒预取或恒不预取）
+    expect(seg).not.toMatch(/(scrollDir|scrollDirection|userScrollingUp|atScrollTop|scrollingUp)\s*=\s*(-?\d+|true|false|'up'|'down')/);
+  });
+
+  it('形状锁③：ScrollMode 必须真的把方向回调出去（覆盖 M5/M6 接线变异）', () => {
+    const seg = neighborPrefetchSrc(readerSrc);
+    // 接线①：ReaderScreen 必须把 handleScrollDir 传给 ScrollMode
+    expect(seg.length).toBeGreaterThan(200); // 正对照：切片非空
+    const rFull = readFileSync(READER_SCREEN_PATH, 'utf8');
+    expect(stripComments(rFull)).toMatch(/onScrollDirChange:\s*handleScrollDir/);
+    // 接线②：ScrollMode 侧必须存在「翻转才回调」的比较与调用（防恒 0 / 防逐帧刷屏）
+    const sFull = stripComments(readFileSync(SCROLL_MODE_PATH, 'utf8'));
+    expect(sFull).toMatch(/scrollDirRef\.current\s*=\s*dir/);
+    expect(sFull).toMatch(/dir\s*!==\s*lastNotifiedDirRef\.current/);
+    expect(sFull).toMatch(/scrollDirCbRef\.current\?\.\(dir\)/);
+    // ★ 防「每帧都回调」：回调必须**在 if (dir !== last) 之内**。
+    //   这条不能用 not.toMatch 表达（实测：写成 not.toMatch(…;\s*\}) 会把
+    //   **正确**的 `if (翻转) { 回调 }` 结构也判红 ⇒ 惩罚正确写法）。
+    //   改用**位置关系**断言：回调行号必须大于翻转判据行号，且中间不得跨越 if 的闭合。
+    const iCmp = sFull.indexOf('dir !== lastNotifiedDirRef.current');
+    const iCall = sFull.indexOf('scrollDirCbRef.current?.(dir)');
+    expect(iCmp).toBeGreaterThan(-1);
+    expect(iCall).toBeGreaterThan(iCmp);
+    // 调用必须落在翻转判据之后 200 字符内（同一个小if 块内）
+    expect(iCall - iCmp).toBeLessThan(200);
+  });
+
+  it('★ 行为组：保留集不含旧章时，跨章不得靠预取把旧章补到窗口上方', () => {
+    // 短章书真几何（实测 songci p50=10 行 / liwengduiyun p50=9）
+    const chapLines = 10;
+    const order = Array.from({ length: 30 }, (_, i) => `c${i + 1}`);
+    const rows: Record<string, number> = {};
+    order.forEach((id) => {
+      rows[id] = chapLines;
+    });
+    const center = 'c6';
+    // 跨章提交：视口顶行 = 新章首行（全局下标 = 5×10 = 50）
+    const keep = retainIdsForViewport(center, order, (id) => rows[id] ?? 0, 50, 13, 78, 78);
+    // ★ 短章书上保留集**含**旧章 ⇒ 预取被windowHas 拦下 ⇒ 无 prepend
+    expect(keep.has('c5')).toBe(true);
+    // 阴性对照：长章形态（880 行/章）下三章下限同样保住旧章 —— 两种形态一致
+    const rowsLong: Record<string, number> = {};
+    order.forEach((id) => {
+      rowsLong[id] = 880;
+    });
+    const keepLong = retainIdsForViewport(center, order, (id) => rowsLong[id] ?? 0, 5 * 880, 13, 78, 78);
+    expect(keepLong.has('c5')).toBe(true);
+    // ★ 结论（本组要锁的是这个推论，不是上面的函数行为）：
+    //   两档量级下保留集都保住旧章 ⇒ prepend 只可能来自「预取无条件补 prev」这条通道，
+    //   因为 windowHas 已拦住对已保留章的重复补装。⇒ 修法点在预取的方向条件，不在保留集。
+    expect(keep.has('c5') && keepLong.has('c5')).toBe(true);
   });
 });

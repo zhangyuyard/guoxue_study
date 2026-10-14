@@ -308,7 +308,23 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     // jumpSeq 入参：重复跳转同章也要重置 effect（路由浅合并语义）
   }, [bookId, chapterId, jumpSeq]);
 
-  // ── 邻章预取（R2b2）：中心就绪后后台装载 prev/next；begin 闸门去重 ──
+  /**
+   * ★★ V3（2026-10-14）：用户滚动方向，由 ScrollMode 的 `onScrollDirChange` 写入。
+   * +1 向下 / -1 向上 / 0 未知（未滚过）。**唯一用途**＝邻章预取的 prev 方向条件。
+   * ⚠ 此前三轮（A6视口覆盖 / B2 三章下限）都在改 `fillNeighbors`，而 prepend 的真因
+   *   是下面那个**邻章预取 effect** —— 它由 `activeChapterId` 变化驱动，
+   *   `windowPut(prev)` 落在锚章之上，**完全绕过 `fillNeighbors` 的所有判据**。
+   */
+  const scrollDirRef = useRef(0);
+  const handleScrollDir = useCallback((dir: number) => {
+    scrollDirRef.current = dir;
+  }, []);
+
+  // ── 邻章预取（R2b2）：中心就绪后后台装载 prev/next；begin 闸门去重
+  // ★★ V3 修正：**prev 方向必须带条件**。跨章提交会调 `setActiveChapterId`
+  //   ⇒ 本effect 必然触发 ⇒ 无条件补 prev = 每次跨章都 prepend（闪烁真因）。
+  //   条件＝用户**确实在往上滚**（scrollDirRef < 0）；向下/未知一律不补 prev。
+  //   ⚠ 不得改回「链首==锚章」：真机实测该判据恒false（见上方说明）。
   useEffect(() => {
     if (!loaded || !activeChapterId) {
       return;
@@ -317,7 +333,12 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     if (!sib.success || !sib.data) {
       return;
     }
-    for (const nid of [sib.data.prev?.id, sib.data.next?.id]) {
+    // ★★ V3：prev 只在「用户确实在往上滚」时才预取（scrollDir < 0）；
+    //   向下跨章（dir>0）或从未滚过（0）都不补 ⇒ 断掉 prepend 通道。
+    const prefetchTargets = scrollDirRef.current < 0
+      ? [sib.data.prev?.id, sib.data.next?.id]
+      : [sib.data.next?.id];
+    for (const nid of prefetchTargets) {
       if (!nid) {
         continue;
       }
@@ -336,7 +357,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         }
       })();
     }
-  }, [loaded, activeChapterId, loadChapterData]);
+  }, [loaded, activeChapterId, loadChapterData]);  // ★ V3：scrollDir 走 ref，不进依赖
 
   // ── 中心章 lastRead 同步（R2b2）：就地切换不产生滚动事件，若不在此
   // 同步，杀进程重开会恢复到切换前的旧章（真机实测复现）。与 R1 路由
@@ -1321,6 +1342,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             onChapterCommit: handleScrollCommit,
             onLineChange: handleScrollLineChange,
             onNearBoundary: handleNearBoundary,
+            onScrollDirChange: handleScrollDir,  // ★ V3：滚动方向→邻章预取的 prev 条件
             loadError: loadError,
           }}
           page={{
