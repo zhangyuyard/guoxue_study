@@ -1049,7 +1049,25 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    *   —— 这正是缺陷①的根源（冷启动链首=锚章，被误当成已落地的 prev）。
    */
   const reservedForRef = useRef<string | null>(null);
-  /** 本次预留的**锁定**行数（补装周期内恒定 ⇒ 预留高度不抖动） */
+  /**
+   * ★★ V9-d（2026-10-14 第三次修复）：**书级**预留高度锁。
+   *
+   * 真机读数（`deliverables/mvcp-rootfix-2026-10-14/paint-run.log`）：
+   * ```
+   * 17:42:57.606 [V9][PAINT] headerH=49100 reserved=49100 lines=2745← 窗口 2 章
+   * 17:43:02.695 [V9][PAINT] headerH=52650 reserved=52650 lines=4613  ← 窗口 3 章
+   * ```
+   * ⇒ `headerH` **单调增大**（+3550px）：「每换一个 prev 就用窗口内 max 重新锁」
+   *   ⇒ 窗口越大 `est` 越大 ⇒ **预留高度自己一直涨**
+   *   ⇒ 每一行 cell 都被整体下移 ⇒ **FlatList 全量重排** ⇒ 重排期间无内容
+   *   ⇒ **白屏**（用户报告「上章加载完成，开始渲染时，开始白屏」）。
+   *
+   * ★决定性认识：`contentSize` 恒定只保证**总高度**不变；
+   *   **header 高度变化仍会移动每一个 cell 的 frame** ⇒ 视觉上照样是一次全量重排。
+   *   ⇒ 预留高度必须**跨对象恒定**（不是「每个 prev 一份」）。
+   */
+  const bookReservedLinesRef = useRef(0);
+  /** 本轮预留的**锁定**行数（= 书级锁的快照，供诊断/清空用） */
   const reservedLinesRef = useRef(0);
   /** 用户是否已发生过真实滚动（ScrollMode 回传）。
    *  ★ 首屏/续读定位时为 false ⇒ **不预留** ⇒ 从根上避免「巨额空白 + 白屏」。 */
@@ -1083,11 +1101,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     if (!userScrolled || !pendingPrevId) {
       return 0;
     }
-    if (reservedForRef.current === pendingPrevId && reservedLinesRef.current > 0) {
-      // 本轮已锁定 ⇒ 沿用（★ 这就是「恒定」的实现点）
-      return reservedLinesRef.current;
+    // ★★ V9-d：**书级恒定**。已锁定过就直接沿用（跨 prev 对象也不变）
+    //   ⇒ header 高度不动 ⇒ 不触发 FlatList 全量重排 ⇒ 不白屏。
+    if (bookReservedLinesRef.current > 0) {
+      reservedForRef.current = pendingPrevId;
+      reservedLinesRef.current = bookReservedLinesRef.current;
+      return bookReservedLinesRef.current;
     }
-    // 首次为该 prev 设预留：取**同类章上界**（窗口内 max，天然 ≥ 真值）
+    // 首次锁定：取**同类章上界**（窗口内 max，天然 ≥ 真值）
     let max = 0;
     for (const cid of loadedChapters) {
       const n = stitched.lineCountOf.get(cid) ?? 0;
@@ -1098,9 +1119,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     if (max <= 0) {
       return 0;
     }
+    //★ 安全余量：真实 prev 可能比窗口 max 更长（tongjian 实测 442–1018 行，
+    //   窗口 max 可能只是其中之一）⇒ 留 1.25 倍余量，
+    //   否则「预留不足 ⇒ contentSize 突变」又回来。
+    const locked = Math.ceil(max * 1.25);
+    bookReservedLinesRef.current = locked;
     reservedForRef.current = pendingPrevId;
-    reservedLinesRef.current = max;
-    return max;
+    reservedLinesRef.current = locked;
+    return locked;
   }, [userScrolled, pendingPrevId, loadedChapters, stitched.lineCountOf]);
 
   /** 已落地 prev 的行数（从预留里扣掉 ⇒ 预留归零 ⇒ contentSize 恒定） */
@@ -1118,6 +1144,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     const n = stitched.lineCountOf.get(id) ?? 0;
     // 落地后本轮预留使命完成 ⇒ 清锁定，下一章重新起算
     if (n > 0) {
+      // ★★ V9-d：**只清本轮对象，不清书级锁**（清了会让下次换对象时按更大的
+      //   窗口重算 ⇒ header 再涨 ⇒ 全量重排 ⇒ 白屏，正是本次修的 bug）。
       reservedForRef.current = null;
       reservedLinesRef.current = 0;
     }

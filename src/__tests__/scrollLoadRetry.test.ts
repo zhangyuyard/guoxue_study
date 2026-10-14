@@ -976,16 +976,24 @@ describe('V9-b 占位等高的三个前置条件', () => {
   const r = () => stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
   const s = () => stripComments(readFileSync(SCROLL_MODE_PATH, 'utf8'));
 
-  it('形状锁⑯：预留行数必须「锁定」而非每次重算（防 est 抖动）', () => {
+  it('形状锁⑯：预留行数必须**书级恒定**（跨 prev 对象也不变）', () => {
     const src = r();
-    // 必须有独立的「本轮预留对象 + 锁定值」ref
     expect(src).toMatch(/reservedForRef\s*=\s*useRef/);
-    expect(src).toMatch(/reservedLinesRef\s*=\s*useRef/);
-    // ★ 同一对象时**沿用锁定值**（这就是「恒定」的实现点）
-    expect(src).toMatch(/reservedForRef\.current === pendingPrevId[\s\S]{0,200}reservedLinesRef\.current/);
-    // ★ 反向断言：不得再「每次都从窗口重算 max」当返回值
-    //（重算是缺陷②的根源；锁定后的重算只允许发生在「首次为该 prev 设预留」分支）
-    expect(src).toMatch(/reservedLinesRef\.current = max/);
+    // ★★ V9-d：必须是**书级**锁（真机读数headerH 49100→52650 单调增大
+    //   ⇒ 每换一个 prev 就按更大窗口重算 ⇒ 每行 cell 被推下 ⇒ 全量重排 ⇒ 白屏）
+    expect(src).toMatch(/bookReservedLinesRef\s*=\s*useRef/);
+    // 关键：已锁定时**直接沿用书级值**，不再看 pendingPrevId 是否变化
+    expect(src).toMatch(/if \(bookReservedLinesRef\.current > 0\) \{[\s\S]{0,200}return bookReservedLinesRef\.current/);
+    // ★ 反向断言：不得再按「同对象」判断沿用（那正是 header 反复增长的来源）
+    expect(src).not.toMatch(/reservedForRef\.current === pendingPrevId && reservedLinesRef\.current > 0/);
+    // ★ prev 落地后**只清本轮对象，不清书级锁**
+    const iClear = src.indexOf('reservedForRef.current = null;');
+    expect(iClear).toBeGreaterThan(-1);
+    const after = src.slice(iClear, iClear + 220);
+    expect(after).toMatch(/reservedLinesRef\.current = 0/);
+    expect(after).not.toMatch(/bookReservedLinesRef\.current = 0/);
+    // 首次锁定必须带安全余量（真实 prev 可能比窗口 max 更长）
+    expect(src).toMatch(/Math\.ceil\(max \* 1\.25\)/);
   });
 
   it('形状锁⑰：首屏/续读定位不得预留（门控＝用户已发生过真实滚动）', () => {
