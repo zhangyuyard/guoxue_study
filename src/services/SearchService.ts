@@ -3,8 +3,8 @@
  * 搜索路径：SQLite segments_fts（FTS5 表）instr 子串匹配（规避中文分词问题）→
  * 异常/无库时回退内存遍历搜索。搜索历史存 MMKV（最多 20 条，去重，最新在前）。
  */
-import { MMKV } from 'react-native-mmkv';
-import { open } from 'react-native-quick-sqlite';
+import { createMMKV } from 'react-native-mmkv';
+import { open } from '@/services/sqliteClient';
 import type { SearchResult, ServiceResult } from '@/types';
 
 import { TextLibraryService } from '@/services/TextLibraryService';
@@ -14,13 +14,13 @@ const HISTORY_KEY = 'search_history';
 const HISTORY_LIMIT = 20;
 
 /** MMKV 实例（惰性，原生不可用时回退内存；undefined=未初始化，null=已初始化但失败降级） */
-let mmkv: InstanceType<typeof MMKV> | null | undefined;
-function getStorage(): InstanceType<typeof MMKV> | null {
+let mmkv: ReturnType<typeof createMMKV> | null | undefined;
+function getStorage(): ReturnType<typeof createMMKV> | null {
   if (mmkv !== undefined) {
     return mmkv;
   }
   try {
-    mmkv = new MMKV();
+    mmkv = createMMKV();
   } catch {
     mmkv = null;
   }
@@ -185,7 +185,7 @@ export const SearchService = {
     const s = getStorage();
     if (s) {
       try {
-        s.delete(HISTORY_KEY);
+        s.remove(HISTORY_KEY);
       } catch {
         // 忽略
       }

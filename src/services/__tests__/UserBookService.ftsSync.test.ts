@@ -7,7 +7,7 @@
  *   - 删除成功 → segments_fts 中该书行被清除，其他书行保留
  *   - FTS 写入/清理失败不影响导入/删除的主流程结果（吞错降级）
  */
-jest.mock('react-native-quick-sqlite', () => {
+jest.mock('@/services/sqliteClient', () => {
   const { createFts5Mock, execFts5Sql } =
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     require('./fts5Mock.helper') as typeof import('./fts5Mock.helper');
@@ -116,7 +116,7 @@ jest.mock('@/services/TextLibraryService', () => {
 
 import type { Book, SearchResult } from '@/types';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { __ftsSyncState } = require('react-native-quick-sqlite');
+const { __ftsSyncState } = require('@/services/sqliteClient');
 import { UserBookService } from '@/services/UserBookService';
 import { SearchService } from '@/services/SearchService';
 import {

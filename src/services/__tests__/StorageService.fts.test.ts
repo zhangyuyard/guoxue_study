@@ -12,7 +12,7 @@
  *  - rowid 自动分配 = 真机语义 `max(现存 rowid) + 1`（含复用被释放 rowid）⇒
  *    「映射残留撞车 ⇒ 老书重写顶掉新书行」这一缺陷在 mock 里**可表示**。
  */
-jest.mock('react-native-quick-sqlite', () => {
+jest.mock('@/services/sqliteClient', () => {
   const { createFts5Mock, execFts5Sql } =
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     require('./fts5Mock.helper') as typeof import('./fts5Mock.helper');
@@ -98,7 +98,7 @@ jest.mock('@/services/TextLibraryService', () => ({
 
 import type { Book } from '@/types';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { __ftsState } = require('react-native-quick-sqlite');
+const { __ftsState } = require('@/services/sqliteClient');
 import {
   pushFtsRow,
   resetFts5Mock,

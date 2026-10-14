@@ -1,6 +1,6 @@
 /**
  * 本地存储服务（StorageService）
- * 基于 react-native-quick-sqlite 的同步 CRUD：
+ * 基于 sqliteClient 适配层（op-sqlite）的同步 CRUD：
  *   - highlights 划线表
  *   - notes 笔记表
  *   - bookmarks 收藏表
@@ -20,7 +20,10 @@ import type {
 } from '@/types';
 
 import { TextLibraryService } from '@/services/TextLibraryService';
-import { open } from 'react-native-quick-sqlite';
+import { open } from '@/services/sqliteClient';
+// ★ 章级目录字段的唯一读侧真值（2026-10-12）：`bookTextChars` 由本模块提供，
+//   见FTS_MAX_BOOK_CHARS 处的迁移说明。
+import { bookTextChars } from '@/services/chapterCatalog';
 
 type DB = ReturnType<typeof open>;
 
@@ -611,13 +614,20 @@ export function ensureFtsIndex(): ServiceResult<boolean> {
     if (!initRes.success) {
       return initRes;
     }
-    const segRes = TextLibraryService.allSegments();
-    if (!segRes.success || !segRes.data) {
+    // ★2026-10-12：此处原有一次 `TextLibraryService.allSegments()` 调用，
+    // 其返回的 `data` **从未被读取**（全文只用于判 `success`）⇒ 纯丢弃调用。
+    // 而它的副作用是**把全书 segments 物化并拼成一个巨型数组**
+    // （161MB / 980 章的书即数万段对象），在冷启路径上白跑一遍。
+    // 现改为直接取书籍列表：既能判活（`getBooks` 失败即返回错误），
+    // 又不触碰段落。下方循环本来就只按 book 粒度工作，语义等价。
+    const booksRes = TextLibraryService.getBooks();
+    if (!booksRes.success || !booksRes.data) {
       return { success: false, error: '无法读取文本库' };
     }
+    const books = booksRes.data;
     const indexedRows = selectRows(instance, 'SELECT DISTINCT book_id FROM segments_fts');
     const indexed = new Set(indexedRows.map((r) => String(r.book_id)));
-    for (const book of TextLibraryService.getBooks().data ?? []) {
+    for (const book of books) {
       if (indexed.has(book.id)) {
         continue;
       }
@@ -629,9 +639,7 @@ export function ensureFtsIndex(): ServiceResult<boolean> {
       insertFtsRows(instance, buildFtsRows(book));
     }
     // 死索引自愈：再次查询现有 book_id，不在当前文本库中的行一律清除
-    const libraryIds = new Set(
-      (TextLibraryService.getBooks().data ?? []).map((b) => b.id),
-    );
+    const libraryIds = new Set(books.map((b) => b.id));
     for (const row of selectRows(instance, 'SELECT DISTINCT book_id FROM segments_fts')) {
       const id = String(row.book_id);
       if (!libraryIds.has(id)) {
@@ -653,16 +661,22 @@ export function ensureFtsIndex(): ServiceResult<boolean> {
  */
 const FTS_MAX_BOOK_CHARS = 4_000_000;
 
-/** 统计单本书全文字数（章/段遍历） */
-function bookTextChars(book: Book): number {
-  let n = 0;
-  for (const ch of book.chapters) {
-    for (const sg of ch.segments) {
-      n += sg.text.length;
-    }
-  }
-  return n;
-}
+/**
+ * 统计单本书全文字数。
+ *
+ * ★ 2026-10-12：实现已迁至 `chapterCatalog.bookTextChars`（唯一读侧真值）。
+ *
+ * 迁移理由：原实现内联 `for (const sg of ch.segments) n += sg.text.length`
+ * ——**为了做一个判断（是否超 4M 字而跳过索引）而必须遍历全书正文**。
+ * 「章节改偏移量」重构（设计文档 §2阻塞 B / §3）会把 `segments` 改为按需读取
+ * ⇒ 该实现会**恒返回 ~0** ⇒ `FTS_MAX_BOOK_CHARS` 闸门形同虚设，
+ * 中等书被误判为「很小」而全部入索引 ⇒ **反而制造新的索引卡顿**。
+ *
+ * ⇒ 现读 `Chapter.charCount` 目录字段（构造时算，见 `createChapterBuilder`）。
+ *
+ * ⚠ 本函数调用点密集（`ensureFtsIndex` / `upsertFtsForBook` /
+ *   `upsertFtsForBookChunked` 各一次）⇒ **不允许**在此处改回遍历 `segments`。
+ */
 
 /**
  * 将单本书（用户导入书）的章/段同步写入 FTS 索引（幂等 upsert）。

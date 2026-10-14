@@ -10,7 +10,7 @@
  * 划线（highlights）刻意不在清理范围（阅读页按段落渲染，删书后自然
  * 不显示且无独立展示页），本套件不对其做断言。
  */
-jest.mock('react-native-quick-sqlite', () => {
+jest.mock('@/services/sqliteClient', () => {
   const { createFts5Mock, execFts5Sql } =
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     require('./fts5Mock.helper') as typeof import('./fts5Mock.helper');
@@ -144,7 +144,7 @@ jest.mock('@/services/TextLibraryService', () => {
 
 import type { Bookmark, Book, Note, RecitationProgress } from '@/types';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { __cascadeState } = require('react-native-quick-sqlite');
+const { __cascadeState } = require('@/services/sqliteClient');
 import { UserBookService } from '@/services/UserBookService';
 import { useRecitationStore } from '@/store/useRecitationStore';
 import { useBookmarkStore } from '@/store/useBookmarkStore';

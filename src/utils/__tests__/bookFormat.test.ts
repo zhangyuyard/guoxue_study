@@ -201,6 +201,110 @@ describe('epubExtractText', () => {
   });
 });
 
+/**
+ * 【A 档 2026-10-12】让出粒度：由「每 100 文档」改为「按累计正文字符数」（阈值 512K，
+ * 兜底 16 文档）。判据要点：**让出次数只与正文体量相关，与文档个体大小无关**——
+ * 这是「按字节」与「按文档数」两种机制的唯一可观测差异。
+ *
+ * ⚠️ 变异自证（须「变异下会红」）：
+ *   - 若把条件退回 `docsSinceYield >= 16`（等价于纯按文档数），用例「大文档」红、
+ *     用例「小文档」绿 —— 即判据能区分两机制，不是恒真。
+ *   - 若把阈值调到 0（每文档都让出），用例「小文档」让出次数暴涨 → 红。
+ */
+describe('epubExtractText 让出粒度（按字节，非按文档数）', () => {
+  /** 造一个 N 章的 epub；每章正文长度 padChars（全为空格时htmlToText 会 trim 掉，故用实义字重复） */
+  const makeEpub = (chapters: number, padChars: number): Uint8Array => {
+    const body = '山'.repeat(padChars);
+    const items: string[] = [];
+    const refs: string[] = [];
+    const docs: ZipFileSpec[] = [
+      { name: 'mimetype', content: 'application/epub+zip' },
+      {
+        name: 'META-INF/container.xml',
+        content:
+          '<?xml version="1.0"?><container><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>',
+        method: 8,
+      },
+    ];
+    for (let i = 0; i < chapters; i += 1) {
+      items.push(
+        `<item id="c${i}" href="c${i}.xhtml" media-type="application/xhtml+xml"/>`,
+      );
+      refs.push(`<itemref idref="c${i}"/>`);
+      docs.push({
+        name: `OEBPS/c${i}.xhtml`,
+        content: `<html><body><p>${body}</p></body></html>`,
+        method: 8,
+      });
+    }
+    docs.push({
+      name: 'OEBPS/content.opf',
+      content: [
+        '<?xml version="1.0"?>',
+        '<package version="2.0" xmlns="http://www.idpf.org/2007/opf">',
+        '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>大书</dc:title></metadata>',
+        `<manifest>${items.join('')}</manifest>`,
+        `<spine>${refs.join('')}</spine>`,
+        '</package>',
+      ].join(''),
+      method: 8,
+    });
+    return buildZip(docs);
+  };
+
+  test('少量超大文档：按字节让出，原「每100文档」在此会让出 0 次', async () => {
+    let yields = 0;
+    // 4 章 × 每章 400_000 字符。实测（探针，textLen=1 600 038）：按字节让出 2 次。
+    // 原机制「每 100 文档」在此只会让出 0 次（文档数 4 < 100）—— 这就是本用例的判别力。
+    await epubExtractText(makeEpub(4, 400_000), () => {
+      yields += 1;
+      return Promise.resolve();
+    });
+    expect(yields).toBeGreaterThanOrEqual(2);
+    expect(yields).toBeLessThan(4);
+  });
+
+  test('大量极小文档：兜底按文档数让出，不会因累计不足阈值而永不让出', async () => {
+    let yields = 0;
+    // 40 章 × 10 字符 = 400 字符，远不足 512K 阈值 ⇒ 只能靠 16 文档兜底让出 2 次
+    await epubExtractText(makeEpub(40, 10), () => {
+      yields += 1;
+      return Promise.resolve();
+    });
+    expect(yields).toBe(2);
+  });
+
+  test('文档数固定时让出次数随正文体量单调增长（只可能来自字节维度）', async () => {
+    const count = async (padChars: number): Promise<number> => {
+      let n = 0;
+      // 文档数固定 20，只有正文体量在变 ⇒ 让出次数变化只能来自按字节维度。
+      // 实测（探针）：pad=1 000 → textLen=20 198 → 1 次；pad=200 000 → textLen=4 000 198 → 6 次。
+      await epubExtractText(makeEpub(20, padChars), () => {
+        n += 1;
+        return Promise.resolve();
+      });
+      return n;
+    };
+    const small = await count(1_000);
+    const big = await count(200_000);
+    expect(small).toBe(1);
+    expect(big).toBe(6);
+    expect(big).toBeGreaterThan(small);
+  });
+
+  test('让出时机不影响提取结果（逐字节一致）', async () => {
+    const bytes = makeEpub(20, 3_000);
+    const noYield = await epubExtractText(bytes);
+    let yields = 0;
+    const withYield = await epubExtractText(bytes, () => {
+      yields += 1;
+      return Promise.resolve();
+    });
+    expect(yields).toBeGreaterThan(0);
+    expect(withYield).toEqual(noYield);
+  });
+});
+
 describe('convertBookBytes 统一入口', () => {
   const enc = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, 'utf-8'));
 

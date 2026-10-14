@@ -133,9 +133,19 @@ function xmlAttr(tag: string, name: string): string | undefined {
  *   章节标题优先取 toc.ncx 的 navLabel，回退文档 h1-h3，再回退 <title>；
  *   全部缺失且多文档时补「第N章」。
  */
-/** 每提取 N 个文档让出一次 JS：数百 MB epub 的解压＋逐文档 htmlToText＋拼接
- * 若一次性同步跑会把 JS 线程占死数十秒（书架冻结真凶之一）。yieldFn 缺省时不让出。 */
-const EPUB_YIELD_EVERY = 100;
+/** 每累计提取 N 字节正文让出一次 JS：数百 MB epub 的解压＋逐文档 htmlToText＋拼接
+ * 若一次性同步跑会把 JS 线程占死数十秒（书架冻结真凶之一）。yieldFn 缺省时不让出。
+ *
+ * 【A 档 2026-10-12】原为 `EPUB_YIELD_EVERY = 100` **按文档数**让出。EPUB 各文档体积差异极大：
+ * 纯文字章节约 2 KB，而含插图的图文 xhtml 可达数 MB⇒按文档计数无法约束 **JS 独占窗口长度**
+ * （100 个小文档可能 20 ms 就让出，1 个大文档就能独占数百 ms 起）。
+ * 故改为按累计**提取出的正文字符数**（与实际做 htmlToText 的工作量同量纲）让出。
+ * 阈值 512K 字符对齐 legado `AnalyzeTxtFile.BUFFER_SIZE = 512 * 1024`。
+ * 仅改让出时机，不改提取顺序与结果（结果逐字节一致，由单测锁定）。 */
+const EPUB_YIELD_BYTES = 512 * 1024;
+
+/** 兜底上限：单个超大文档（正文超阈值）也要让出一次，否则「按字节」在大文档上退化为不让出 */
+const EPUB_YIELD_DOC_FALLBACK = 16;
 
 export async function epubExtractText(
   bytes: Uint8Array,
@@ -235,6 +245,8 @@ export async function epubExtractText(
   const forceMarkers = docs.length > 1;
   const parts: string[] = [];
   let idx = 0;
+  let pendingChars = 0;
+  let docsSinceYield = 0;
   for (const doc of docs) {
     const raw = readEntryText(doc.path);
     if (raw == null) {
@@ -257,10 +269,14 @@ export async function epubExtractText(
     if (idx >= 5000) {
       break;
     }
-    // 【T23b】逐文档让出：超大 epub 数千文档的 htmlToText＋拼接若一次性同步跑，
-    // 会把 JS 线程占死数十秒（真机 jsBlocked≈32s）；每 100 文档让出一次，
-    // 书架/点击在批次间保持可响应。yieldFn 缺省时不让出（保持老调用语义）。
-    if (yieldFn && idx % EPUB_YIELD_EVERY === 0) {
+    // 【A 档 2026-10-12】按累计正文字符数让出（原为每 100 文档，见 EPUB_YIELD_BYTES 注释）：
+    // 文档体积差异大时按文档计数无法约束 JS 独占窗口。docsSinceYield 是兜底——
+    // 防止「大量短文档累计不足阈值」时久不让出。yieldFn 缺省时不让出（保持老调用语义）。
+    pendingChars += bodyText.length;
+    docsSinceYield += 1;
+    if (yieldFn && (pendingChars >= EPUB_YIELD_BYTES || docsSinceYield >= EPUB_YIELD_DOC_FALLBACK)) {
+      pendingChars = 0;
+      docsSinceYield = 0;
       // eslint-disable-next-line no-await-in-loop
       await yieldFn();
     }

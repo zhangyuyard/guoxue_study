@@ -3,7 +3,7 @@
  * 用可编程的 quick-sqlite mock 验证：note 字段写入（INSERT 列序）、读出映射、
  * 旧数据 note 为空时兼容（undefined），以及 updateBookmarkMeta 的 UPDATE 语义。
  */
-jest.mock('react-native-quick-sqlite', () => {
+jest.mock('@/services/sqliteClient', () => {
   const mockState = { bookmarks: [] as Record<string, unknown>[] };
   /** saveBookmark INSERT 的列序 */
   const mockInsertCols = [

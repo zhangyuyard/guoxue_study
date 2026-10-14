@@ -19,6 +19,7 @@ import type {
   ServiceResult,
   TextSegment,
 } from '@/types';
+import { chapterIdOfSegment } from '@/services/chapterIndex';
 
 /** 内置书（UserBookService 启动时经 registerBuiltinBooks 注册，初始为空）。
  * 注册的是「元数据书」：chapters 仅含目录（id/title/order，segments 空），
@@ -41,10 +42,8 @@ const MAX_HYDRATED_BUILTINS = 8;
 
 /** 书籍缓存（惰性构建） */
 let booksCache: Book[] | null = null;
-/** 章节索引：chapterId -> Chapter */
+/** 章节索引：chapterId -> Chapter（**只索引章，不索引段**） */
 let chapterIndex: Map<string, Chapter> | null = null;
-/** 段落索引：segmentId -> TextSegment */
-let segmentIndex: Map<string, TextSegment> | null = null;
 /** 用户上传书籍（UserBookService 经 registerUserBooks 注册） */
 let userBooks: Book[] = [];
 
@@ -70,23 +69,31 @@ function buildBooks(): Book[] {
   return booksCache;
 }
 
-/** 构建章节/段落索引 */
+/**
+ * 构建章节索引（**章级**：只登记 chapterId -> Chapter）。
+ *
+ * ★2026-10-12（原 `buildIndexes` 的段级实现已下线）：旧实现在这里额外建
+ * `Map<segmentId, TextSegment>`，代价是**每次注册/水合/淘汰/抑制变更都要把
+ * 全书 `chapter.segments` 遍历一遍**。而全书段实体数组的存在正是「整本书正文
+ * 必须全量驻留内存」的根源（书架冷启读 12.78MB 缓存耗时 6275ms 即由此而来）。
+ *
+ * 段查询改为**按需在单章内线性查找**（`getSegment`）：段 id 形如
+ * `${chapterId}-s${n}` ⇒ 先反解出章 id（`chapterIdOfSegment`），再取该章，
+ * 章内段数是几十量级 ⇒ 复杂度 O(章内段数)，**不再要求全书段已物化**。
+ * 这为「章节改偏移量」铺路：段未装载时本章退化为空数组，查找只是 miss，
+ * 而不会在索引构建阶段就强制整本展开。
+ */
 function buildIndexes(): void {
-  if (chapterIndex && segmentIndex) {
+  if (chapterIndex) {
     return;
   }
   const chapters = new Map<string, Chapter>();
-  const segments = new Map<string, TextSegment>();
   for (const book of buildBooks()) {
     for (const chapter of book.chapters) {
       chapters.set(chapter.id, chapter);
-      for (const segment of chapter.segments) {
-        segments.set(segment.id, segment);
-      }
     }
   }
   chapterIndex = chapters;
-  segmentIndex = segments;
 }
 
 /** 判定是否用户上传书籍 */
@@ -108,7 +115,6 @@ function registerUserBooks(books: Book[]): ServiceResult<null> {
     userBooks = books;
     booksCache = null;
     chapterIndex = null;
-    segmentIndex = null;
     buildBooks();
     buildIndexes();
     return { success: true, data: null };
@@ -144,7 +150,6 @@ function registerBuiltinBooks(books: Book[]): ServiceResult<null> {
     }
     booksCache = null;
     chapterIndex = null;
-    segmentIndex = null;
     buildBooks();
     return { success: true, data: null };
   } catch (e) {
@@ -230,7 +235,6 @@ function hydrateBook(book: Book): ServiceResult<null> {
     }
     booksCache = null;
     chapterIndex = null;
-    segmentIndex = null;
     return { success: true, data: null };
   } catch (e) {
     return { success: false, error: (e as Error).message };
@@ -258,7 +262,6 @@ function evictBook(bookId: string): ServiceResult<null> {
     hydratedOrder.splice(pos, 1);
     booksCache = null;
     chapterIndex = null;
-    segmentIndex = null;
     return { success: true, data: null };
   } catch (e) {
     return { success: false, error: (e as Error).message };
@@ -288,7 +291,6 @@ function setSuppressedBuiltins(ids: string[]): ServiceResult<null> {
     suppressedBuiltins = new Set(ids);
     booksCache = null;
     chapterIndex = null;
-    segmentIndex = null;
     buildBooks();
     buildIndexes();
     return { success: true, data: null };
@@ -333,17 +335,33 @@ export const TextLibraryService = {
     return { success: true, data: chapter };
   },
 
-  /** 获取单个段落 */
+  /**
+   * 获取单个段落（**章级懒查**：段 id 反解章 id → 章内线性查找）。
+   *
+   * ★2026-10-12：旧实现依赖 `Map<segmentId, TextSegment>` 全书段索引，
+   * 那要求全书段落**已全部物化**。现改为先取所属章再在章内找段：
+   * 未装载的章其 `segments` 为空数组 ⇒ 查找 miss（`success === false`），
+   * 与旧实现在该状态下**行为一致**，但不再要求整本正文在内存。
+   */
   getSegment(segmentId: string): ServiceResult<TextSegment> {
     if (!segmentId) {
       return { success: false, error: '段落 ID 不能为空' };
     }
     buildIndexes();
-    const segment = segmentIndex!.get(segmentId);
-    if (!segment) {
+    const chapterId = chapterIdOfSegment(segmentId);
+    if (!chapterId) {
       return { success: false, error: `未找到段落：${segmentId}` };
     }
-    return { success: true, data: segment };
+    const chapter = chapterIndex!.get(chapterId);
+    if (!chapter) {
+      return { success: false, error: `未找到段落：${segmentId}` };
+    }
+    for (const segment of chapter.segments) {
+      if (segment.id === segmentId) {
+        return { success: true, data: segment };
+      }
+    }
+    return { success: false, error: `未找到段落：${segmentId}` };
   },
 
   /** 获取章节在书籍中的相邻章节（用于上一篇/下一篇） */
@@ -380,21 +398,6 @@ export const TextLibraryService = {
   /** 获取分类列表 */
   getCategories(): ServiceResult<Category[]> {
     return { success: true, data: CATEGORIES };
-  },
-
-  /** 按关键词遍历全部段落（供 SearchService 内存搜索回退使用） */
-  allSegments(): ServiceResult<TextSegment[]> {
-    try {
-      const segments: TextSegment[] = [];
-      for (const book of buildBooks()) {
-        for (const chapter of book.chapters) {
-          segments.push(...chapter.segments);
-        }
-      }
-      return { success: true, data: segments };
-    } catch (e) {
-      return { success: false, error: (e as Error).message };
-    }
   },
 
   /**

@@ -18,7 +18,7 @@
  *      修复前此断言红（store 停留在初始空架，注册表却有书——两读数分离）。
  *
  * 桩保真度：与 importShelfRegistrationGuard.test.ts 同构——react-native-fs
- * 内存文件系统 + react-native-quick-sqlite 可编程 user_books 表 +
+ * 内存文件系统 + @/services/sqliteClient 可编程 user_books 表 +
  * jest.resetModules() 等价「杀进程重启」；TextLibraryService / UserBookService /
  * useLibraryStore 均为真实实现，断言落在 useLibraryStore.getState().books。
  */
@@ -34,7 +34,7 @@ const mockDocDir = '/data/user/0/com.guoxue.studyapp/files';
 const mockCacheDir = '/data/user/0/com.guoxue.studyapp/cache';
 const mockMtime = 1_700_000_000_000;
 
-jest.mock('react-native-quick-sqlite', () => {
+jest.mock('@/services/sqliteClient', () => {
   const state = {
     userBooks: [] as Array<Record<string, unknown>>,
     builtinHidden: [] as string[],
@@ -219,7 +219,7 @@ function boot(): Session {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const rnfsMod = require('react-native-fs');
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const sql = require('react-native-quick-sqlite').__state;
+  const sql = require('@/services/sqliteClient').__state;
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const ss = require('@/services/StorageService').StorageService;
   for (const m of ['upsertFtsForBook', 'deleteFtsForBook', 'isBookIndexedInFts']) {

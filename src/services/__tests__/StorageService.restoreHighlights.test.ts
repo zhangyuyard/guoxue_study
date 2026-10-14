@@ -8,7 +8,7 @@
  *   - 空数组无副作用；非数组入参报错
  *   - getHighlights() 无参全量读取（导出采集复用入口）
  */
-jest.mock('react-native-quick-sqlite', () => {
+jest.mock('@/services/sqliteClient', () => {
   const mockState = { highlights: [] as Record<string, unknown>[] };
   /** restoreHighlights INSERT 的列序（与 saveHighlight 一致） */
   const mockInsertCols = [
@@ -56,7 +56,7 @@ jest.mock('react-native-quick-sqlite', () => {
 });
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { __restoreState } = require('react-native-quick-sqlite');
+const { __restoreState } = require('@/services/sqliteClient');
 import {
   StorageService,
   getHighlights,

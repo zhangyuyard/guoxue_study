@@ -12,7 +12,7 @@
  * 所以才单独成文件（本文件是独立的 jest 模块实例，`ftsAvailability` 从 unknown
  * 起算，能真正走到 unknown→ready 的播种分支；在已 init 过的套件里无法复现）。
  */
-jest.mock('react-native-quick-sqlite', () => {
+jest.mock('@/services/sqliteClient', () => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const Database = require('better-sqlite3') as typeof import('better-sqlite3');
   const real = new Database(':memory:');
@@ -52,7 +52,7 @@ import type { Book } from '@/types';
 import { StorageService, initDatabase } from '@/services/StorageService';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const adapter = (require('react-native-quick-sqlite') as {
+const adapter = (require('@/services/sqliteClient') as {
   __adapter: {
     __real: {
       exec: (sql: string) => void;

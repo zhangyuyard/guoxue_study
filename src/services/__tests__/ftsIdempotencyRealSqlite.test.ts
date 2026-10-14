@@ -3,7 +3,7 @@
  *
  * 与 `fts5RealSqliteSemantics.test.ts` 的分工：
  *  - 那个文件把 SQL 语句**逐字从源码抽取**后手写执行，锁的是「语句语义」；
- *  - 本文件把 `react-native-quick-sqlite` 换成 **better-sqlite3 适配器**，直接调用
+ *  - 本文件把 `@/services/sqliteClient` 换成 **better-sqlite3 适配器**，直接调用
  *    **生产函数**（`upsertFtsForChapter` / `upsertFtsForBook` / `isBookFullyIndexedInFts`
  *    / `deleteFtsForBook`），在真实 SQLite 上验证端到端行为。
  *
@@ -19,7 +19,7 @@
  *  ④ 整书写入 = **替换**语义 ⇒ 清理历史残留（重复行/幽灵行）；
  *  ⑤ 不存在幽灵行：写入章后，库中该书的行集合 == 该书的段集合。
  */
-jest.mock('react-native-quick-sqlite', () => {
+jest.mock('@/services/sqliteClient', () => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const Database = require('better-sqlite3') as typeof import('better-sqlite3');
   const real = new Database(':memory:');
@@ -57,7 +57,7 @@ import type { Book } from '@/types';
 import { StorageService, initDatabase } from '@/services/StorageService';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const adapter = (require('react-native-quick-sqlite') as {
+const adapter = (require('@/services/sqliteClient') as {
   __adapter: { __real: { prepare: (sql: string) => { all: (...a: unknown[]) => unknown[]; get: (...a: unknown[]) => unknown; run: (...a: unknown[]) => unknown } } };
 }).__adapter;
 

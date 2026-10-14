@@ -21,7 +21,7 @@
  *      永远上不了架，故必须有这条反向断言。
  *
  * 桩保真度（与真机同构）：react-native-fs 为可编程内存文件系统（存在/拷贝/
- * 大小/mtime/分块读/目录列举全走它），react-native-quick-sqlite 为可编程
+ * 大小/mtime/分块读/目录列举全走它），@/services/sqliteClient 为可编程
  * user_books 表（含 source_path / file_sig / content_hash 三列），
  * `jest.resetModules()` + 重新 require 等价「杀进程重启」（模块级 userBooks /
  * loadedBooks / booksCache / db 单例全部归零）。
@@ -50,7 +50,7 @@ const mockCacheDir = '/data/user/0/com.guoxue.studyapp/cache';
 const mockBooksDir = 'guoxue-books';
 const mockMtime = 1_700_000_000_000;
 
-jest.mock('react-native-quick-sqlite', () => {
+jest.mock('@/services/sqliteClient', () => {
   const state = {
     /** user_books 行（列名与 UserBookService.createUserBooksSchema 逐字一致） */
     userBooks: [] as Array<Record<string, unknown>>,
@@ -275,7 +275,7 @@ function boot(): Session {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const rnfsMod = require('react-native-fs');
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const sql = require('react-native-quick-sqlite').__state;
+  const sql = require('@/services/sqliteClient').__state;
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const ss = require('@/services/StorageService').StorageService;
   for (const m of ['upsertFtsForBook', 'deleteFtsForBook', 'isBookIndexedInFts']) {

@@ -7,7 +7,7 @@
  *   - 合并语义：设备上存在但备份中没有的用户书 → 保留不被删
  *   - 空数组无副作用；非数组入参报错
  */
-jest.mock('react-native-quick-sqlite', () => {
+jest.mock('@/services/sqliteClient', () => {
   const { createFts5Mock, execFts5Sql } =
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     require('./fts5Mock.helper') as typeof import('./fts5Mock.helper');
@@ -96,7 +96,7 @@ jest.mock('@/services/TextLibraryService', () => {
 
 import type { Book } from '@/types';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { __restoreState } = require('react-native-quick-sqlite');
+const { __restoreState } = require('@/services/sqliteClient');
 import { UserBookService } from '@/services/UserBookService';
 import { __resetBuiltinLazyStateForTests } from '@/services/UserBookService';
 import { TextLibraryService } from '@/services/TextLibraryService';

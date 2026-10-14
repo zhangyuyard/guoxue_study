@@ -21,7 +21,6 @@
 import * as DocumentPicker from '@react-native-documents/picker';
 import { isErrorWithCode, errorCodes } from '@react-native-documents/picker';
 import RNFS from 'react-native-fs';
-import { InteractionManager } from 'react-native';
 import { open } from '@/services/sqliteClient';
 import type { Book, ServiceResult } from '@/types';
 import { getBuiltinSpec, BUILTIN_CATALOG, type BuiltinBookSpec } from '@/data/builtinCatalog';
@@ -41,6 +40,7 @@ import {
   type ChapterReadyEvent,
 } from '@/services/ChapterAssemblyScheduler';
 import { TextLibraryService } from '@/services/TextLibraryService';
+import { buildTocFromBook, lineByteRanges, normalizeForCache, validateTocShape, type ChapterToc } from '@/services/chapterToc';
 import { StorageService } from '@/services/StorageService';
 import { useRecitationStore } from '@/store/useRecitationStore';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
@@ -104,9 +104,10 @@ const FTS_PAUSE_AFTER_HYDRATE_MS = 10_000;
 const FTS_PAUSE_POLL_MS = 250;
 /**
  * 队列书间让出下限（ms）。旧值 16ms 让出形同虚设——连续书解析之间
- * JS 几乎不间断占用，tap 排队可达秒级。改为 200ms 与
- * InteractionManager.runAfterInteractions 竞速：至少间隔 200ms，
- * 且等当前交互/动画收尾。测试可注入短间隔（见 __setFtsQueueYieldForTests）。
+ * JS 几乎不间断占用，tap 排队可达秒级。改为 200ms 硬下限；测试可注入
+ * 短间隔（见 __setFtsQueueYieldForTests）。
+ * （RN 0.83 迁移时起该下限由定时器独占，InteractionManager 竞速已移除，
+ *   原因见 ftsInterBookYield 注释。）
  */
 let ftsQueueYieldMs = 200;
 /**
@@ -169,6 +170,24 @@ const OVERSIZED_CACHE_LEGACY_SUFFIX = '.gxcache';
 let oversizedQueueRunning = false;
 /** 超大书 id → 源文件/缓存文件位置（超大书不落 db，删除时按此清理文件） */
 const oversizedBookFiles = new Map<string, { path: string; cachePath: string }>();
+
+/**
+ * 仅测试：登记超大书的缓存位置（等价于 `processOversizedBooks` 装载完成后的登记）。
+ *
+ * ⚠ 为什么需要这个注入口（不是「给判据开后门」）：
+ *   `fillBuiltinChapterNow` 的用户书分支靠 `oversizedBookFiles` 找缓存路径，
+ *   而该 Map 只在后台队列里被写 ⇒ 端到端判据无法在单测里触达该分支。
+ *   与 `__resetAssemblyStateForTests` 同族惯例：**测试专用、生产不调用**。
+ *   替代方案（让判据去驱动整个 `loadAndRegisterAll`）会把用例变成大而慢的集成测试，
+ *   且失败时定位不到具体分支。
+ */
+export function __registerOversizedFileForTests(
+  bookId: string,
+  path: string,
+  cachePath: string,
+): void {
+  oversizedBookFiles.set(bookId, { path, cachePath });
+}
 
 /**
  * 用户书集合变更监听（R2c 修复：超大书后台装载完成注册后通知 UI 层）。
@@ -579,43 +598,26 @@ function yieldToJs(): Promise<void> {
 }
 
 /**
- * 与交互收尾竞速的让出 promise；InteractionManager 不可用（测试桩/
- * 异常环境）时返回 undefined——此时书间让出必须退化为纯 setTimeout
- * 下限等待，绝不能拿「已 resolve 的 promise」参与竞速（那会让下限
- * 失效，等于没让出）。
- */
-function runAfterInteractionsSafe(): Promise<void> | undefined {
-  try {
-    // 经 unknown 双重断言：RN 类型里 runAfterInteractions 返回 thenable
-    //（无 catch/finally），与标准 Promise 结构不兼容，需放宽签名判断
-    const im = InteractionManager as unknown as
-      | { runAfterInteractions?: () => Promise<void> }
-      | undefined;
-    if (im && typeof im.runAfterInteractions === 'function') {
-      return im.runAfterInteractions();
-    }
-  } catch {
-    // 测试桩/异常环境下降级
-  }
-  return undefined;
-}
-
-/**
- * FTS 队列书间让出：InteractionManager（等交互收尾）与 setTimeout
- * （至少 ftsQueueYieldMs，默认 200ms）竞速——两者都满足前不开始下一本书
- * 的解析。InteractionManager 不可用时只等 setTimeout 下限。
+ * FTS 队列书间让出：只等 setTimeout 下限（ftsQueueYieldMs，默认 200ms）。
+ *
+ * ⚠ 迁移 RN 0.83 时移除 InteractionManager 竞速（真机 + 用例双重实证）：
+ *  ① RN 0.83 起 `runAfterInteractions(task)` 的 task 是**必需**入参，无参调用
+ *     被 reject TypeError「Invalid task of type: undefined」
+ *     （react-native/Libraries/Interaction/InteractionManager.js）。该 thenable
+ *     参与原先的 `Promise.race` ⇒ 未处理拒绝 ⇒ 真机 JS 致命崩溃
+ *     （2026-10-08 实测：冷启 ~11s、daodejing FTS 装配期间进程被杀）。
+ *  ② 仅补一个空任务只是「不崩」：RN 0.83 的 IM 已不再等交互（内部退化为
+ *     setImmediate），它会**立即赢得竞速**，把 200ms 下限击穿成 0ms
+ *     ——与让出目的相反（保真 IM 桩下既有用例实测书间隔 0ms 红）。
+ *  ③ IM 自本版起被官方标记 deprecated（建议改 requestIdleCallback），
+ *    且「等交互收尾」语义已不存在 ⇒ 改为由定时器下限独占。
  */
 function ftsInterBookYield(): Promise<void> {
-  const timerDone = new Promise<void>((resolve) => {
+  return new Promise<void>((resolve) => {
     const t = setTimeout(resolve, ftsQueueYieldMs);
     // 【R2-3/D7】纯让出定时器不得阻塞宿主退出（RN 无 unref → 可选调用）
     (t as unknown as { unref?: () => void }).unref?.();
   });
-  const interactionDone = runAfterInteractionsSafe();
-  if (!interactionDone) {
-    return timerDone;
-  }
-  return Promise.race([interactionDone, timerDone]);
 }
 
 /** meta 快路径全本组装：逐章切片 → toParagraphs → segments。
@@ -771,6 +773,47 @@ async function loadBuiltinMeta(
 }
 
 /**
+ * 用户书章字节目录（`.gxbook.toc`）读侧 —— 与 `loadBuiltinMeta` **同范式**的对偶。
+ *
+ * ★为什么不需要从零造通道（2026-10-13 勘察纠正）：
+ *   此前结论「阻塞 A＝按需物化通道压根不存在，须从零新建」**是错的**。
+ *   内置书的 meta 快路径（`loadBuiltinMeta` + `readFileSliceUtf8Safe`）**早就在跑**，
+ *   且有 3 套判据锁着（含 `builtinSliceUtf8Boundary` UTF-8 边界专测）。
+ *   用户书缺的只是：① toc 落盘（步骤 5 已做）②读盘闸门（本函数）③路径泛化（已做）。
+ *
+ * ★读侧**只做纯结构校验**（`validateTocShape`），绝不读正文来校验偏移——
+ *   读正文就等于把本步要省的 6275ms 又花回去。偏移是否真与文本对得上，
+ *   由生成端 `verifyTocAgainstText` 的 fail-fast 保证（写不出坏 toc）。
+ *
+ * @param cachePath 该书的 `.gxbook` 缓存路径（toc 落在 `<cachePath>.toc`）
+ * @param bookId 期望书 id（校验条目归属，防别书的 toc 错挂）
+ * @param expectedChapterCount 期望章数；≤0 表示不校验（调用方尚不知章数时）
+ * @returns 合法 toc；缺失/损坏/不合法一律 `null`（调用方回退全量读，永远正确）
+ */
+async function loadUserBookToc(
+  cachePath: string,
+  bookId: string,
+  expectedChapterCount: number,
+): Promise<ChapterToc | null> {
+  try {
+    // eslint-disable-next-line no-await-in-loop
+    const raw = await RNFS.readFile(`${cachePath}.toc`, 'utf8');
+    const parsed = JSON.parse(raw) as ChapterToc;
+    const reason = validateTocShape(parsed, bookId, expectedChapterCount);
+    if (reason !== '') {
+      console.info(
+        `[UserBookService] .gxbook.toc 结构非法（回退全量读）：${bookId} reason=${reason}`,
+      );
+      return null;
+    }
+    return parsed;
+  } catch {
+    // toc 缺失/JSON 损坏：慢路径兜底（首次导入后尚未写 toc 的书属正常）
+    return null;
+  }
+}
+
+/**
  * 单片读取结果。
  * `text` = 该片文本；`consumed` = **实际消费的字节数**（≤ 请求量；尾部不完整
  * UTF-8 序列被裁掉时小于请求量，至多 -3）。调用方必须以 `consumed`（而非
@@ -888,55 +931,73 @@ export function utf8CompletePrefixLength(bytes: Uint8Array): number {
  * 真 IO 失败（native reject / 文件缺失）在 ② 同样失败 → 仍返回 null，
  * 失败计数/退避/终态语义（R2-1/D1）完全不变。
  */
-async function readBuiltinChapterSlice(
-  spec: BuiltinBookSpec,
+/**
+ * ★通用版：按字节区间切片读取任意本地文件的正文（**UTF-8 边界对齐**）。
+ *
+ * 这是 r41/#20 根因修复的**真实现**，对内置书与用户书共用；`readBuiltinChapterSlice`
+ * 只是「内置书路径 + 失败日志标签」的薄包装（其行为逐字不变，见该函数注释）。
+ *
+ * 为什么必须对齐 UTF-8 边界：旧实现 `RNFS.read(path, e - s, s, 'utf8')` 让 RNFS 的
+ * JS 包装把 native 返回的 base64 交给 `utf8.decode()`，而 `utf8@3` 是**严格**解码器
+ * —— 一旦 `e` 落在多字节字符中间（中文 3 字节字符 → 命中概率 ≈ 2/3），尾部不完整
+ * 序列直接抛 `Error('Invalid byte index')`，上层只判「读失败」。真机 + 资产实测
+ * （资治通鉴 294 章）：156 个 >32KB 的章里 **112 章（71.8%）** 首批 32KB 切片即命中
+ * ⇒ 目标章首批零产出 ⇒ 永不就绪 ⇒ 整页转圈（QA #19 根因）。
+ *
+ * 双路径策略（最小改动）：
+ *  ① 主路径 `'utf8'` 单次 native read——落在字符边界上的批恒成功，零额外开销；
+ *  ② **仅当** ① 抛错/非字符串时，回落一次 `'base64'`：JS 侧用
+ *     `utf8CompletePrefixLength` 裁掉尾部不完整序列，再用**宽松**解码器
+ *     `decodeUtf8`（U+FFFD 容错、绝不抛）解出前缀文本；
+ *  返回 `consumed` 让调用方自真正的字符边界续读（内容不丢不重）。
+ *  真 IO 失败在 ② 同样失败 ⇒ 仍返回 null，失败语义不变。
+ *
+ * @param filePath 绝对/可读路径（调用方给定；本函数不做路径拼接）
+ * @param tag 失败日志里的书标识（去重键的一部分）
+ */
+async function readFileSliceUtf8Safe(
+  filePath: string,
   s: number,
   e: number,
+  tag: string,
 ): Promise<BuiltinChapterSliceRead | null> {
   const want = e - s;
   if (want <= 0) {
     return { text: '', consumed: 0 };
   }
-  const canonicalPath = `${getBuiltinDirPath()}/${spec.id}.txt`;
   // ① 快路径：native utf8 直解（尾部恰落在字符边界时恒成功）
   try {
-    const text = await RNFS.read(canonicalPath, want, s, 'utf8');
+    const text = await RNFS.read(filePath, want, s, 'utf8');
     if (typeof text === 'string') {
       return { text, consumed: want };
     }
     // 非字符串 = 桥接层没给出数据（真机 RNFS 只会 resolve(字符串) 或 reject）。
-    // 此时不是「尾部截断」形态，重读一次 base64 也无济于事 → 直接判失败，
-    // 不付出第二次 native read 的代价。
-    logSliceReadFailure(spec.id, s, want, 'utf8-非字符串');
+    // 此时不是「尾部截断」形态，重读一次 base64 也无济于事 → 直接判失败。
+    logSliceReadFailure(tag, s, want, 'utf8-非字符串');
     return null;
   } catch (err) {
     // ★ 本缺陷的形态：utf8@3 严格解码在「切片尾部截断多字节字符」时抛
     //   `Invalid byte index`。把真实 message 打出来（禁止推理猜因），
     //   随后走 ② 的边界对齐回落。
-    logSliceReadFailure(
-      spec.id,
-      s,
-      want,
-      (err as Error)?.message ?? String(err),
-    );
+    logSliceReadFailure(tag, s, want, (err as Error)?.message ?? String(err));
   }
   // ② 边界对齐回落：base64 原文 → 裁掉尾部不完整序列 → 宽松解码前缀
   try {
-    const b64 = await RNFS.read(canonicalPath, want, s, 'base64');
+    const b64 = await RNFS.read(filePath, want, s, 'base64');
     if (typeof b64 !== 'string') {
-      logSliceReadFailure(spec.id, s, want, 'base64-非字符串');
+      logSliceReadFailure(tag, s, want, 'base64-非字符串');
       return null;
     }
     const bytes = bytesFromBase64(b64);
     const consumed = utf8CompletePrefixLength(bytes);
     if (consumed <= 0) {
-      logSliceReadFailure(spec.id, s, want, '无可解码的完整字符前缀');
+      logSliceReadFailure(tag, s, want, '无可解码的完整字符前缀');
       return null; // 连一个完整字符都拿不到 = 真失败（不得静默跳字节）
     }
     return { text: decodeUtf8(bytes.subarray(0, consumed)), consumed };
   } catch (err) {
     logSliceReadFailure(
-      spec.id,
+      tag,
       s,
       want,
       (err as Error)?.message ?? String(err),
@@ -946,15 +1007,47 @@ async function readBuiltinChapterSlice(
 }
 
 /**
+ * 按字节区间切片读取内置书章节正文。
+ *
+ * ⚠ 内置书专名包装：**行为与历史实现逐字一致**（保留其专属注释与调用点形状），
+ *   真实现见 `readFileSliceUtf8Safe`（内置书/用户书共用）。
+ */
+async function readBuiltinChapterSlice(
+  spec: BuiltinBookSpec,
+  s: number,
+  e: number,
+): Promise<BuiltinChapterSliceRead | null> {
+  const canonicalPath = `${getBuiltinDirPath()}/${spec.id}.txt`;
+  return readFileSliceUtf8Safe(canonicalPath, s, e, spec.id);
+}
+
+/**
  * 整章区间读取：必须完整消费 `[s, e)`，任一片失败即 null（调用方回退慢路径）。
  * 分片上限 READ_CHUNK_LIMIT（4MB，RNFS.read 建议值），与切片路径共用边界对齐
- * 逻辑——章尾落在章界（meta 由构建脚本按章生成，恒为字符边界），故正常情况
+ * 逻辑——章尾落在章界（meta/toc 按章生成，恒为字符边界），故正常情况
  * 一次读完；即便资产异常也不会把「尾部截断」误判成读失败。
+ *
+ * ⚠ 内置书专名包装：真实现见 `readFileRangeUtf8Safe`（内置书/用户书共用）。
  */
 async function readBuiltinChapterRange(
   spec: BuiltinBookSpec,
   s: number,
   e: number,
+): Promise<string | null> {
+  return readFileRangeUtf8Safe(
+    `${getBuiltinDirPath()}/${spec.id}.txt`,
+    s,
+    e,
+    spec.id,
+  );
+}
+
+/** 任意本地文件的整章区间读取（见 `readBuiltinChapterRange` 的语义与分片上限）。 */
+async function readFileRangeUtf8Safe(
+  filePath: string,
+  s: number,
+  e: number,
+  tag: string,
 ): Promise<string | null> {
   const total = e - s;
   if (total <= 0) {
@@ -965,12 +1058,12 @@ async function readBuiltinChapterRange(
   while (pos < e) {
     const want = Math.min(e - pos, READ_CHUNK_LIMIT);
     // eslint-disable-next-line no-await-in-loop
-    const r = await readBuiltinChapterSlice(spec, pos, pos + want);
+    const r = await readFileSliceUtf8Safe(filePath, pos, pos + want, tag);
     if (r === null) {
       return null;
     }
     parts.push(r.text);
-    // consumed ≥ 1（consumed ≤ 0 已在切片函数内判失败）→ 循环必然推进
+    // consumed ≥ 1（consumed ≤ 0 已在切片函数内判失败）⇒ 循环必然推进
     pos += Math.max(1, Math.min(r.consumed, want));
   }
   return parts.join('');
@@ -1834,8 +1927,15 @@ export async function fillBuiltinChapterNow(
   if (!bookId || !chapterId) {
     return false;
   }
-  const spec = getBuiltinSpec(bookId);
-  if (!spec || hiddenBuiltins.has(bookId)) {
+  // ★2026-10-13（B 档步骤 6）：本函数从「内置书专名」泛化为「任何有章字节区间的书」。
+  //   用户书走 `.gxbook.toc`（步骤 5 已落盘）——此前用户书在此**无条件早退**，
+  //   于是 `ReaderScreen` 的空壳兜底 `degradeChapterToWholeRead` 对用户书恒返回
+  //   false ⇒ 目录态书点开必 `throw '章节正文加载失败'`。
+  //   ⚠ 内置书的早退条件与顺序**逐字保留**（非用户书缺 spec / hidden 都直接退，
+  //     且**不做任何 IO**）；用户书另走一支，缺 toc 时同样退 ⇒ 回退全量读，永远正确。
+  const isUser = TextLibraryService.isUserBook(bookId);
+  const spec = isUser ? null : getBuiltinSpec(bookId);
+  if (hiddenBuiltins.has(bookId) || (!isUser && !spec)) {
     return false;
   }
   const bookRes = TextLibraryService.getBook(bookId);
@@ -1858,14 +1958,45 @@ export async function fillBuiltinChapterNow(
   // 在飞的流式游标（否则在飞步会重复 push 同一批段号 = 正文重复）
   abandonStreamingAssembly(bookId, chapterId);
   try {
-    const meta = await loadBuiltinMeta(spec);
-    if (!meta) {
+    // 章字节区间来源：内置书 = `books/<id>.meta.json`，用户书 = `<cachePath>.toc`。
+    // 两者的「纯结构校验」都在各自读侧完成（`loadBuiltinMeta` / `loadUserBookToc`），
+    // **读盘即判**——不为了校验偏移去读正文，否则本步要省的 6275ms 就白花了。
+    let rangeOf: (id: string) => { s: number; e: number } | null;
+    let readSlice: (s: number, e: number) => Promise<BuiltinChapterSliceRead | null>;
+    if (isUser) {
+      const files = oversizedBookFiles.get(bookId);
+      if (!files) {
+        return false; // 非超大书路径注册的用户书（仍全量注册）⇒ 维持原行为
+      }
+      const toc = await loadUserBookToc(files.cachePath, bookId, 0);
+      if (!toc) {
+        return false; // 无 toc / 非法 ⇒ 回退全量读
+      }
+      rangeOf = (id: string) => {
+        const hit = toc.chapters.find((c) => c.id === id);
+        return hit ? { s: hit.start, e: hit.end } : null;
+      };
+      readSlice = (s: number, e: number) =>
+        readFileSliceUtf8Safe(files.cachePath, s, e, bookId);
+    } else {
+      const builtinSpec = spec as BuiltinBookSpec;
+      const meta = await loadBuiltinMeta(builtinSpec);
+      if (!meta) {
+        return false;
+      }
+      rangeOf = (id: string) => {
+        const hit = meta.chapters.find((c) => c.id === id);
+        return hit ? { s: hit.s, e: hit.e } : null;
+      };
+      readSlice = (s: number, e: number) =>
+        readBuiltinChapterSlice(builtinSpec, s, e);
+    }
+    const range = rangeOf(chapterId);
+    if (!range) {
       return false;
     }
-    const entry = meta.chapters.find((c) => c.id === chapterId);
-    if (!entry) {
-      return false;
-    }
+    const entryS = range.s;
+    const entryE = range.e;
     // 流式装配（r37）：整章一次读 + toParagraphs 单块在巨章（史记表章级
     // 几十万字节）上是多秒级连续同步块——跳远章后邻章预热串行触发本函数，
     // JS 连续阻塞（真机采样 jsBlocked 8.4s）导致触摸不被处理（「无法
@@ -1876,7 +2007,7 @@ export async function fillBuiltinChapterNow(
     // 语义保持「全有或全无」：中途读失败丢弃部分产出——部分内容会让后台
     // 填充按 segments 非空跳过该章，造成永久截断章。
     const t0 = Date.now();
-    const totalBytes = entry.e - entry.s;
+    const totalBytes = entryE - entryS;
     let bytePos = 0;
     let carry = '';
     let readMs = 0;
@@ -1889,11 +2020,7 @@ export async function fillBuiltinChapterNow(
       let slice = '';
       if (want > 0) {
         const rT0 = Date.now();
-        const r = await readBuiltinChapterSlice(
-          spec,
-          entry.s + bytePos,
-          entry.s + bytePos + want,
-        );
+        const r = await readSlice(entryS + bytePos, entryS + bytePos + want);
         readMs += Date.now() - rT0;
         if (r === null) {
           readFailed = true;
@@ -2032,8 +2159,12 @@ export async function prefillBuiltinNeighbors(
   chapterId: string,
   count = resolvePreloadSpan(),
 ): Promise<void> {
-  const spec = getBuiltinSpec(bookId);
-  if (!spec || hiddenBuiltins.has(bookId)) {
+  // ★2026-10-13（B 档步骤 7）：早退条件按书籍类型分流——用户书无
+  //   `BuiltinBookSpec`，此前在此**无条件早退** ⇒ 邻章预热对用户书恒失效。
+  //   ⚠ 内置书分支的判据与顺序**逐字未变**（hidden 优先、缺 spec 即退）。
+  const isUser = TextLibraryService.isUserBook(bookId);
+  const spec = isUser ? null : getBuiltinSpec(bookId);
+  if (hiddenBuiltins.has(bookId) || (!isUser && !spec)) {
     return;
   }
   const bookRes = TextLibraryService.getBook(bookId);
@@ -2043,6 +2174,11 @@ export async function prefillBuiltinNeighbors(
   const chapters = bookRes.data.chapters;
   const idx = chapters.findIndex((c) => c.id === chapterId);
   if (idx < 0) {
+    return;
+  }
+  // ★用户书只在「有 toc（= 目录态）」时才提交邻章请求：非超大书路径注册的
+  //   用户书仍是全量注册（各章 segments 已在手），提交纯浪费。
+  if (isUser && !oversizedBookFiles.has(bookId)) {
     return;
   }
   if (R38_SCHEDULER_ENABLED) {
@@ -2388,6 +2524,19 @@ export interface BuiltinShell {
    * `clearShellFailures` 清除，恢复「可续可重试」。
    */
   failedTerminal?: boolean;
+  /**
+   * ★ 2026-10-13（B 档步骤 7）：本壳的**字节区间切片读函数**（用户书通道）。
+   *
+   * 存在理由：`runChapterStreamingStep` 原本硬调 `readBuiltinChapterSlice(opts.spec, …)`
+   * ——而 `opts.spec` 是 `BuiltinBookSpec`，**用户书没有它** ⇒ 调度器主路径
+   * 对用户书恒早退（实测：邻章永不装配，目录态用户书只能一章一章跳）。
+   *
+   * ⚠ **内置书壳不写此字段**（`hydrateBuiltinViaMeta` /
+   *   `fillRemainingBuiltinChapters` 构造的壳逐字不变）⇒ 缺省时
+   *   `runChapterStreamingStep` 走原 `readBuiltinChapterSlice(opts.spec, …)`
+   *   分支，**内置书行为零变化**。
+   */
+  readSlice?: (s: number, e: number) => Promise<BuiltinChapterSliceRead | null>;
 }
 
 async function buildBuiltinChapterShells(
@@ -2850,11 +2999,14 @@ async function runChapterStreamingStep(
     const want = Math.min(readChunkBytes, totalBytes - cur.bytePos);
     let slice = '';
     if (want > 0) {
-      const r = await readBuiltinChapterSlice(
-        opts.spec,
-        shell.range.s + cur.bytePos,
-        shell.range.s + cur.bytePos + want,
-      );
+      // ★2026-10-13（B 档步骤 7 · 调度器主路径泛化）：壳自带切片器优先
+      //   （用户书通道，`.gxbook.toc` 字节区间）；**内置书壳不写该字段**
+      //   ⇒ 下面 else 分支与优化前逐字一致（`readBuiltinChapterSlice` 照旧）。
+      const sliceFrom = shell.range.s + cur.bytePos;
+      const sliceTo = sliceFrom + want;
+      const r = shell.readSlice
+        ? await shell.readSlice(sliceFrom, sliceTo)
+        : await readBuiltinChapterSlice(opts.spec, sliceFrom, sliceTo);
       if (r === null) {
         // ★ D1 截断防护：切片读失败**绝不置 `cur.done`**。
         //   置 done 会把「已产出但内容截断」的章标成 READY_FULL——
@@ -3332,8 +3484,9 @@ function armIdleHeartbeatIfNeeded(ctx: BuiltinFillContext): void {
  *  - 首次启动延迟默认 10s（原 3s），先让书架/水合链路彻底站稳；
  *  - 每本书开始前检查「用户优先门闩」（ftsQueuePausedUntil）：用户
  *    水合期间轮询等待（250ms 一次），门闩过期才继续下一本；
- *  - 书间让出从 setTimeout(16) 升级为 InteractionManager 与 setTimeout(200)
- *    竞速：至少 200ms 间隔且等当前交互/动画收尾，大幅降低连续占用；
+ *  - 书间让出从 setTimeout(16) 升级为硬下限 setTimeout(200)：
+ *    至少 200ms 间隔（RN 0.83 迁移时移除 InteractionManager 竞速，见
+ *    ftsInterBookYield 注释）；
  *  - 单本解析走分片路径（loadBuiltinBookBody chunked）：书内按章让出，
  *    用户 tap 可在章间插队，正解析一本书时无需中断也不会拖死交互。
  */
@@ -3768,8 +3921,17 @@ function splitLongParagraph(text: string, limit: number): string[] {
   return parts;
 }
 
-/** 文本切段落：优先按空行分组；无空行则每行一段；空白行剔除 */
-function toParagraphs(raw: string): string[] {
+/**
+ * 文本切段落：优先按空行分组；无空行则每行一段；空白行剔除。
+ *
+ * ★导出（2026-10-13，B 档步骤 5）：`.gxbook.toc` 消费端按字节偏移切出某章
+ *   正文后，**必须**用本函数重切段才能得到与全量解析**逐段相同**的 segments
+ *   （否则段 id 漂移 ⇒ FTS / 划线 / 笔记锚点全部失效）。
+ *   它同时是「字节路径 == 解析路径」对拍判据的一端 —— 私有函数在 jest 里
+ *   无法被执行，判据会退化成「自己等于自己」。
+ * ⚠ 本函数是**纯函数**：不得引入状态/IO，否则上述等价性立即失效。
+ */
+export function toParagraphs(raw: string): string[] {
   const normalized = raw.replace(/\r\n?/g, '\n');
   const chunks = normalized.includes('\n\n')
     ? normalized.split(/\n{2,}/)
@@ -3794,6 +3956,19 @@ export function makeUserBookId(now = Date.now()): string {
 interface RawChapter {
   title: string;
   body: string[];
+  /**
+   * ★ 正文首行行号（含）。切到标题行时该标题**不计入**正文，故为 `标题行号 + 1`。
+   * 用途：把 `splitRawChapters` 的结果映射回**字节偏移**（`.gxbook.toc` 的来源）。
+   * ⚠ 行号口径必须与 `normalized.split('\n')` **完全一致**（空行也算一项），
+   *   否则与 `lineByteRanges` 的行表错位 ⇒ toc 偏移漂移 ⇒ 静默切错章。
+   */
+  startLine: number;
+  /** 正文末行行号 + 1（**开区间**）；下一标题行的行号，或全文末行数 */
+  endLine: number;
+  /** ★ 正文起始**字节**偏移（由 `finishChapterScan` 从 `startLine` 换算） */
+  byteStart: number;
+  /** ★ 正文结束**字节**偏移（开区间） */
+  byteEnd: number;
 }
 
 /** 分片解析的让出粒度：每装配 30 章让出一次 JS 线程 */
@@ -3933,10 +4108,28 @@ interface ChapterScanState {
   current: RawChapter | null;
   preface: string[];
   markerCount: number;
+  /**
+   * ★ preface 的结束行号（开区间）＝首个标题行行号；无标题则＝全文末行数。
+   * preface 就是「第一个标题行之前」的行，故天然连续，可直接映射字节区间。
+   */
+  prefaceEndLine: number;
 }
 
 function createChapterScanState(): ChapterScanState {
-  return { rawChapters: [], current: null, preface: [], markerCount: 0 };
+  return { rawChapters: [], current: null, preface: [], markerCount: 0, prefaceEndLine: -1 };
+}
+
+/**
+ * 收尾当前章：把正文范围截至 `endLine`（下一标题行的行号）并入结果。
+ * 正文范围收尾与 push 必须**同一处**，否则会出现「push 了但 endLine 还是 0」的章。
+ */
+function finishCurrentChapter(state: ChapterScanState, endLine: number): void {
+  if (!state.current) {
+    return;
+  }
+  state.current.endLine = endLine;
+  state.rawChapters.push(state.current);
+  state.current = null;
 }
 
 /** 扫描 lines 的 [from, to) 区间并入状态（逐行规则与原实现逐语句一致） */
@@ -3951,21 +4144,35 @@ function scanChapterLineRange(
     const line = lines[i];
     const marker = useMarkers ? CHAPTER_MARKER_LINE_RE.exec(line) : null;
     if (marker) {
-      if (state.current) {
-        state.rawChapters.push(state.current);
+      finishCurrentChapter(state, i);
+      if (state.prefaceEndLine < 0) {
+        state.prefaceEndLine = i;
       }
       state.markerCount += 1;
       state.current = {
         title: marker[1].trim() || `第${state.markerCount}章`,
         body: [],
+        // ★ 标题行不计入正文 ⇒ 正文从下一行开始
+        startLine: i + 1,
+        endLine: -1,
+        byteStart: -1,
+        byteEnd: -1,
       };
     } else {
       const m = CHAPTER_TITLE_RE.exec(line);
       if (m) {
-        if (state.current) {
-          state.rawChapters.push(state.current);
+        finishCurrentChapter(state, i);
+        if (state.prefaceEndLine < 0) {
+          state.prefaceEndLine = i;
         }
-        state.current = { title: m[1].trim(), body: [] };
+        state.current = {
+          title: m[1].trim(),
+          body: [],
+          startLine: i + 1,
+          endLine: -1,
+          byteStart: -1,
+          byteEnd: -1,
+        };
       } else if (state.current) {
         state.current.body.push(line);
       } else {
@@ -3975,23 +4182,60 @@ function scanChapterLineRange(
   }
 }
 
+/**
+ * 切章收尾：把行范围换算成**字节偏移**（`.gxbook.toc` 的记账口径）。
+ *
+ * ⚠ 行→字节的换算必须与 `chapterToc.lineByteRanges` **同一张行表**
+ *   （口径＝`normalized.split('\n')`，空行也算一项）⇒ 换算必须在**本文件内**
+ *   用同一张表，否则两处行表不一致 ⇒ toc 偏移漂移 ⇒ 静默切错章。
+ *
+ * ⚠ 换算是 O(全文长度) 的额外一趟（≈12MB 文本约几十~百 ms）。
+ *   只在「生成分片切章结果」时付一次，落盘时一次，读取时零成本。
+ */
 function finishChapterScan(
   state: ChapterScanState,
-): { rawChapters: RawChapter[]; preface: string[] } {
-  if (state.current) {
-    state.rawChapters.push(state.current);
+  lineCount: number,
+  byteStarts: number[],
+  byteLen: number,
+): {
+  rawChapters: RawChapter[];
+  preface: string[];
+  prefaceStartByte: number;
+  prefaceEndByte: number;
+} {
+  finishCurrentChapter(state, lineCount);
+  if (state.prefaceEndLine < 0) {
+    state.prefaceEndLine = lineCount;
   }
-  return { rawChapters: state.rawChapters, preface: state.preface };
+  // 行号 → 字节偏移；行号越界（末行无换行时 endLine === 行数）时钳到 byteLen
+  const toByte = (line: number): number =>
+    line < byteStarts.length ? byteStarts[line] : byteLen;
+  for (const rc of state.rawChapters) {
+    rc.byteStart = toByte(rc.startLine);
+    rc.byteEnd = toByte(rc.endLine);
+  }
+  return {
+    rawChapters: state.rawChapters,
+    preface: state.preface,
+    prefaceStartByte: 0,
+    prefaceEndByte: toByte(state.prefaceEndLine),
+  };
 }
 
 function splitRawChapters(
   normalized: string,
   useMarkers: boolean,
-): { rawChapters: RawChapter[]; preface: string[] } {
+): {
+  rawChapters: RawChapter[];
+  preface: string[];
+  prefaceStartByte: number;
+  prefaceEndByte: number;
+} {
   const lines = normalized.split('\n');
+  const { starts, byteLen } = lineByteRanges(normalized);
   const state = createChapterScanState();
   scanChapterLineRange(state, lines, 0, lines.length, useMarkers);
-  return finishChapterScan(state);
+  return finishChapterScan(state, lines.length, starts, byteLen);
 }
 
 /** 分批切章的每批行数：9MB 书约 20 万行 → 10 批，每批约 30-80ms 让出一次
@@ -4007,8 +4251,14 @@ const SPLIT_SCAN_BATCH_LINES = 20000;
 async function splitRawChaptersChunked(
   normalized: string,
   useMarkers: boolean,
-): Promise<{ rawChapters: RawChapter[]; preface: string[] }> {
+): Promise<{
+  rawChapters: RawChapter[];
+  preface: string[];
+  prefaceStartByte: number;
+  prefaceEndByte: number;
+}> {
   const lines = normalized.split('\n');
+  const { starts, byteLen } = lineByteRanges(normalized);
   const state = createChapterScanState();
   for (let from = 0; from < lines.length; from += SPLIT_SCAN_BATCH_LINES) {
     scanChapterLineRange(
@@ -4023,7 +4273,7 @@ async function splitRawChaptersChunked(
       await yieldToJs();
     }
   }
-  return finishChapterScan(state);
+  return finishChapterScan(state, lines.length, starts, byteLen);
 }
 
 /**
@@ -4032,11 +4282,25 @@ async function splitRawChaptersChunked(
  */
 function createChapterBuilder(bookId: string): {
   chapters: Book['chapters'];
-  pushChapter: (chapterTitle: string, bodyLines: string[]) => void;
+  /**
+   * 装配一章。
+   * @param byteRange **可选**：本章正文在归一化文本中的**字节**区间。
+   *   缺省时**不写** `byteStart`/`byteEnd` ⇒ `buildTocFromBook` 整体放弃生成 toc。
+   *   典型缺省场景：「按段数切第N部分」——段落边界不在行边界，偏移无法表达。
+   */
+  pushChapter: (
+    chapterTitle: string,
+    bodyLines: string[],
+    byteRange?: { byteStart: number; byteEnd: number },
+  ) => void;
 } {
   const chapters: Book['chapters'][number][] = [];
   let chapterOrder = 0;
-  const pushChapter = (chapterTitle: string, bodyLines: string[]): void => {
+  const pushChapter = (
+    chapterTitle: string,
+    bodyLines: string[],
+    byteRange?: { byteStart: number; byteEnd: number },
+  ): void => {
     if (chapters.length >= MAX_CHAPTERS) {
       return;
     }
@@ -4058,6 +4322,14 @@ function createChapterBuilder(bookId: string): {
       title: chapterTitle,
       order: chapterOrder,
       segments,
+      // ★ 目录字段（2026-10-12）：与 segments 同源算出，构造即一致。
+      //   作用见 types/index.ts 的 Chapter.segCount / charCount 注释与设计文档 §3。
+      //   ⚠ 必须在此算（而非读侧兜底算）：读侧在「未装载」态拿不到正文。
+      segCount: segments.length,
+      charCount: paragraphs.reduce((n, p) => n + p.length, 0),
+      // ★ 字节范围（2026-10-13）：`.gxbook.toc` 的来源。缺省时**不写**
+      //   （宁缺勿猜：部分 toc 会静默切错章，见 chapterToc.buildTocFromBook）。
+      ...(byteRange ? { byteStart: byteRange.byteStart, byteEnd: byteRange.byteEnd } : {}),
     });
   };
   return { chapters, pushChapter };
@@ -4105,33 +4377,99 @@ export function parseTxtBook(
   opts?: ParseTxtBookOptions,
 ): Book {
   const normalized = text.replace(/\r\n?/g, '\n');
-  const { rawChapters, preface } = splitRawChapters(normalized, opts?.markers ?? false);
+  const { rawChapters, preface, prefaceStartByte, prefaceEndByte } = splitRawChapters(
+    normalized,
+    opts?.markers ?? false,
+  );
   const { chapters, pushChapter } = createChapterBuilder(bookId);
   const prefaceParagraphs = toParagraphs(preface.join('\n'));
 
   if (rawChapters.length === 0) {
     // 无章节标记：preface 即全部内容，整本一章「全文」；段落过多时切「部分」
     if (prefaceParagraphs.length <= SEGMENTS_PER_PART) {
-      pushChapter('全文', preface);
+      // 单章「全文」＝整个 preface 区间 ⇒ 字节范围可用
+      pushChapter('全文', preface, {
+        byteStart: prefaceStartByte,
+        byteEnd: prefaceEndByte,
+      });
     } else {
       for (let i = 0; i < prefaceParagraphs.length; i += SEGMENTS_PER_PART) {
         const part = prefaceParagraphs.slice(i, i + SEGMENTS_PER_PART);
-        pushChapter(`第${Math.floor(i / SEGMENTS_PER_PART) + 1}部分`, [
-          part.join('\n\n'),
-        ]);
+        // ★**故意不传字节范围**：按段数切片，段落边界**不一定落在行边界**
+        //   ⇒ 偏移无法表达 ⇒ 该书整体不生成 toc（`buildTocFromBook` 返回 null，
+        //   消费端回退全量读，永远正确）。
+        pushChapter(`第${Math.floor(i / SEGMENTS_PER_PART) + 1}部分`, [part.join('\n\n')]);
       }
     }
   } else {
     // 有章节标记：标题前正文归「开篇」
     if (prefaceParagraphs.length > 0) {
-      pushChapter('开篇', preface);
+      pushChapter('开篇', preface, {
+        byteStart: prefaceStartByte,
+        byteEnd: prefaceEndByte,
+      });
     }
     for (const rc of rawChapters) {
-      pushChapter(rc.title, rc.body);
+      pushChapter(rc.title, rc.body, {
+        byteStart: rc.byteStart,
+        byteEnd: rc.byteEnd,
+      });
     }
   }
 
   return finishParsedBook(fileName, bookId, chapters, opts);
+}
+
+/**
+ * 由 `.gxbook.toc` 构造**目录态** `Book`（2026-10-13 B 档步骤 6 消费端）。
+ *
+ * ★这是「兑现 6275ms」的那一步：冷启只读几十 KB 的 toc 即可上架全部章节，
+ *   **不读 12.78MB 正文、不跑 `parseTxtBookChunked`**（真机读数：读缓存
+ *   6275ms 占冷启→上屏 8.2s 的 69%，重建 980 章另 1785ms）。
+ *
+ * 目录态与全量态的差异**只有一个**：`segments: []`。
+ * 章 id / title / order / segCount / charCount / byteStart / byteEnd
+ * 全部**取自 toc**——它们与全量解析逐字相同（toc 就是全量解析的产物）⇒
+ * 章 id 不漂 ⇒ 目录跳转 / FTS / 划线 / 笔记锚点全部保持有效。
+ *
+ * ⚠ 正文缺失的补救**不在本函数**：阅读时 `ReaderScreen` 见 `segments.length === 0`
+ *   会走 `degradeChapterToWholeRead` → `fillBuiltinChapterNow` 按 toc 的字节区间
+ *   切片装配（内置书 meta 快路径的同范式，用户书版在同文件内）。
+ *   ⇒ 「读侧通道」与「目录态注册」必须**同时**落地，否则目录态书点开必报错。
+ *
+ * @param meta `.gxbook.meta` 信封（title/author；缺失时用文件名兜底）
+ */
+function buildShellBookFromToc(
+  fileName: string,
+  bookId: string,
+  toc: ChapterToc,
+  meta: { title?: string; author?: string },
+): Book {
+  const fallbackTitle =
+    fileName.replace(/\.(txt|md|markdown|html?|xhtml|fb2|epub)$/i, '').trim() ||
+    '未命名书籍';
+  const totalSegments = toc.chapters.reduce((n, c) => n + c.segCount, 0);
+  return {
+    id: bookId,
+    title: meta.title?.trim() || fallbackTitle,
+    author: meta.author?.trim() || '佚名',
+    category: 'user',
+    description: `共 ${toc.chapters.length} 章 ${totalSegments} 段 · 导入自 ${
+      fileName.split('.').pop()?.toUpperCase() ?? 'TXT'
+    }`,
+    chapters: toc.chapters.map((c) => ({
+      id: c.id,
+      bookId,
+      title: c.title,
+      order: c.order,
+      // ★ 目录态：**唯一**差异。正文由阅读时按字节区间切片装配。
+      segments: [],
+      segCount: c.segCount,
+      charCount: c.charCount,
+      byteStart: c.start,
+      byteEnd: c.end,
+    })),
+  };
 }
 
 /**
@@ -4153,17 +4491,22 @@ export async function parseTxtBookChunked(
   // 【T23】切分也走分片版：原同步 splitRawChapters 对整书一次性扫描是隐藏的
   // 同步大块（超大书可达数秒），会使「chunked」版本名不副实。splitRawChaptersChunked
   // 每 2 万行让出一次，返回同构 {rawChapters, preface}，解析结果与原版一致。
-  const { rawChapters, preface } = await splitRawChaptersChunked(normalized, opts?.markers ?? false);
+  const { rawChapters, preface, prefaceStartByte, prefaceEndByte } =
+    await splitRawChaptersChunked(normalized, opts?.markers ?? false);
   const { chapters, pushChapter } = createChapterBuilder(bookId);
   const prefaceParagraphs = toParagraphs(preface.join('\n'));
 
   if (rawChapters.length === 0) {
     if (prefaceParagraphs.length <= SEGMENTS_PER_PART) {
-      pushChapter('全文', preface);
+      pushChapter('全文', preface, {
+        byteStart: prefaceStartByte,
+        byteEnd: prefaceEndByte,
+      });
     } else {
       let partsDone = 0;
       for (let i = 0; i < prefaceParagraphs.length; i += SEGMENTS_PER_PART) {
         const part = prefaceParagraphs.slice(i, i + SEGMENTS_PER_PART);
+        // ★**故意不传字节范围**：段落边界不在行边界 ⇒ 偏移无法表达 ⇒ 不生成 toc
         pushChapter(`第${Math.floor(i / SEGMENTS_PER_PART) + 1}部分`, [
           part.join('\n\n'),
         ]);
@@ -4177,11 +4520,17 @@ export async function parseTxtBookChunked(
     }
   } else {
     if (prefaceParagraphs.length > 0) {
-      pushChapter('开篇', preface);
+      pushChapter('开篇', preface, {
+        byteStart: prefaceStartByte,
+        byteEnd: prefaceEndByte,
+      });
     }
     let chaptersDone = 0;
     for (const rc of rawChapters) {
-      pushChapter(rc.title, rc.body);
+      pushChapter(rc.title, rc.body, {
+        byteStart: rc.byteStart,
+        byteEnd: rc.byteEnd,
+      });
       chaptersDone += 1;
       // 分片让出：每 30 章放行一次已排队的 tap/触摸/渲染任务
       if (chaptersDone % PARSE_CHUNK_CHAPTERS === 0) {
@@ -4235,6 +4584,19 @@ async function parseBookFile(
     }
     const ext = fileName.split('.').pop()?.toLowerCase() ?? 'txt';
     let text: string;
+    /**
+     * ★ 结构化格式（epub/odt/fb2…）的内嵌元数据（书名/作者）。
+     *
+     * 存在理由（2026-10-12 真机实证）：`convertBookBytes` 已从 OPF `dc:title` /
+     * `dc:creator` 解析出书名与作者（`bookFormat.ts:183-184`），但本函数原先
+     * **只取 `.text`、把 `title`/`author` 整个丢掉** ⇒ `finishParsedBook` 的
+     * `opts?.title` 恒 undefined ⇒ `:4062` 回落**文件名**、`:4064` 回落 `佚名`。
+     * 实录：`大奉打更人.epub` 的 OPF 明确含 `<dc:title>大奉打更人</dc:title>`、
+     * `<dc:creator>卖报小郎君</dc:creator>`，书架却显示文件名 + 佚名。
+     * ⇒ 用户重命名文件或用 ASCII 名导入时，书架显示跟着变；opaque 文件名 ⇒ 显示乱码。
+     */
+    let metaTitle: string | undefined;
+    let metaAuthor: string | undefined;
     const tConv0 = Date.now();
     if (isStructuredFormat(ext)) {
       try {
@@ -4244,6 +4606,8 @@ async function parseBookFile(
         // 书架冻结真凶）。仅 chunked（超大书）路径传 yieldToJs，普通导入保持原语义。
         const converted = await convertBookBytes(ext, bytesRes.data, chunked ? yieldToJs : undefined);
         text = converted.text;
+        metaTitle = converted.title;
+        metaAuthor = converted.author;
       } catch {
         return null;
       }
@@ -4254,6 +4618,10 @@ async function parseBookFile(
     const parseOpts = {
       markers: isStructuredFormat(ext) || !!spec,
       sourceLabel: spec ? '内置' : ext.toUpperCase(),
+      // ★ 结构化格式传内嵌元数据；空串由 finishParsedBook 的 `|| fallback` 兜住
+      //   （`opts?.title?.trim() || fallbackTitle`），故无需在此判空。
+      title: metaTitle,
+      author: metaAuthor,
     };
     // chunked：内置书水合/FTS 队列传 true，大书装配期间按章让出 JS；
     // 用户书导入等其余链路默认 false 走原同步路径（解析结果一致）。
@@ -4452,6 +4820,96 @@ function retainKnownUserBook(
 }
 
 /**
+ * ★目录态快路径：只读 `.gxbook.toc` + `.gxbook.meta`，**不碰 12.78MB 正文**。
+ *
+ * 这是 B 档兑现 6275ms 的读侧入口。任何一步不成立即返回 `null`，
+ * 由调用方落回「分片读正文 + `parseTxtBookChunked` 重建」的原路径 ——
+ * 回退路径必须**永远正确**，宁可不优化。
+ *
+ * ⚠ 为什么 meta 缺失也要回退（而不是用文件名兜底）：
+ *   `.meta` 里有 `fileSig`/`contentHash`，是判断「缓存是否还对得上原书」的依据。
+ *   记忆条目：`meta.fileSig`/`contentHash` **写入但从不校验** ⇒ 这是已知欠账。
+ *   本函数**不引入**该欠账（不校验就当没有），但也不能在 meta 缺失时
+ *   造一个「看起来正常」的书 —— 那会让缺信封的书走上一条从未被验证的路径。
+ *   ⇒ meta 缺失即回退全量读。
+ */
+async function buildShellBookFromCacheIfPossible(
+  t: OversizedTask,
+  id: string,
+): Promise<Book | null> {
+  // ① 信封（title/author）必须在：缺它就没法产出与全量态等价的书体元数据
+  let meta: { title?: string; author?: string };
+  try {
+    // eslint-disable-next-line no-await-in-loop
+    const metaRaw = await RNFS.readFile(`${t.cachePath}.meta`, 'utf8');
+    meta = JSON.parse(metaRaw) as { title?: string; author?: string };
+  } catch {
+    return null; // 信封缺失/损坏 ⇒ 回退全量读
+  }
+  // ② toc（章目录 + 字节区间），读侧已做纯结构校验
+  const toc = await loadUserBookToc(t.cachePath, id, 0);
+  if (!toc) {
+    return null;
+  }
+  return buildShellBookFromToc(t.name, id, toc, meta);
+}
+
+/**
+ * ★偏移基准是否与 `.gxbook` 落盘内容**逐字一致**（B 档步骤 8）。
+ *
+ * 为什么必须是独立判据而不是「相信兜底」：`buildTocFromBook` 的行边界自检
+ * 只保证「**偏移与传入文本**自洽」。而步骤 4（落盘前归一化）之前写的旧缓存
+ * **含 CRLF**，解析层却已把 CRLF 归一化后才算 `byteStart/byteEnd`
+ * ⇒ 两者口径不一致，且**偏移有可能碰巧落在 CRLF 版的行边界上** ⇒
+ * 自检通过但 toc 是错的 ⇒ **静默显示错章**（最坏的一类缺陷，不报错）。
+ * ⇒ 必须**显式判基准**，宁可不落 toc（回退全量读，永远正确）。
+ *
+ * 抽成导出纯函数的理由：这是「该不该落 toc」的**唯一真值**，
+ * 判据要能在不搭 24MB 集成环境的前提下直接验证它两个方向。
+ */
+export function tocOffsetBaseMatchesCache(cacheText: string): boolean {
+  return normalizeForCache(cacheText) === cacheText;
+}
+
+/**
+ * ★落 `.gxbook.toc`（B 档步骤 8 抽出的共用小函数）——两条落盘路径共用一份实现。
+ *
+ * 抽出来的理由（不是「为了好看」）：`.toc` 曾只在「缓存**不存在**→完整解析」
+ * 路径写 ⇒ **存量已导入的大书**走「读缓存+ `parseTxtBookChunked` 重建」分支
+ * ⇒ `.toc` 永远不会被生成 ⇒ B 档收益（真机 8072ms → 202ms）对真实用户等于零。
+ * 真机证据：装机后首启 Δ=9247ms（比走老路更慢）且 `ls` 确认无 `.toc`。
+ *
+ * ⚠ `buildTocFromBook` **全有或全无**：返回 null（无标记书按段数切「第N部分」，
+ *   段落边界不在行边界 ⇒ 偏移无法表达）⇒ **不写 toc、不报错**，消费端回退
+ *   全量读，永远正确。宁可不优化，也不能给一份会切错章的 toc。
+ * ⚠ 内部 `verifyTocAgainstText` 自检是**真保护**而非装饰：若传入的 `cacheText`
+ *   含 CRLF（步骤 4 归一化修复之前写的旧缓存），而 `book` 的 `byteStart/byteEnd`
+ *   是按**归一化后**文本算的 ⇒ 行边界对不上 ⇒ 自检不过 ⇒ 返回 null ⇒ 不写。
+ *   这正是我们要的：**宁可不落 toc，也绝不落一份会静默切错章的 toc**。
+ *
+ * @param cacheText **与 `.gxbook` 落盘内容逐字一致**的文本（偏移基准）
+ * @returns 是否真的写出了 `.toc`（写失败/不适用都返回 false，绝不抛）
+ */
+export async function writeTocIfPossible(
+  book: Book,
+  cacheText: string,
+  cachePath: string,
+): Promise<boolean> {
+  const toc = buildTocFromBook(book, cacheText);
+  if (!toc) {
+    console.info(`[UserBookService] 该书无法用字节偏移表达章目录（不写 .toc）：${book.title}`);
+    return false;
+  }
+  try {
+    await RNFS.writeFile(`${cachePath}.toc`, JSON.stringify(toc), 'utf8');
+    return true;
+  } catch {
+    // toc 写失败不影响正文缓存（下次启动退回全量读）
+    return false;
+  }
+}
+
+/**
  * 逐个处理超大书（串行 + 每项处理前让出 JS 线程）：优先读磁盘缓存（纯文本 +
  * .meta 信封），无缓存则完整解析并写纯文本缓存供下次直接读。
  * 每完成一本立即重注册进文本库——书架下次刷新即可见可读。
@@ -4470,6 +4928,17 @@ async function processOversizedBooks(tasks: OversizedTask[]): Promise<Book[]> {
       try {
         // eslint-disable-next-line no-await-in-loop
         if (await RNFS.exists(t.cachePath)) {
+          // ★★ 2026-10-13（B 档步骤 6 · 消费端）：**toc 快路径**。
+          //   有 `.gxbook.toc` ⇒ 只读它（~54KB）+ `.meta` 信封即可上架全部章节，
+          //   **不读 12.78MB 正文、不跑 `parseTxtBookChunked`**（真机 6275ms / 69%）。
+          //   任何一步不成立（toc 缺失/损坏/结构非法/`meta` 缺失）⇒ 落回下方
+          //   原「分片读正文 + 重建」路径，行为与优化前**逐字相同**。
+          //   ⚠ 形状锁：判据必须同时锁「快路径存在」与「正文仍可回退读」两个方向
+          //     （只锁前者 ⇒ 有人把回退删了测试仍绿）。
+          const shellBook = await buildShellBookFromCacheIfPossible(t, id);
+          if (shellBook) {
+            book = shellBook;
+          } else {
           // 【T23c→】纯文本缓存分片读：不再用无界 RNFS.readFile('utf8')——RNFS 原生
           // 只返回 base64、UTF-8 解码在 JS 层（FS.common.js:164），12.78MB 单次
           // 实测阻塞 JS 14.767s（不可中断，tap 被吞）。改 readLocalTextFileChunked
@@ -4496,6 +4965,29 @@ async function processOversizedBooks(tasks: OversizedTask[]): Promise<Book[]> {
             if (meta.title) rebuilt.title = meta.title;
             if (meta.author) rebuilt.author = meta.author;
             book = rebuilt;
+            // ★★ 2026-10-13（B 档步骤 8 · 修「存量书拿不到 toc」缺陷）：
+            //   本分支是**存量已导入大书**的必经之路（`.gxbook` 已存在 ⇒
+            //   走「读缓存 + 重建」，不会进下方完整解析路径）⇒ 修复前
+            //   `.toc` **永远不会被生成** ⇒ B 档收益对真实用户等于零。
+            //   真机证据：装 B 臂包后首启 Δ=9247ms（比老路更慢）且 `ls` 无 `.toc`。
+            //   代价：首次仍付一次重建成本（约 8s）；**之后每次冷启走快路径**。
+            //
+            //   ⚠ 偏移基准必须**逐字等于 `.gxbook` 落盘内容**，否则偏移随
+            //   CRLF 数线性漂移 ⇒ 静默显示错章（最坏的一类缺陷）。
+            //   `raw` 就是刚读出来的缓存本体，故基准天然一致 —— **但**：
+            //   步骤 4 加归一化之前写的旧缓存含 CRLF，而 `parseTxtBookChunked`
+            //   内部把 CRLF 归一化后才算 `byteStart/byteEnd` ⇒ 二者口径不一致。
+            //   `buildTocFromBook` 的行边界自检**未必**能兜住（偏移可能碰巧
+            //   落在 CRLF 版的行边界上）⇒ 这里**显式先判**，不依赖兜底。
+            if (tocOffsetBaseMatchesCache(raw)) {
+              // eslint-disable-next-line no-await-in-loop
+              await writeTocIfPossible(rebuilt, raw, t.cachePath);
+            } else {
+              console.info(
+                `[UserBookService] 缓存含 CR，偏移口径不一致（本次不写 .toc，回退全量读）：${t.name}`,
+              );
+            }
+          }
           }
         }
       } catch {
@@ -4514,8 +5006,28 @@ async function processOversizedBooks(tasks: OversizedTask[]): Promise<Book[]> {
             // 直写源文本（直接字节拷贝）比序列化数万章×百万段对象快数倍，
             // 且读路径只需 readFile 无需嵌套 JSON.parse。
             if (parsed.text) {
+              // ★★ 2026-10-12（B 档步骤 4）：落盘前**必须归一化**。
+              //   缺陷实测：`parseBookFile` 返回的 `text` 是**未归一化**原文
+              //   （`decodeTextBytes(...).text` / `converted.text` 原样透传），
+              //   而归一化只发生在 `parseTxtBook` / `parseTxtBookChunked`
+              //   **函数内部** ⇒ 旧实现直写 `parsed.text` ⇒ **`.gxbook` 缓存里
+              //   存的是 CRLF 文本**。
+              //   ⇒ 未来 `.gxbook.toc` 若按「归一化文本的字节偏移」记账，
+              //   偏移会随 CRLF 数线性漂移：10 万行 CRLF ⇒ 第 900 章偏 9 万字节
+              //   ⇒ **静默显示错章、不报错**（最坏的一类缺陷）。
+              //   口径与解析层四处 `replace(/\r\n?/g,'\n')` 逐字一致（由
+              //   `chapterToc.test.ts` 的形状判据锁定处数）。
+              //   ⚠ 行号会随本文件改动位移 ⇒ 只引函数名，不引行号。
+              const cacheText = normalizeForCache(parsed.text);
               // eslint-disable-next-line no-await-in-loop
-              await RNFS.writeFile(t.cachePath, parsed.text, 'utf8');
+              await RNFS.writeFile(t.cachePath, cacheText, 'utf8');
+              // ★★ 2026-10-13（B 档步骤 5）：同时落 `.gxbook.toc` —— 章目录
+              //   （字节区间 + segCount + charCount）。有了它，冷启**只需读几十 KB
+              //   的 toc**即可上架全部章节，**不必读 12.78MB 正文**（真机 6275ms）。
+              //   2026-10-13（步骤 8）：实现抽到 `writeTocIfPossible`，与
+              //   「缓存命中回退重建」分支共用一份（全有或全无语义两处必须一致）。
+              // eslint-disable-next-line no-await-in-loop
+              await writeTocIfPossible(book, cacheText, t.cachePath);
               // eslint-disable-next-line no-await-in-loop
               await RNFS.writeFile(
                 `${t.cachePath}.meta`,
@@ -4570,6 +5082,23 @@ async function processOversizedBooks(tasks: OversizedTask[]): Promise<Book[]> {
     }
   }
   return loaded;
+}
+
+/**
+ * 仅测试：直接驱动后台超大书队列（2026-10-13 B 档步骤 8）。
+ *
+ * ⚠ 同族惯例（`__registerOversizedFileForTests` / `__resetBuiltinLazyStateForTests`）：
+ *   **测试专用、生产不调用**。存在的理由不是「给判据开后门」，而是：
+ *   `processOversizedBooks` 的入队门槛是 `size > OVERSIZED_RAW_BYTES`(24MB)
+ *   ⇒ 走 `loadAndRegisterAll` 端到端必须造一本 24MB 的书（既有
+ *   `oversizedShelfNotification.test.ts` 单这一条就要 ~30s）。
+ *   而本步要验的是「缓存命中回退分支是否补落 `.toc`」，**与书有多大无关**
+ *   ⇒ 直接喂任务列表，把预算花在真行为上而不是造大文件上。
+ */
+export async function __processOversizedBooksForTests(
+  tasks: Array<{ path: string; name: string; sig: string; cachePath: string }>,
+): Promise<Book[]> {
+  return processOversizedBooks(tasks);
 }
 
 /**
@@ -5509,6 +6038,14 @@ export async function deleteBook(id: string): Promise<ServiceResult<null>> {
         if (await RNFS.exists(metaPath)) {
           await RNFS.unlink(metaPath);
         }
+        // ★2026-10-13（B 档步骤 6）：`.gxbook.toc` 章目录一并清理。
+        //   ⚠ 漏清的后果不是「占盘」而是**更坏**：书重新导入同名文件时
+        //   （`stableBookIdFromPath` 对同名文件给同一 id），会命中**上一版的
+      //   旧 toc** ⇒ 目录态快路径直接采用它 ⇒ 偏移指向旧版正文 ⇒ 静默错章。
+        const tocPath = `${oversizedFiles.cachePath}.toc`;
+        if (await RNFS.exists(tocPath)) {
+          await RNFS.unlink(tocPath);
+        }
         // 旧版 .gxcache（T23c 前嵌套 Book JSON）遗留清理，避免占盘
         const legacyCache = `${oversizedFiles.path}${OVERSIZED_CACHE_LEGACY_SUFFIX}`;
         if (await RNFS.exists(legacyCache)) {
@@ -5680,8 +6217,13 @@ async function runChapterAssembleToFull(
   chapterId: string,
   ctx?: AsmExecContext,
 ): Promise<boolean> {
-  const spec = getBuiltinSpec(bookId);
-  if (!spec || hiddenBuiltins.has(bookId)) {
+  // ★2026-10-13（B 档步骤 7 · 调度器主路径泛化）：本函数此前对用户书
+  //   **无条件早退**（`getBuiltinSpec` 对用户书恒 null）⇒ 邻章永远装不上，
+  //   目录态用户书只能一章一章跳、**不能连续滚动阅读**。
+  //   早退条件与顺序按书籍类型分流，**内置书分支逐字未变**。
+  const isUser = TextLibraryService.isUserBook(bookId);
+  const spec = isUser ? null : getBuiltinSpec(bookId);
+  if (hiddenBuiltins.has(bookId) || (!isUser && !spec)) {
     return false;
   }
   const bookRes = TextLibraryService.getBook(bookId);
@@ -5725,22 +6267,53 @@ async function runChapterAssembleToFull(
       // **不完整**内容（搜到的章与上屏内容不一致）；且本分支 `return repaired`
       // 会跳过函数末段就绪门（`if (full)`）的章级 FTS 写入，
       // 此处是「补全后重新入索引」的唯一写入点。真幂等 upsert 属 #16 独立范围。
-      writeFtsForChapter(spec, chapter);
+      // ★用户书跳过：`writeFtsForChapter` 需要 `BuiltinBookSpec`（只有 `.id` 可用），
+      //   且用户书走 `fillBuiltinChapterNow` 兜底时**本来就不写**章级 FTS
+      //   （超 24MB 恒超 `FTS_MAX_BOOK_CHARS` 闸门，整书索引不可达）⇒ 两路径同口径。
+      if (!isUser) {
+        writeFtsForChapter(spec as BuiltinBookSpec, chapter);
+      }
     }
     return repaired;
   }
-  const meta = await loadBuiltinMeta(spec);
-  if (!meta) {
-    return false;
-  }
-  const range = meta.chapters.find((c) => c.id === chapterId);
-  if (!range) {
-    return false;
+  // 章字节区间来源：内置书 = `books/<id>.meta.json`；用户书 = `<cachePath>.toc`
+  //   （与 `fillBuiltinChapterNow` 的分流同构，读侧闸门分别是
+  //   `loadBuiltinMeta` / `loadUserBookToc`，**都在读盘即判**、不读正文）。
+  let range: { s: number; e: number } | null = null;
+  /** 用户书切片器（内置书为 undefined ⇒ 流式步走 `readBuiltinChapterSlice`） */
+  let userReadSlice: BuiltinShell['readSlice'];
+  if (isUser) {
+    const files = oversizedBookFiles.get(bookId);
+    if (!files) {
+      return false; // 非超大书路径注册的用户书（仍全量注册）⇒ 维持原行为
+    }
+    const toc = await loadUserBookToc(files.cachePath, bookId, 0);
+    if (!toc) {
+      return false;
+    }
+    const hit = toc.chapters.find((c) => c.id === chapterId);
+    if (!hit) {
+      return false;
+    }
+    range = { s: hit.start, e: hit.end };
+    userReadSlice = (s, e) => readFileSliceUtf8Safe(files.cachePath, s, e, bookId);
+  } else {
+    const meta = await loadBuiltinMeta(spec as BuiltinBookSpec);
+    if (!meta) {
+      return false;
+    }
+    const hit = meta.chapters.find((c) => c.id === chapterId);
+    if (!hit) {
+      return false;
+    }
+    range = { s: hit.s, e: hit.e };
   }
   const shell: BuiltinShell = registered?.shell ?? {
     chapter,
     bodyLines: [],
     range: { s: range.s, e: range.e },
+    // ★仅用户书壳带切片器；内置书壳逐字不变（无此字段）
+    ...(userReadSlice ? { readSlice: userReadSlice } : {}),
   };
   if (!registered) {
     // 本壳的章对象就是书体内对象（上方已查），故必不为陈旧壳（返回非 null）
@@ -5759,7 +6332,10 @@ async function runChapterAssembleToFull(
     steps += 1;
     // eslint-disable-next-line no-await-in-loop
     const step = await assembleChapterStreaming(shell, {
-      spec,
+      // ★用户书 `spec` 为 null：流式步在壳带 `readSlice` 时**不会**碰它
+      //   （`runChapterStreamingStep` 只在壳无切片器时才调`readBuiltinChapterSlice`）。
+      //   类型上仍是必填 ⇒ 此处给内置书 spec（用户书路径不会被消费）。
+      spec: spec as BuiltinBookSpec,
       readChunkBytes: tier.readChunkBytes,
       timeBudgetMs: tier.timeBudgetMs,
     });
@@ -5822,8 +6398,9 @@ async function runChapterAssembleToFull(
   //   保证「搜到的章必定已装配完整」；写失败静默降级，绝不影响装配主链路。
   //   部分就绪（Partial，游标未 done）不写：半章的 FTS 行会让搜索命中
   //   尚未上屏的内容（且与后续整章写入重复）。
-  if (full) {
-    writeFtsForReadyChapter(spec, shell);
+  if (full && !isUser) {
+    // ★用户书不写章级 FTS（同 4a：与 `fillBuiltinChapterNow` 兜底路径同口径）
+    writeFtsForReadyChapter(spec as BuiltinBookSpec, shell);
   }
   // 合并 + 通知：复用填充链路语义（LRU 刷新 + 三级缓存重建 + 订阅者重算）
   const hydrate = (

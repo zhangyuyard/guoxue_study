@@ -8,7 +8,7 @@
  * 5. ensureBookLoaded 单本水合：文件解析 → hydrate，正文段落就位
  * 6. FTS 后台索引队列：逐书 upsert（幂等），不依赖内存全量注册
  */
-jest.mock('react-native-quick-sqlite', () => {
+jest.mock('@/services/sqliteClient', () => {
   const mockState = {
     userBooks: [] as Array<Record<string, unknown>>,
     /** 已执行的 DELETE FROM user_books 参数记录 */
@@ -188,7 +188,7 @@ jest.mock('react-native-fs', () => {
 });
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { __builtinResilienceState } = require('react-native-quick-sqlite');
+const { __builtinResilienceState } = require('@/services/sqliteClient');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { __rnfsState } = require('react-native-fs');
 import {

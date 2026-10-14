@@ -22,7 +22,7 @@
  * `jest.resetModules()` + 重新 require 取全新模块实例，用例之间互不污染
  * （否则某个不可用用例会把后续用例一并毒化）。
  */
-jest.mock("react-native-quick-sqlite", () => {
+jest.mock("@/services/sqliteClient", () => {
   const mockState = {
     /** FTS5 是否编译进 SQLite（false = 真机未注入 quickSqliteFlags 的现状） */
     ftsCompiled: false,
@@ -94,7 +94,7 @@ function loadFreshStorage(ftsCompiled: boolean): {
 } {
   jest.resetModules();
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const sqlite = require("react-native-quick-sqlite") as {
+  const sqlite = require("@/services/sqliteClient") as {
     __ftsDegradeState: FtsDegradeState;
   };
   sqlite.__ftsDegradeState.ftsCompiled = ftsCompiled;
