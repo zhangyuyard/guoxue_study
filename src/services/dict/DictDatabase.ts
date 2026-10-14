@@ -9,7 +9,7 @@
  */
 import { Platform } from 'react-native';
 import RNFS from 'react-native-fs';
-import { open } from 'react-native-quick-sqlite';
+import { open } from '@/services/sqliteClient';
 import type { DictEntry, DictEntryExtra, ServiceResult } from '@/types';
 import type { DictMeta } from '@/types/dict';
 

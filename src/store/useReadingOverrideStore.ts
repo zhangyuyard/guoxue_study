@@ -9,7 +9,7 @@
  */
 import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
-import { MMKV } from 'react-native-mmkv';
+import { createMMKV } from 'react-native-mmkv';
 
 import { genId, nowISO } from '@/services/StorageService';
 
@@ -28,7 +28,7 @@ export interface ReadingOverride {
 }
 
 /** MMKV 实例（加密 KV 存储） */
-const storage = new MMKV();
+const storage = createMMKV();
 
 /** zustand persist 所需的 storage adapter（与 useSettingsStore 同款） */
 const mmkvStorage: StateStorage = {
@@ -39,7 +39,7 @@ const mmkvStorage: StateStorage = {
     return storage.getString(name) ?? null;
   },
   removeItem: (name) => {
-    storage.delete(name);
+    storage.remove(name);
   },
 };
 

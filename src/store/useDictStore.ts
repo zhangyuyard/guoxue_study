@@ -8,15 +8,15 @@
  */
 import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
-import { MMKV } from 'react-native-mmkv';
+import { createMMKV } from 'react-native-mmkv';
 import type { DictMeta, ImportStatus, PolyphoneSource } from '@/types/dict';
 
-const storage = new MMKV();
+const storage = createMMKV();
 
 const mmkvStorage: StateStorage = {
   setItem: (name, value) => storage.set(name, value),
   getItem: (name) => storage.getString(name) ?? null,
-  removeItem: (name) => storage.delete(name),
+  removeItem: (name) => storage.remove(name),
 };
 
 export interface DictImportProgress {

@@ -31,7 +31,7 @@ jest.mock('@/services/dict/DictFileService', () => ({
   },
 }));
 
-jest.mock('react-native-quick-sqlite', () => {
+jest.mock('@/services/sqliteClient', () => {
   const state = {
     native: { dicts: [], entries: [] } as MockTable,
     user: { dicts: [], entries: [] } as MockTable,
@@ -117,7 +117,7 @@ jest.mock('react-native-quick-sqlite', () => {
   };
 });
 
-const sqliteMock = jest.requireMock('react-native-quick-sqlite') as {
+const sqliteMock = jest.requireMock('@/services/sqliteClient') as {
   __importState: {
     native: MockTable;
     user: MockTable;

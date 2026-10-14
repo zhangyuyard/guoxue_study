@@ -11,7 +11,7 @@
  */
 import { Platform } from 'react-native';
 import RNFS from 'react-native-fs';
-import { open } from 'react-native-quick-sqlite';
+import { open } from '@/services/sqliteClient';
 import { ConversionService } from '@/services/ConversionService';
 import type {
   CanonProvider,

@@ -43,6 +43,7 @@ import {
   resolveAdaptiveDowngrade,
   resolveTierScore,
   runMicroProbe,
+  probeSink,
   setOverride,
   __setTierForTests,
   type DeviceTier,
@@ -282,7 +283,12 @@ describe('⑧ 探测端到端：机型表命中立即生效；无结论回落 mi
     const second = await probeAndPersist();
     expect(second.capturedAt).toBe(first.capturedAt);
     const probeMs = runMicroProbe();
-    expect(probeMs === null || (Number.isFinite(probeMs) && probeMs > 0)).toBe(true);
+    // ★ 2026-10-09 去 flake：原断言为 `probeMs > 0`，但 `runProbeRound` 返回
+    //   `Date.now() - t0`（整数毫秒）——整块在亚毫秒内跑完时**合法返回 0**
+    //   ⇒ 同一份代码既可红又可绿（实测：全量套一次红、复跑一次绿），无判据价值。
+    //   改为①语义判据（有限值或 null）+②**非计时**判据（探测确实执行了计算）。
+    expect(probeMs === null || (Number.isFinite(probeMs) && probeMs >= 0)).toBe(true);
+    expect(probeSink).toBeGreaterThan(0);
   });
 
   test('档位探测只读内置能力：模块不引入任何第三方依赖（源码断言）', () => {

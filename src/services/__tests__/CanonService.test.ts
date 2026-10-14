@@ -41,7 +41,7 @@ jest.mock('react-native-fs', () => ({
   unlink: jest.fn(async () => undefined),
 }));
 
-jest.mock('react-native-quick-sqlite', () => ({
+jest.mock('@/services/sqliteClient', () => ({
   open: jest.fn(() => ({
     execute: (sql: string, params: (string | number)[] = []) => {
       // 回归守卫：SQL 占位符 ? 数量必须与参数数一致，否则 quick-sqlite 会抛

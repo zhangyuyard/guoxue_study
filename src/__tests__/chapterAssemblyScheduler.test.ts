@@ -686,19 +686,30 @@ describe('⑦ 流式装配状态机（carry 跨批 + 非空行=段落 + 行级�
     const asmBody = src.slice(
       src.indexOf('export async function assembleChapterToFull('),
     );
-    const writePos = asmBody.indexOf('writeFtsForReadyChapter(spec, shell);');
-    const guardPos = asmBody.indexOf('if (full) {');
+    // ★2026-10-13（B 档步骤 7）：断言改为**按「写法会变」写正则**，不再锁死字面量
+    //   （旧版锁 `writeFtsForReadyChapter(spec, shell);` + `if (full) {`，通道泛化
+    //   后写作`spec as BuiltinBookSpec` / `if (full && !isUser)` ⇒ 锚点过期假红）。
+    //   ★但**强度不许降低**：`full` 仍必须是**必要条件**（正则不接受 `||`/`!full`）。
+    const writeMatch = /writeFtsForReadyChapter\([^)]*\);/.exec(asmBody);
+    expect(writeMatch).not.toBeNull();
+    const writePos = writeMatch?.index ?? -1;
+    // 守卫：`if (full)` 或 `if (full && …)` —— `full` 必居首位且不被 `||` 放宽
+    const guardMatch = /if \(full(?: && [^)]*)?\) \{/.exec(asmBody);
+    expect(guardMatch).not.toBeNull();
+    const guardPos = guardMatch?.index ?? -1;
     const fullPos = asmBody.indexOf('const full = !failed && cursorSettled;');
     expect(fullPos).toBeGreaterThan(-1);
     expect(guardPos).toBeGreaterThan(fullPos); // 守卫在 full 判定之后
     expect(writePos).toBeGreaterThan(guardPos); // 写入在守卫之内
     // 写入语句必须紧贴守卫（无中间分支/无其他条件绕过）
-    expect(asmBody.slice(guardPos, writePos + 40)).toMatch(
-      /^if \(full\) \{\s*\n\s*writeFtsForReadyChapter\(spec, shell\);/,
+    expect(asmBody.slice(guardPos, writePos + writeMatch[0].length)).toMatch(
+      /^if \(full(?: && [^)]*)?\) \{\s*\n\s*\/\/[^\n]*\n\s*writeFtsForReadyChapter\(/,
     );
-    // 未就绪分支不得写 FTS：`if (full)` 之外再无第二处调用
+    // 未就绪分支不得写 FTS：守卫之外再无第二处调用
     const callCount = (asmBody.match(/writeFtsForReadyChapter\(/g) ?? []).length;
     expect(callCount).toBe(1);
+    // ★反向对照：守卫必须真的含 `full`（否则上面正则可能匹到无关的 `if (fullXxx)`）
+    expect(guardMatch?.[0]).toMatch(/^if \(full(?: &|$)/);
   });
 
   test('宿主适配器登记 + 聚合导出登记（装配唯一入口）', () => {

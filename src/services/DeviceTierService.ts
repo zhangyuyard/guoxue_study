@@ -17,7 +17,7 @@
  *    二者不引入漂移；同时满足验收「ALT-AL10 首会话即 tier=low」）。
  */
 import { Dimensions, PixelRatio, Platform } from 'react-native';
-import { MMKV } from 'react-native-mmkv';
+import { createMMKV } from 'react-native-mmkv';
 
 // ============ 公开类型（与架构 §2.1 签名级一致） ============
 
@@ -358,7 +358,7 @@ const MODULE_TIER_FALLBACK: DeviceTierState = {
   capturedAt: 0,
 };
 
-let storage: MMKV | null = null;
+let storage: ReturnType<typeof createMMKV> | null = null;
 let storageInitialized = false;
 /** 会话内生效档位（冻结：只由确定性判定或探测落盘后的下个会话变更） */
 let sessionState: DeviceTierState = { ...MODULE_TIER_FALLBACK };
@@ -381,13 +381,13 @@ function isSource(value: unknown): value is DeviceTierSource {
   );
 }
 
-function getStorage(): MMKV | null {
+function getStorage(): ReturnType<typeof createMMKV> | null {
   if (storageInitialized) {
     return storage;
   }
   storageInitialized = true;
   try {
-    storage = new MMKV();
+    storage = createMMKV();
   } catch {
     storage = null; // MMKV 不可用：纯内存档位，不影响启动
   }
@@ -725,7 +725,7 @@ export function __setTierForTests(tier: DeviceTier | null): void {
     sessionState = { ...MODULE_TIER_FALLBACK };
     const kv = getStorage();
     try {
-      kv?.delete(DEVICE_TIER_KEY);
+      kv?.remove(DEVICE_TIER_KEY);
     } catch {
       // 测试态清理失败可忽略
     }

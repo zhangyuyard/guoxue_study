@@ -5,6 +5,12 @@
 > 本文档评估这四层迁移的真实代价、步骤、依赖矩阵与回滚方案，供评审决策。  
 > 生成日期：2026-09-29。基线：`12237fb`（兜底分支 `pre-rn-upgrade-0.74` 已建）。
 
+> ⚠ **本文档已部分过时（2026-09-30 校正）**：sqlite 迁移目标已从评估时的 `nitro-sqlite` 改为
+> **`@op-engineering/op-sqlite` 15.1.6 + 适配层**（`src/services/sqliteClient.ts`，把 op-sqlite 的
+> 异步 `executeSync` 包成旧同步 `{ rows: { _array } }` 契约，业务 SQL 与 ~90 处调用零改写）。
+> 另 MMKV V4 实为 **NitroModules**（非 TurboModule），需 `react-native-nitro-modules` 运行时。
+> **现行落地计划以 `docs/rn-upgrade-0.83-execution.md` 为准。**
+
 ---
 
 ## 1. 五种模式的落地边界（先厘清「哪些需要迁移」）
@@ -23,7 +29,7 @@
 仿真翻页 → @shopify/react-native-skia ≥2.6.9
          → Skia 要求 RN ≥0.78 + React 19 + Reanimated ≥3.19.1
          → RN 0.78+ 强制新架构（0.82 起旧架构永久禁用，无法回退）
-         → 新架构迫使 MMKV V2→V4、quick-sqlite → nitro 方案
+         → 新架构迫使 MMKV V2→V4、quick-sqlite → op-sqlite 方案
 ```
 
 ---
@@ -35,7 +41,7 @@
 | **① RN**           | 0.74.7       | 0.83.x            | 跨 9 个小版本；旧架构强制关                                                         | gradle/kotlin/ndk/AGP 全升级 |
 | **② React**        | 18.2.0       | 19.x              | 主版本                                                                     | 全依赖 peer 重验               |
 | **③ MMKV**         | ^2.12.0 (V2) | V4（Nitro Module）  | API 破坏（`new MMKV()` → `createMMKV()` + 新增 `react-native-nitro-modules`） | 持久化层重写 + 数据兼容             |
-| **④ quick-sqlite** | ^8.2.7       | nitro-sqlite 或新版本 | 自定义 `quickSqliteFlags`（FTS5）需重验                                         | FTS 全文搜索回归                |
+| **④ quick-sqlite** | ^8.2.7       | @op-engineering/op-sqlite 15.1.6 | 经 `src/services/sqliteClient.ts` 适配层桥接；FTS5 由 op-sqlite 预编译自带，无需 `quickSqliteFlags` | FTS 全文搜索回归（路径锚定需实机验） |
 
 **叠加效应**：四层**互相阻塞**——MMKV 不升级 RN 升不上去；RN 不升 Skia 装不了；Skia 装不了仿真做不了。任何一层卡在 native 编译错误或真机白屏，整个迁移停滞。
 
@@ -66,7 +72,7 @@
 | @types/react                   | ^18.2.0 | ^19          | 类型破坏性变更                   |
 | @react-native/metro-config     | ^0.74.0 | 随 RN         | —                         |
 | react-native-mmkv              | ^2.12.0 | ^4.x         | **API 破坏**，+nitro-modules |
-| react-native-quick-sqlite      | ^8.2.7  | nitro-sqlite | **FTS5 自定义编译重验**          |
+| @op-engineering/op-sqlite      | —       | 15.1.6       | 经适配层桥接；FTS5 预编译自带        |
 | react-native-reanimated        | 3.10.1  | ≥3.19.1      | worklets 插件配置             |
 | react-native-gesture-handler   | 2.16.2  | ≥2.30        | —                         |
 | @shopify/react-native-skia     | 无       | ≥2.6.9       | **新增重量级 native 依赖**       |
@@ -78,7 +84,7 @@
 **待查证的三个原生库新架构兼容性**（迁移前必须逐个确认，这是最大不确定源）：
 
 1. `react-native-mmkv` V4 对现有 persist 数据的读取兼容（V2 → V4 数据是否可无缝读）；
-2. `react-native-quick-sqlite` 的 FTS5 自定义编译（`quickSqliteFlags`）在新架构/新库下的等价方案；
+2. `@op-engineering/op-sqlite` 的 FTS5（预编译自带）与原 quick-sqlite 自定义编译的等价性，且 `location` 路径需锚定到 `RNFS.DocumentDirectoryPath`（详见执行文档「路径锚定」）；
 3. `@notifee/react-native` 的新架构版本。
 
 ---
@@ -99,7 +105,7 @@
 - [ ] 用 `@react-native-community/cli` 的 upgrade 或 `npx @rnx-kit/align-deps` 对齐版本
 - [ ] 重生成 android/ios 模板（对比 0.83 官方模板 diff）
 - [ ] gradle/kotlin/AGP/compileSdk 升级到 0.83 要求
-- [ ] `newArchEnabled` 从 false → true（0.82+ 强制）
+- [ ] `newArchEnabled` 从 false → true（0.82+ 强制；iOS `Podfile` 同步 `:new_arch_enabled => true`）
 - [ ] **验证**：debug APK 构建成功 + 真机冷启动无白屏
 
 ### 阶段 2：React 18 → 19 + 依赖 peer 对齐
@@ -114,10 +120,11 @@
 - [ ] zustand persist adapter 适配
 - [ ] **验证**：旧数据（阅读进度/设置/划线）升级后仍可读（**数据兼容是核心验收项**）
 
-### 阶段 4：quick-sqlite → nitro-sqlite（FTS 回归，高风险）
+### 阶段 4：quick-sqlite → op-sqlite（FTS 回归，高风险）
 
-- [ ] 迁移 SQLite 绑定 + FTS5 编译 flag 等价方案
-- [ ] **验证**：全文搜索（FTS）功能回归
+- [ ] 新增 `src/services/sqliteClient.ts` 适配层（op-sqlite `executeSync` → 旧 `{ rows: { _array } }` 同步契约）
+- [ ] 5 生产文件 import 改走适配层；`location` 锚定 `RNFS.DocumentDirectoryPath`（双平台对齐旧数据路径）
+- [ ] **验证**：全文搜索（FTS）功能回归 + 旧库数据可读
 
 ### 阶段 5：引入 react-native-reader + Skia（最终目标）
 
@@ -133,7 +140,7 @@
 - **兜底分支**：`pre-rn-upgrade-0.74`（=`12237fb`）已建，任何阶段失败可 `git reset --hard` 回到。
 - **每阶段独立提交**：禁止把多层改动压进一个 commit，保证可 `git revert` 单层。
 - **产物备份**：阶段 0 记录基线 APK sha256，迁移后对比包体/启动耗时。
-- **数据兜底**：MMKV/quick-sqlite 迁移前导出持久化数据快照，验证升级后数据可读才放行。
+- **数据兜底**：MMKV/sqlite 迁移前导出持久化数据快照，验证升级后数据可读才放行。
 
 ---
 
@@ -142,7 +149,7 @@
 **最大不确定源**（不是工具链，是原生库兼容性）：
 
 1. MMKV V2→V4 的**数据迁移**是否无损（阅读进度/设置/划线全依赖它）；
-2. quick-sqlite 的 **FTS5 自定义编译**在新方案下的等价性（全文搜索是核心功能）；
+2. op-sqlite 的 **FTS5（预编译自带）** 与原 quick-sqlite 自定义编译的等价性（全文搜索是核心功能），且 `location` 路径锚定需实机验证；
 3. 新架构下自绘组件（LineRow/PinyinText）的渲染行为是否变化（历史所有「像素级真机验证」结论作废，需重测）。
 
 **建议的降级路径（若不想冒四层迁移的险）**：
@@ -156,5 +163,5 @@
 ## 8. 决策点（待确认）
 
 - [ ] 是否接受「仿真」模式延后（其余四模式零迁移可落地）？
-- [x] 若坚持做仿真，是否接受阶段 3/4 的数据迁移风险（MMKV/quick-sqlite 是核心持久化层）？
+- [x] 若坚持做仿真，是否接受阶段 3/4 的数据迁移风险（MMKV/sqlite 是核心持久化层）？
 - [ ] 迁移是否只做 Android（本项目以 Android 真机为主），iOS 暂缓（可省 CocoaPods/新架构 iOS 验证）？

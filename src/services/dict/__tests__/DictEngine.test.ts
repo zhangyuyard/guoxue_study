@@ -15,7 +15,7 @@ interface MockTable {
   entries: Row[];
 }
 
-jest.mock('react-native-quick-sqlite', () => {
+jest.mock('@/services/sqliteClient', () => {
   const state: Record<'native' | 'user', { dicts: Record<string, unknown>[]; entries: Record<string, unknown>[] }> = {
     native: { dicts: [], entries: [] },
     user: { dicts: [], entries: [] },
@@ -124,7 +124,7 @@ jest.mock('react-native-quick-sqlite', () => {
 });
 
 /** quick-sqlite mock 的内存表（经 __dictState 暴露） */
-const sqliteMock = jest.requireMock('react-native-quick-sqlite') as {
+const sqliteMock = jest.requireMock('@/services/sqliteClient') as {
   __dictState: Record<'native' | 'user', MockTable>;
 };
 const tables = sqliteMock.__dictState;

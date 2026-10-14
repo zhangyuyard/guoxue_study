@@ -5,18 +5,18 @@
  */
 import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
-import { MMKV } from 'react-native-mmkv';
+import { createMMKV } from 'react-native-mmkv';
 import type { PinyinAnnotation } from '@/types';
 
 import { PinyinService } from '@/services/PinyinService';
 import { useSettingsStore } from '@/store/useSettingsStore';
 
-const storage = new MMKV();
+const storage = createMMKV();
 
 const mmkvStorage: StateStorage = {
   setItem: (name, value) => storage.set(name, value),
   getItem: (name) => storage.getString(name) ?? null,
-  removeItem: (name) => storage.delete(name),
+  removeItem: (name) => storage.remove(name),
 };
 
 /** 持久化字段 */

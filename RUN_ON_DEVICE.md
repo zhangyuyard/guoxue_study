@@ -190,7 +190,7 @@ npm ls react-native-reanimated  # 应显示 3.10.1
 | 信息 | 值 |
 |------|-----|
 | 项目路径 | `/Users/wxzhangyu/WorkBuddy/2026-08-26-10-31-18/guoxue_study_app` |
-| 技术栈 | React Native 0.74.7 + TypeScript 5.4 |
+| 技术栈 | React Native 0.83.0 + React 19.2.0 + TypeScript 5.4（新架构 newArchEnabled=true） |
 | Bundle ID | `com.guoxue.studyapp` |
 | 源码文件 | 66 个 |
-| 主要依赖 | zustand, pinyin-pro, opencc-js, react-native-quick-sqlite, react-native-mmkv |
+| 主要依赖 | zustand, pinyin-pro, opencc-js, @op-engineering/op-sqlite（FTS5 TurboModule，取代 quick-sqlite）, react-native-mmkv（V4 NitroModules，取代 V2）, react-native-reanimated ≥3.19 |

@@ -14,6 +14,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type GestureResponderEvent,
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
@@ -169,10 +170,14 @@ interface CharCellProps {
   selectionBg: string;
   /** 该字格是否处于活动选区内 */
   selected: boolean;
-  onHighlightPress?: (h: Highlight) => void;
+  /** 点按命中划线回调（第二参 = 触点 pageX，供上层判「是否落在翻屏分区」） */
+  onHighlightPress?: (h: Highlight, pageX: number) => void;
   onLongPressChar?: (index: number) => void;
-  /** 点按汉字回调（自由选区扩展用；提供时优先于划线点击） */
-  onPressChar?: (index: number) => void;
+  /**
+   * 点按汉字回调（自由选区扩展用；提供时优先于划线点击）。
+   * 第二参 = 触点 pageX：★ 上层必须用它判「点字 vs 翻屏」（纵向不做几何命中）。
+   */
+  onPressChar?: (index: number, pageX: number) => void;
   /** 点击多音字拼音回调（弹出全部读音浮窗），仅多音字生效 */
   onPressPinyin?: (cell: CharCellData) => void;
   /** 点击通假字「通」标识回调（弹出通假字浮窗），仅通假字生效 */
@@ -209,9 +214,9 @@ const CharCell = React.memo(function CharCell({
   // 后续真选区落地时由「选区模式开关」显式接管，而非靠本优先级顺位。
   const pressChar =
     highlight && onHighlightPress
-      ? () => onHighlightPress(highlight)
+      ? (e: GestureResponderEvent) => onHighlightPress(highlight, e.nativeEvent.pageX)
       : onPressChar
-        ? () => onPressChar(cell.index)
+        ? (e: GestureResponderEvent) => onPressChar(cell.index, e.nativeEvent.pageX)
         : undefined;
   // 仅多音字拼音响应点击（弹出全部读音），不占用汉字的划线点击与长按手势
   const pressPinyin =
@@ -237,6 +242,8 @@ const CharCell = React.memo(function CharCell({
         style={[styles.pinyin, { fontSize: pinyinFontSize }, cell.isPolyphone ? { color: accentColor } : null]}
         numberOfLines={1}
         ellipsizeMode="clip"
+        adjustsFontSizeToFit
+        minimumFontScale={0.6}
         allowFontScaling={false}
         onPress={pressPinyin}
       >
@@ -542,15 +549,16 @@ export interface PinyinTextProps {
    * 点按扩展后随 selection state 更新实时跟随；菜单关闭后传入 undefined 即消失。
    */
   selectionRange?: [number, number];
-  /** 点击命中划线回调 */
-  onPressHighlight?: (h: Highlight) => void;
+  /** 点击命中划线回调（第二参 = 触点 pageX，透传自 CharCell） */
+  onPressHighlight?: (h: Highlight, pageX: number) => void;
   /** 长按汉字回调（参数为码点索引，供上层扩展选词） */
   onLongPressChar?: (index: number) => void;
   /**
    * 点按汉字回调（码点索引，供自由选区「点按扩展」；提供时优先于划线点击）。
    * 仅覆盖汉字格，非汉字 run（标点/空白）不响应点按扩展。
+   * 第二参 = 触点 pageX（翻屏分区判据的唯一输入）。
    */
-  onPressChar?: (index: number) => void;
+  onPressChar?: (index: number, pageX: number) => void;
   /** 当前篇目 ID（Chapter.id），用于语境化通假/读音判定；缺省则降级 */
   workId?: string;
   /** 当前书籍 ID（Book.id），作为通配兜底层；缺省仅用 workId + 全局 '*' */
