@@ -36,11 +36,11 @@ export interface LineRowProps {
   /** 当前篇目 ID（语境化通假/读音判定） */
   workId?: string;
   bookId?: string;
-  /** 点按汉字回调（段内码点索引，供上层查字/选区扩展） */
-  onPressChar?: (index: number) => void;
+  /** 点按汉字回调（段内码点索引，供上层查字/选区扩展）；pageX = 触点横坐标（翻屏分区判据） */
+  onPressChar?: (index: number, pageX: number) => void;
   onLongPressChar?: (index: number) => void;
-  /** 点按命中划线回调（透传 PinyinText.onPressHighlight，R2d-2 查看面板入口） */
-  onPressHighlight?: (h: Highlight) => void;
+  /** 点按命中划线回调（透传 PinyinText.onPressHighlight，R2d-2 查看面板入口）；pageX 同上 */
+  onPressHighlight?: (h: Highlight, pageX: number) => void;
 }
 
 /** INV-G1 运行期探针：行高 ≠ rowHeight 时计数（真机验收须恒 0） */

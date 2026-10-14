@@ -46,14 +46,23 @@ describe('① 两渲染模式的 per-char 点按支持', () => {
     // 真机实证反转——旧序让 renderItem 恒传的查词回调抢死划线点击（点划线字
     // 永远进查词页，划线不可点）。新序：划线 > 查词；真选区将来由显式选区
     // 模式接管，不再靠顺位。否定对照：旧序模式不得再现。
-    expect(pinyinText).toMatch(/onPressChar\?: \(index: number\) => void;/);
+    // 契约变更留痕（2026-10-08 滚动翻屏修复，本批）：`onPressChar` /
+    // `onHighlightPress` 增加第二参 `pageX` —— 点字落在左右 30% 时必须能判出
+    // 「这是翻屏不是查词」（纵向不做几何命中，见 tapRegions.ts 文件头 ②）。
+    // 夹具随之收紧：不仅要求签名含 pageX，还要求**调用点确实把 pageX 传上去**
+    // （只写签名不传值 = 上层恒收 undefined ⇒ 静默退化为「永不翻屏」，故加否定对照）。
+    expect(pinyinText).toMatch(/onPressChar\?: \(index: number, pageX: number\) => void;/);
     expect(pinyinText).toMatch(
       /const pressChar =\s*\n\s*highlight && onHighlightPress/,
     );
-    expect(pinyinText).toMatch(/\?\s*\(\) => onHighlightPress\(highlight\)/);
-    expect(pinyinText).toMatch(/onPressChar\(cell\.index\)/);
+    expect(pinyinText).toMatch(
+      /\?\s*\(e: GestureResponderEvent\) => onHighlightPress\(highlight, e\.nativeEvent\.pageX\)/,
+    );
+    expect(pinyinText).toMatch(/onPressChar\(cell\.index, e\.nativeEvent\.pageX\)/);
     // 否定对照（变异自证）：旧优先级模式回潮即红
     expect(pinyinText).not.toMatch(/const pressChar = onPressChar/);
+    // 否定对照（变异自证）：漏传 pageX 的旧调用形（`onPressChar(cell.index)`）即红
+    expect(pinyinText).not.toMatch(/onPressChar\(cell\.index\)/);
   });
 
   test('HighlightText：提供 onPressChar 时逐字渲染并按码点索引上报', () => {

@@ -24,6 +24,8 @@ import {
 
 import LineRow from '@/components/reader/LineRow';
 import { ReaderCore } from '@/reader/core';
+import CharActionMenu from '@/components/reader/CharActionMenu';
+import ChapterTocSheet from '@/components/reader/ChapterTocSheet';
 import HighlightActionSheet from '@/components/reader/HighlightActionSheet';
 import { TextLibraryService } from '@/services/TextLibraryService';
 import { StorageService } from '@/services/StorageService';
@@ -31,6 +33,7 @@ import { UserBookService } from '@/services/UserBookService';
 import { useReaderStore } from '@/store/useReaderStore';
 import { useNoteStore } from '@/store/useNoteStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
+import { useDictStore } from '@/store/useDictStore';
 import { getColors, type ThemeColors } from '@/theme';
 import { cellAdvanceFor, charGapFor, layoutChapter, resolveGeometry, unifiedPinyinFontSizeFor, type Line } from '@/reader/geometry';
 import { resolveContentLayout } from '@/reader/contentLayout';
@@ -40,11 +43,13 @@ import {
   orderedRenderChapters,
 } from '@/reader/stitch';
 import { buildSegmentHighlight } from '@/reader/highlightFactory';
-import { annotate, maxPinyinLength } from '@/services/PinyinService';
-import { currentPolyphoneSalt } from '@/hooks/usePinyin';
-import { prewarmPinyinCache } from '@/utils/pinyin';
+import { buildTocItems } from '@/reader/toc';
+import { currentPolyphoneSalt, polyphoneSaltOf } from '@/hooks/usePinyin';
+import { annotateText, prewarmPinyinCache } from '@/utils/pinyin';
+import { createChapterMaxPinyinLenStore } from '@/reader/pinyinLenCache';
 import {
   createChapterWindow,
+  retainIdsForViewport,
   windowBegin,
   windowFail,
   windowGet,
@@ -54,6 +59,7 @@ import {
   windowRecenter,
   type ChapterWindow,
 } from '@/reader/chapterWindow';
+import { indexOfLineKey, lineKeyOf } from '@/reader/core/modes/scrollAnchor';
 import type { ReaderRouteParams } from '@/navigation/types';
 import type { Chapter, Highlight, HighlightColor, TextSegment } from '@/types';
 
@@ -103,6 +109,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const pinyinOn = pinyinMode !== 'off';
+  // 多音字读音来源 → 注音缓存盐（与 `usePinyin`／`prewarmChapter` 同源；来源切换后
+  // 章级缓存 key 随之改变 ⇒ 自动失效，不会留下旧读音下的字号）
+  const polyphoneSource = useDictStore((s) => s.polyphoneSource);
+  const polyphoneSalt = polyphoneSaltOf(polyphoneSource);
   // 字距 → 单格步进（cellAdvanceFor 唯一真源，与几何层同源）
   const charGap = charGapFor(pinyinMode, fontSize);
   const cellAdvance = cellAdvanceFor(fontSize, charGap);
@@ -154,13 +164,38 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   /** 装载单章：水合（懒加载壳）→ 取章 → 排序。内置书与用户书同一 API。 */
   const loadChapterData = useCallback(
     async (cid: string): Promise<LoadedChapter> => {
-      const ensure = await UserBookService.ensureBookLoaded(bookId);
+      // 【首开提速】走「首章优先快速水合」而非 ensureBookLoaded（整本解析完
+      // 才 resolve）。真机实证（2026-10-08）：ensureBookLoaded 的耗时与书体
+      // 字节强线性（≈1.5 s/MB），《资治通鉴》9.47MB ⇒ 首屏 15.8–16.2s；而
+      // meta 快路径只按章切片读目标章（meta.chapters[i].s/e 字节区间），
+      // 其余章以空壳占位并由后台分批填充。
+      const ensure = await UserBookService.ensureBookReady(bookId, {
+        priorityChapterId: cid,
+      });
       if (!ensure.success) {
         throw new Error(ensure.error ?? '书籍加载失败');
       }
-      const chapterRes = TextLibraryService.getChapter(cid);
+      let chapterRes = TextLibraryService.getChapter(cid);
       if (!chapterRes.success || !chapterRes.data) {
         throw new Error(chapterRes.error ?? '章节不存在');
+      }
+      // 空壳章兜底：首开只装配了目标章，若用户跳到尚未被后台填充到的章，
+      // segments 为空 ⇒ 触发「按需整章直读」（语义全有或全无）后重取一次。
+      if (chapterRes.data.segments.length === 0) {
+        const filled = await UserBookService.degradeChapterToWholeRead(
+          bookId,
+          cid,
+        );
+        if (filled) {
+          chapterRes = TextLibraryService.getChapter(cid);
+        }
+        if (
+          !chapterRes.success ||
+          !chapterRes.data ||
+          chapterRes.data.segments.length === 0
+        ) {
+          throw new Error('章节正文加载失败');
+        }
       }
       const chapter = chapterRes.data;
       const bookRes = TextLibraryService.getBook(chapter.bookId);
@@ -392,28 +427,27 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // 全章同一值，消除逐字自适应造成的同行大小/字重不齐（24px 档 gé=12px 混 yǒu=8px）。
   // 仅缩字形不改拼音槽高 ⇒ 行高恒等（INV-G1）不受影响；U7 不破坏：
   // 几何（行高/行数）不依赖此值，注音缺失时行仍按 rowHeight 渲染。
-  const chapterMaxPinyinLen = useMemo(() => {
-    if (!pinyinOn) {
-      return 0;
-    }
-    let max = 0;
-    for (const seg of segments) {
-      const res = annotate(seg.text, pinyinMode, { workId: activeChapterId, bookId });
-      if (res.success && res.data) {
-        const len = maxPinyinLength(res.data);
-        if (len > max) {
-          max = len;
-        }
-      }
-    }
-    return max;
-  }, [segments, pinyinOn, pinyinMode, activeChapterId, bookId]);
-  const unifiedPinyinFontSize = useMemo(() => {
-    if (!pinyinOn || chapterMaxPinyinLen < 1) {
-      return undefined;
-    }
-    return unifiedPinyinFontSizeFor(fontSize, chapterMaxPinyinLen);
-  }, [pinyinOn, chapterMaxPinyinLen, fontSize]);
+  /**
+   * 章级「最长拼音长度」缓存（§7.2 统一拼音字号）。
+   * ★ 2026-10-09 真机根因修复（⑫ 装配空窗）：原实现直接调 `PinyinService.annotate`
+   *   （**无结果缓存**），且每次 `segmentsByChapter` 变更即对**全部已载章**全量重算
+   *   ⇒ 单次同步块 9.2~38s、JS 线程占用 99%、换章时正文区长时间空白。
+   *   现：按章内容签名缓存 + 走带 LRU 的 `annotateText`（与 `prewarmChapter`／
+   *   `PinyinText` 同参 ⇒ 预热后即命中）。完整根因与判据见 `@/reader/pinyinLenCache`。
+   */
+  const pinyinLenStore = useMemo(
+    () =>
+      createChapterMaxPinyinLenStore(
+        (text, mode, salt, opts) => annotateText(text, mode, undefined, salt, opts),
+        bookId,
+      ),
+    [bookId],
+  );
+  const chapterMaxPinyinLenOf = useCallback(
+    (cid: string, segs: readonly TextSegment[]): number =>
+      pinyinLenStore.of(cid, segs, pinyinMode, polyphoneSalt),
+    [pinyinLenStore, pinyinMode, polyphoneSalt],
+  );
 
   // 段内码点基准备查（跨章）：章 id → 段 id → [segStart, segEnd)
   const segmentSpanByChapter = useMemo(() => {
@@ -433,6 +467,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
 
 
   // 跨章统一拼音字号：按章算（邻章最长拼音可能异于锚章，避免溢出 1em 格）
+  // ★ 2026-10-09：改经 `chapterMaxPinyinLenOf`（带 LRU + 章级签名缓存）。
+  //   原实现内联 `PinyinService.annotate` ⇒ 每次 segmentsByChapter 变更都对全部
+  //   已载章全量重算（无缓存）⇒ ⑫ 装配空窗根因之一。
   const unifiedPinyinFontSizeByChapter = useMemo(() => {
     const m = new Map<string, number | undefined>();
     for (const [cid, segs] of segmentsByChapter) {
@@ -440,20 +477,16 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         m.set(cid, undefined);
         continue;
       }
-      let max = 0;
-      for (const seg of segs) {
-        const res = annotate(seg.text, pinyinMode, { workId: cid, bookId });
-        if (res.success && res.data) {
-          const len = maxPinyinLength(res.data);
-          if (len > max) {
-            max = len;
-          }
-        }
-      }
+      const max = chapterMaxPinyinLenOf(cid, segs);
       m.set(cid, max < 1 ? undefined : unifiedPinyinFontSizeFor(fontSize, max));
     }
     return m;
-  }, [segmentsByChapter, pinyinOn, pinyinMode, bookId, fontSize]);
+  }, [segmentsByChapter, pinyinOn, fontSize, chapterMaxPinyinLenOf]);
+
+  // 锚章的统一拼音字号直接取自同一映射（原实现另跑一遍全章注音 ⇒ 成本翻倍）
+  const unifiedPinyinFontSize = pinyinOn
+    ? unifiedPinyinFontSizeByChapter.get(activeChapterId)
+    : undefined;
 
   // ── 划线（R2d，跨章）：为所有可见章装载划线/笔记（拼接场景下邻章也显高亮）──
   const addNote = useNoteStore((st) => st.addNote);
@@ -518,13 +551,58 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     return m;
   }, [highlightsByChapter]);
 
+  /**
+   * 长按动作菜单状态（2026-10-08 用户裁定）。
+   * ★ 长按是**唯一**的显式文字入口：点击已不再触发任何动作（滚动模式的
+   *   单击翻屏与全模式的点字查字典两个入口都取消）。故这里一次承载
+   *   「查字典 / 划线本段 / 朗读本段」，以免「新建划线」失去入口
+   *   （选区 UI 已在 2026-09-22 清理中整体移除，长按原先是它的唯一入口）。
+   */
+  const [charMenu, setCharMenu] = useState<
+    { chapterId: string; segmentId: string; char: string; text: string } | null
+  >(null);
+  const closeCharMenu = useCallback(() => setCharMenu(null), []);
+
   const handleLongPressChar = useCallback(
-    (seg: TextSegment, chapterId: string) => () => {
-      setHighlightSheet({ mode: 'create', chapterId, segmentId: seg.id, text: seg.text });
+    (seg: TextSegment, chapterId: string) => (index: number) => {
+      const ch = Array.from(seg.text)[index];
+      if (!ch) {
+        return;
+      }
+      setCharMenu({ chapterId, segmentId: seg.id, char: ch, text: seg.text });
     },
     [],
   );
 
+  const handleCharMenuLookup = useCallback(() => {
+    if (!charMenu) {
+      return;
+    }
+    setCharMenu(null);
+    navigation?.navigate('DictLookup', { headword: charMenu.char });
+  }, [charMenu, navigation]);
+
+  const handleCharMenuHighlight = useCallback(() => {
+    if (!charMenu) {
+      return;
+    }
+    setCharMenu(null);
+    setHighlightSheet({
+      mode: 'create',
+      chapterId: charMenu.chapterId,
+      segmentId: charMenu.segmentId,
+      text: charMenu.text,
+    });
+  }, [charMenu]);
+
+  /**
+   * 点按已有划线 → 查看/编辑面板。
+   * ★ 划线是**显式视觉目标**（上屏有底色），点它属于「指哪打哪」，保留点按语义；
+   *   被取消的是「点正文空白/无标记的字也有动作」那类隐式触发。
+   * 第二参 `pageX` 已无消费方（分区问询随单击翻屏一并删除），签名保留以兼容
+   * `PinyinText.onPressHighlight` 的透传契约（该签名被 `readerFreeSelection.test.ts`
+   * 逐字冻结，禁改）。
+   */
   const handleViewHighlight = useCallback((h: Highlight) => {
     setHighlightSheet({ mode: 'view', highlight: h });
   }, []);
@@ -662,6 +740,105 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // （52/39 为本轮真机实测稳定值）；onLayout 真值到达时覆盖兜底。
   const viewportH = viewportHMeasured || Math.round(windowHeight) - 52 - 39;
 
+  /**
+   * 滚动跨章提交的保留集：**行数预算邻域 ∪ 视口实际覆盖的章**（而非固定三章）。
+   *
+   * ★ 2026-10-08 真机根因（探针实证）：短章书（道德经 ~6 行/章）下固定三章
+   *   ≈ 18 行 < 一屏（~22 行）⇒ 裁剪瞬间 `contentH < viewportH` ⇒ 原生
+   *   `maxScroll = 0` ⇒ 滚动位置被**原生**钳到 0（表现为：下滚中突然跳回窗口
+   *   顶部、章节栏回跳、并露出「上一章加载中…」占位）。该瞬间补偿算式本身
+   *   是对的（锚行 62→7、delta=-1595、记账 target=252），坏的是「内容比视口高」
+   *   这一几何前提 ⇒ 保留集必须按行数预算取。
+   * 几何未就绪（行高/视口为 0）或中心不在已载链内时，退回三章策略。
+   *
+   * ★★ 2026-10-14 真机判决：**视口覆盖集这一修法无效**（A/B 同起点对照，两臂都出 prepend）。
+   *
+   * ⚠⚠ **本段曾按「已修好」写，现按「已判决无效」重写（2026-10-14 清理旧结论时改）。
+   * 旧文字里的读数来自**已丢失的载体**（161MB epub / 980 章 / 单章行数中位 133），
+   * 且把「视口覆盖」当成有效修法 —— **该结论已被同日的 A6 / B2 两轮真机 A/B 推翻**，
+   * 下面「实测读数」一段是那两轮的原始记录，保留只为可追溯，**不要再当依据引用**。
+   *
+   * ## 当时实测到的事实（仍成立的部分）
+   *
+   * 闪烁 100% 来自 prepend，append 的 delta 恒 0：
+   * ```
+   *   append  ⇒ anchorIdx 不变 ⇒ delta = 0
+   *   prepend  ⇒ delta = 整章高度（数百行 / 数万 px）
+   * ```
+   * prepend 的链条（**这一段仍是当前源码事实**）：
+   * ```
+   *   跨章 A → B ⇒ windowRecenter(win, B, retain) ⇒ A 若不在 retain 里就出门
+   *     └─ handleScrollCommit 里 fillNeighborsRef.current({forceNext:true, forcePrev:true})
+   *        ← ★★ 无条件 forcePrev ⇒ A 被补回，插在 B 上方 = prepend
+   * ```
+   *
+   * ★★ **真因是上面那个无条件 `forcePrev`**，不是「保留集退化」：
+   *   B2 实测 `chainEqActive = (loadedChapters[0] === activeChapterId)` 在**加下限之前
+   *   那一版就已经是 false**（那一版 `keep=2`，覆盖集已保住前章）⇒
+   * 「链首==锚章 ⇒ needPrev 恒真」这条根因**在本载体上从来没成立过**。
+   *   同一份分析里我曾同时写「不靠 forcePrev 也会补」和「forcePrev 是正常预取」两句
+   *   自相矛盾的话，**真机读数站在前者的反面**。
+   *
+   * ## 当前内置书载体的真实量级（2026-10-14 全量离线实测，取代旧 epub 读数）
+   *
+   * 量法：取设备上 77 本内置书正文（`Android/data/<pkg>/files/guoxue-books/builtin/`
+   * 共 3441 章），按**运行时同一口径**算行数 —— `@@CH@@` 行切章 → `toParagraphs`
+   * → 每段 `ceil(码点/charsPerLine)` → scroll 模式 +1 标题行。
+   * `charsPerLine` 是运行期量（`floor(containerWidth/cellAdvance)`），
+   * 故按 cpl ∈ [10,20] 给**区间**而非单值：
+   *
+   * | 量 | 旧读数（已丢失的 epub 载体，单本书） | 当前实测（77 本 / 3441 章） |
+   * |---|---|---|
+   * | 单章行数中位 | 133 | 跨书中位 **52–96**（随 cpl 20→10） |
+   * | 单章 > budget(78) 的书 | 该书 97.7% | **44–55 / 77** |
+   * | 长章书 | 未分类 | `tongjian` p50 **723–1134**，`>78` 恒 **100%** |
+   * | 短章书（< 一屏 22 行） | 道德经「每章约 6 行」 | **11 / 77**（`guanzi` p50=1、`songci` p50=10、`daodejing` p50=7 …） |
+   *
+   * ⇒ 旧读数「单章行数中位 133」**只对那一本书成立**，不是本仓的量级常数。
+   * ⇒ 真实图景是**双峰**：短章书（p50 ≤ 16）与长章书（p50 ≥ 723）之间几乎没有书。
+   * ⇒ 因此「预算恒失效」「预算是根因」这类判断**不能跨载体搬运**：
+   *    在长章书成立（tongjian 单章 ≫ budget ⇒ 扩张循环不执行），
+   *    在短章书**必须**靠预算（否则 contentH < viewportH ⇒ 原生 maxScroll=0）。
+   *
+   * ⚠ 上表只描述**行数量级**，不构成「视口覆盖修法有效」的依据 ——
+   *   那一版已由 A6/B2 判决无效，**下一版方向见 `deliverables/flick-fixB2-2026-10-14/README.md`**。
+   * ⚠ 别再引「单章行数中位 133」和「161MB epub / 980 章」：载体已被 `pm clear` 删除，
+   *   `/sdcard` 无源文件，**不可恢复**，换载体后那些数字不再可测。
+   *
+   * @param topLineIndex 视口顶行在拼接序列中的全局下标。由 `handleScrollCommit` 的
+   *        `firstLine`（ScrollMode 传的是 `firstContentLineOf(cur, ownerIdx)`，即视口顶行
+   *        归属行）现场算出 ⇒ **无需新增任何跨文件回调**。
+   *        ★ 找不到（-1）时该函数退回纯预算集，不猜（见 `retainIdsForViewport` 的不变式 3）。
+   */
+  const retainForScrollCommit = useCallback(
+    (cid: string, topLineIndex: number): Set<string> => {
+      const rowH = geometry.rowHeight;
+      const lpp = Math.max(1, Math.floor(viewportH / Math.max(1, rowH)));
+      const budget = SCROLL_WINDOW_KEEP_SCREENS * lpp;
+      if (!(budget > 0) || !loadedChapters.includes(cid)) {
+        return retainSetFor(cid);
+      }
+      // ★★ 上方余量必须 ≥1 屏（2026-10-14 同日自纠）：跨章提交那一刻视口**全在新章内**
+      //   （ownerLine 已切到新章 ⇒ topLineIndex = 新章首行）⇒ 纯视口语义与旧章不相交
+      //   ⇒ 旧章不被保留 ⇒ 立刻被 fillNeighbors 补回 ⇒ **自造 prepend 照旧**。
+      //   余量 1 屏 ⇒ 覆盖区 [top−lpp, top+lpp) 跨过界 ⇒ 旧章被保留。
+      //   ⚠⚠ 2026-10-14 B2 判决：余量从 1 屏加到 6 屏**实测无改善**
+      //     （同起点对照 A 臂 err=795 / B 臂 err=952，均出 prepend）。
+      //     ⇒ 余量大小**不是**这里的杠杆；杠杆在 `handleScrollCommit` 的无条件 `forcePrev`。
+      //     ⇒ 现值只是「不引入新量纲」的占位，**不要再靠调它治病**，也不要凭感觉上调。
+      return retainIdsForViewport(
+        cid,
+        loadedChapters,
+        (id) => stitched.lineCountOf.get(id) ?? 0,
+        topLineIndex,
+        lpp,
+        budget,
+        SCROLL_WINDOW_KEEP_SCREENS * lpp,
+      );
+    },
+    [geometry.rowHeight, viewportH, loadedChapters, stitched, retainSetFor],
+  );
+
   // ── 填满视口 + 前瞻装载（R3-stitch 补强）：
   // 短章书 stitched 总高 < 视口 ⇒ 无可滚距离、handleScrollEnd 不触发 ⇒ 邻章永不装载 ⇒ 末章后空白断档；
   // 长章书在接近章界前把下一章 body 预载进窗，避免边界空白。
@@ -797,11 +974,20 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         return;
       }
       if (chapterId !== activeChapterId) {
-        // 跨章提交：切 store 章（记精确码点真值）+ 滑窗锚点跟随 + 裁窗（无补偿）
+        // 跨章提交：切 store 章（记精确码点真值）+ 滑窗锚点跟随 + 裁窗。
+        // ★ 裁窗本身不做滚动补偿——补偿由 ScrollMode 按「视口顶行锚点」的
+        //   下标位移统一补（scrollAnchor.ts / 2026-10-08 真机修复 ③）：
+        //   裁窗/前插/前删都表现为 lines 数组的行下标位移，一个算式全覆盖。
+        // ★★ 2026-10-14：`firstLine` 就是**视口顶行**（ScrollMode 传的
+        //   `firstContentLineOf(cur, ownerIdx)`），现场求出其全局下标交给
+        //   `retainForScrollCommit` —— 保留集并入视口覆盖集 ⇒ 上一章不出门
+        //   ⇒ 不补装 ⇒ prepend 消失 ⇒ delta = 0。找不到（-1）时该函数
+        //   退回纯预算集（等于原行为），不猜。
+        const topLineIndex = firstLine ? indexOfLineKey(stitched.lines, lineKeyOf(firstLine)) : -1;
         openChapter(bookId, chapterId, firstLine.segmentId, undefined, firstLine.charStart);
         centerRef.current = chapterId;
         setActiveChapterId(chapterId);
-        setWin((w) => windowRecenter(w, chapterId, retainSetFor(chapterId)));
+        setWin((w) => windowRecenter(w, chapterId, retainForScrollCommit(chapterId, topLineIndex)));
       }
       recordProgress(firstLine.segmentId, undefined, firstLine.charStart);
       setSegment(firstLine.segmentId);
@@ -809,7 +995,19 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       // force 仅触发一次装载尝试）
       fillNeighborsRef.current({ forceNext: true, forcePrev: true });
     },
-    [activeChapterId, bookId, openChapter, recordProgress, setSegment, retainSetFor],
+    [
+      activeChapterId,
+      bookId,
+      openChapter,
+      recordProgress,
+      setSegment,
+      retainForScrollCommit,
+      // ★ 2026-10-14：`stitched.lines` 用于现场求顶行下标。漏了它 ⇒ stale closure
+      //   ⇒ 顶行下标按**旧数据**算（新 prepend 后下标已位移）⇒ 视口覆盖判定偏移。
+      //   代价：跨章提交时本函数身份随 stitched 变化（stitched 只在 win/geometry 变时变，
+      //   非每帧）⇒ 重建频率可接受。
+      stitched.lines,
+    ],
   );
 
   // 热区 bottom 让位底栏：热区 absolute 于 listWrap，若压到 footer 两端按钮，
@@ -862,11 +1060,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     }
     return clampWithin;
     // initialScrollIndex 只在挂载时生效；滚动模式锚点滑动不重挂载（listKey 见下），
-    // 跨章连续性由补偿 effect 维持。
+    // 跨章连续性由 ScrollMode 的锚点补偿保障（该补偿在 ScrollMode 内，不在此）。
   }, [layout, initialCharOffset, readerMode, stitched, activeChapterId, params]);
 
   // scroll 模式锚点滑动不重挂载：listKey 不含 activeChapterId（保持 data 原地更新，
-  // 视觉位置由补偿 effect 维持）；其余模式跳章/切模式走 switchSeq 触发重挂载。
+  // 视觉位置由 ScrollMode 的锚点补偿维持）；其余模式跳章/切模式走 switchSeq 触发重挂载。
+  // ★ 2026-10-08 修正：原注释写「补偿 effect 维持」，但那时的补偿**并不存在**
+  //   （stitch.compensationDelta 生产零消费）⇒ 真机表现为打开非首章整体偏一个整屏、
+  //   上滚跨章倒退两点几章。现由 ScrollMode 按视口顶行锚点补偿。
   const listKey = readerMode === 'scroll' ? `scroll:${switchSeq}` : `${readerMode}:${activeChapterId}:${switchSeq}`;
 
   // flip 模式（cover/slide/none）挂载定位页号：章内行下标 → 页号（与 FlipMode 内
@@ -896,16 +1097,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     fillNeighborsRef.current(dir === 'next' ? { forceNext: true } : { forcePrev: true });
   }, []);
 
-  // ── 查字入口：点按汉字 → DictLookup ──
-  const handlePressChar = useCallback(
-    (segText: string) => (index: number) => {
-      const ch = Array.from(segText)[index];
-      if (ch) {
-        navigation?.navigate('DictLookup', { headword: ch });
-      }
-    },
-    [navigation],
-  );
+  // ── 查字入口：已改挂长按菜单（见 handleCharMenuLookup）──
+  // 2026-10-08（用户裁定）：点字不再查字典。原「点按汉字 → DictLookup」链路
+  // （handlePressChar + ScrollMode.charTapIntercept 分区问询）整体删除 ——
+  // 二者是同一根因（给「点」赋动作语义），留着任何一个都会让点按仍起作用。
+  // 「点」在连读场景里的本义是重新定位视线，误触率高于收益。
 
   // 列命中 → 语义分流已下沉到 renderItem 的 LineRow.onPressChar（原生 FlatList 版）。
 
@@ -954,6 +1150,38 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [loadChapterData, retainSetFor, prewarmChapter],
   );
 
+  // ── 目录（TOC，2026-10-08）：顶栏点章节名 → 目录弹层 → 点章名跳章 ──
+  // 数据源 = **书体章列表**（TextLibraryService.getBook），不是当前滑动窗口：
+  // 内置书启动即注册「目录元数据」（chapters 含 id/title/order、segments 空）
+  // ⇒ 目录**不需要水合正文**，打开目录不触发任何 IO 与大对象分配。
+  const [tocVisible, setTocVisible] = useState(false);
+  const tocItems = useMemo(() => {
+    if (!bookId) {
+      return [];
+    }
+    const res = TextLibraryService.getBook(bookId);
+    return res.success && res.data ? buildTocItems(res.data.chapters) : [];
+  }, [bookId]);
+  /** 目录弹层高度：0.7 窗高，下限 320（矮屏下若只剩两三行，长书等于不可用） */
+  const tocHeight = Math.max(320, Math.round(windowHeight * 0.7));
+  const openToc = useCallback(() => setTocVisible(true), []);
+  const closeToc = useCallback(() => setTocVisible(false), []);
+
+  /**
+   * 目录点章 → 就地跳章。★ 复用 `jumpTo`（与底栏上一章/下一章、翻页边界同一
+   * 路径），不另造一套：它会 bump `switchSeq` ⇒ `listKey` 变化 ⇒ 三种模式都按
+   * 「目标章首行」重挂载（`initialLineIndex` 在无 route charOffset/lastRead 时
+   * 落 0）⇒ 落到章首。点当前章时 `jumpTo` 自身早退（`cid === centerRef.current`），
+   * 只关窗、不产生无谓重挂载。
+   */
+  const handleTocSelect = useCallback(
+    (cid: string) => {
+      setTocVisible(false);
+      jumpTo(cid);
+    },
+    [jumpTo],
+  );
+
   // flip 模式边界 → 章间导航（react-native-reader onBoundaryPrev/Next 语义）
   const handleFlipBoundaryPrev = useCallback(() => {
     if (siblings.prev) {
@@ -986,6 +1214,11 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       }
       const span = segmentSpanByChapter.get(item.chapterId)?.get(item.segmentId);
       const segStart = span?.start ?? 0;
+      // ★ 刻意**不传** onPressChar（2026-10-08 用户裁定）：LineRow/PinyinText 上
+      //   该 prop 是可选出口，不传 ⇒ 未划线字的点按不产生任何动作。
+      //   点按仍保留两处语义：①已划线字 → onPressHighlight（查看/编辑面板）
+      //   ②长按 → onLongPressChar（动作菜单）。禁「顺手补上」查字回调——
+      //   那会让「点」重新带上动作语义，本次改动即失效。
       return (
         <LineRow
           text={seg.text}
@@ -998,7 +1231,6 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           conversionMode={conversionMode}
           workId={item.chapterId}
           bookId={bookId}
-          onPressChar={handlePressChar(seg.text)}
           highlights={segmentHighlightByChapter.get(item.chapterId)?.get(item.segmentId)}
           onLongPressChar={handleLongPressChar(seg, item.chapterId)}
           onPressHighlight={handleViewHighlight}
@@ -1017,7 +1249,6 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       pinyinMode,
       conversionMode,
       bookId,
-      handlePressChar,
       handleLongPressChar,
       segmentHighlightByChapter,
       handleViewHighlight,
@@ -1037,15 +1268,24 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           <Text style={[styles.bookTitle, { color: colors.textSecondary }]} numberOfLines={1} allowFontScaling={false}>
             {loaded?.bookTitle ?? ''}
           </Text>
-          <Text style={[styles.chapterTitle, { color: colors.text }]} numberOfLines={1} allowFontScaling={false}>
-            {loaded?.chapter.title ?? ''}
-          </Text>
+          {/* 点章节名 → 目录弹层（2026-10-08）。加 hitSlop：标题仅 15pt，
+              字号档位调小后点击目标会窄到难以命中 */}
+          <Pressable
+            hitSlop={10}
+            onPress={openToc}
+            accessibilityRole="button"
+            accessibilityLabel={`打开目录：${loaded?.chapter.title ?? ''}`}
+          >
+            <Text style={[styles.chapterTitle, { color: colors.text }]} numberOfLines={1} allowFontScaling={false}>
+              {loaded?.chapter.title ?? ''}
+            </Text>
+          </Pressable>
         </View>
         <View style={styles.headerSpacer} />
       </View>
 
-      {/* 正文：listWrap 包裹（onLayout + 热区载体）。注意：tap 分发按 z 序，
-          热区 zIndex:10 会压过无 zIndex 的纵排 footer——footer 需 zIndex:20。 */}
+      {/* 正文：listWrap 包裹（onLayout 量视口高）。★ 2026-10-08：原先压在这里的
+          左右 30% 透明热区已删除（兄弟覆盖层吞滚动手势），点按分区随之取消。 */}
       {error ? (
         <View style={styles.center}>
           <Text style={{ color: colors.textSecondary }}>{`加载失败：${error}`}</Text>
@@ -1174,6 +1414,24 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         onNoteSubmit={handleNoteSubmit}
         onDelete={handleDeleteHighlight}
       />
+      {/* 长按动作菜单（点击已无动作 ⇒ 长按是唯一入口，见 handleLongPressChar） */}
+      <CharActionMenu
+        visible={charMenu !== null}
+        onClose={closeCharMenu}
+        char={charMenu?.char ?? ''}
+        text={charMenu?.text ?? ''}
+        onLookup={handleCharMenuLookup}
+        onHighlight={handleCharMenuHighlight}
+      />
+      {/* 目录弹层：由顶栏章节名唤起（openToc） */}
+      <ChapterTocSheet
+        visible={tocVisible}
+        onClose={closeToc}
+        items={tocItems}
+        currentChapterId={activeChapterId}
+        onSelect={handleTocSelect}
+        height={tocHeight}
+      />
     </View>
   );
 }
@@ -1182,6 +1440,13 @@ const EMPTY_SEGMENTS: TextSegment[] = [];
 
 /** 章首标题形状（EPUB TOC 标题粗粒度时以正文自带章名为准） */
 const HEADING_RE = /^\s*(第\s*[0-9一二两三四五六七八九十百千零〇]+\s*[章回节卷篇话则场折]|序章?|楔子|前言|序言|引言|后记|後記|番外|尾声|終章|终章|附录|附錄|导语|導讀|导读|题记|題記|说明)/;
+
+/**
+ * 滚动模式「跨章提交」保留窗口的行数预算（单位：屏）。
+ * ★ 不可下调到 1：短章书下保留行数若 ≤ 一屏，裁剪后 contentH < viewportH
+ *   ⇒ 原生 maxScroll = 0 ⇒ 滚动位置被钳到 0（2026-10-08 真机根因）。
+ */
+const SCROLL_WINDOW_KEEP_SCREENS = 6;
 /** 首段是否自带章首标题：短行 + 常见章首形状 ⇒ 不另插（可能粗粒度的）TOC 标题行 */
 function firstSegmentIsHeading(text: string): boolean {
   const t = text.trim();
@@ -1235,24 +1500,11 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 44,
   },
-  // 翻页热区（page 模式）：左右 30% 透明层，absolute 相对 container，
-  // top/bottom 运行时让位 headerH/footerH
-  tapZoneL: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: '30%',
-    zIndex: 10,
-  },
-  tapZoneR: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: '30%',
-    zIndex: 10,
-  },
+  // ★ 2026-10-08 删除 tapZoneL/tapZoneR（左右 30% 透明翻页热区）：
+  //   ① 滚动模式的热区已于 10-08 上午先行删除（兄弟覆盖层吞滚动手势）；
+  //   ② 本批取消「点击翻页」后，两个样式对象在**全文件零引用** —— 留着会让
+  //      下一个人以为还存在点按分区。真正承接翻页的是 PageMode 内部的
+  //      Pressable（逐页模式的既有语义，未改动）。
   center: {
     flex: 1,
     alignItems: 'center',
