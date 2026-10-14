@@ -476,7 +476,17 @@ describe('V3 邻章预取：跨章滚动不得补 prev（闪烁真因通道）',
 });
 
 /**
- * ★★★ V4 判据组：跨章提交时`fillNeighbors` 的 `forcePrev` 必须挂滚动方向条件。
+ * ★★★ V4 判据组：跨章提交时 `fillNeighbors` 的 `forcePrev` 不得放行。
+ *
+ * ⚠⚠⚠ **V8 真机判决后，本组所锁的杠杆已失效**（2026-10-14）：
+ *   V4 的思路是「按滚动方向决定补不补 prev」。V8 判决证明：
+ *   **只要补的那一章不在 `win.data` 里，补装就必然落链首 = prepend**，
+ *   与时机/方向无关 ⇒ 上滚方向补不补都闪（长章书 IO 实测 6.5 s，
+ *   做不到「data 早就在窗内」）。
+ *   ⇒ 契约已升级为「`forcePrev: false`」（见形状锁④）。
+ *   ★本组**一条不删**（条目 113：判据不许失效，只许换层），
+ *     但「直测 `shouldFillPrevOnCommit` 三向语义」那条现为**退役留证**
+ *     ——该函数已无生产调用方（见 `chapterWindow.ts` 里的退役标注）。
  *
  * ## 为什么要有这一组（V3 真机判决：修法生效但不充分）
  *
@@ -526,39 +536,34 @@ describe('V4 跨章提交：fillNeighbors 的 forcePrev 必须挂滚动方向条
     return seg;
   };
 
-  it('形状锁④：forcePrev 必须调纯函数（不得内联方向算式/常量）', () => {
+  it('形状锁④（★V8 改写）：跨章提交里的 forcePrev 必须恒为 false（上滚 prev 已由 V8 预装）', () => {
     const seg = commitFillSrc(readerSrc);
-    // ★★ 上一版断言「实参不是字面 true」⇒ M1 红但 **M2/M3 零红**（形状锁求不了值，
-    //   条目 109/114）⇒ 改为要求**实参是纯函数调用**，这样函数体内部被变异
-    //   （方向接反 / 死常量）时，行为组直测纯函数即可抓到。
+    //★★ 契约变更（2026-10-14 V8）：`forcePrev` 由「挂方向条件」改成「**恒 false**」。
+    //   理由：上滚跨章需要的 prev 现在由 V8 在跨章提交里**先装载进窗**，
+    //   `recenter` 保住它 ⇒ 这里再 force 就是重复补装，且一旦 retain 漏掉
+    //   就会重演 prepend（真机delta=47100px）。
+    //   ⇒ 判据改为「实参必须是字面 false」，且**不得**是任何真值表达式。
+    //   （原判据「实参必须是函数调用」是 V4 契约，**一条不删**，移到下面的
+    //   「V8 组」去锁V8 那处对纯函数的调用。）
     const m = seg.match(/forcePrev\s*:\s*([^,}\n]+)/);
     expect(m).not.toBeNull();
     const arg = (m as RegExpMatchArray)[1].trim();
-    // 必须是一个函数调用（形如 `shouldXxx(...)`）
-    expect(arg).toMatch(/^[A-Za-z_$][\w$]*\(/);
-    // 不得内联比较算式或常量
-    expect(arg).not.toMatch(/[<>]=?|&&|\|\||\?/);
-    expect(arg).not.toMatch(/^\(?\s*(-?\d+|true|false)\s*\)?$/);
-    // 反向断言：不得出现「裸 ref 直接比较」形态（否则判据与实现同源、变异绕过）
-    expect(arg).not.toMatch(/scrollDirRef\.current\s*[<>]/);
+    expect(arg).toBe('false');
+    // 反向断言：不得是 `true`、不得是任何比较式/逻辑式（都会重开放行）
+    expect(arg).not.toBe('true');
+    expect(arg).not.toMatch(/[<>]=?|&&|\|\||\?|\(/);
+    // ★ `forceNext` 仍必须保留（向下预取不能一起关掉）
+    expect(seg).toMatch(/forceNext\s*:\s*true/);
   });
 
-  it('形状锁⑤：跨章提交必须调shouldFillPrevOnCommit，且方向 ref 由回调写入', () => {
+  it('形状锁⑤（★V8 改写）：上滚 prev 的补装职责已移交 V8（此处不得再按方向 force）', () => {
     const seg = commitFillSrc(readerSrc);
-    // 函数调用在场（正对照：切片非空 + 上条已验证 forcePrev 有实参）
-    expect(seg).toMatch(/forcePrev\s*:\s*shouldFillPrevOnCommit\(/);
-    // 实参必须**读同一个方向 ref**（覆盖「传常量 0」变异）
-    expect(seg).toMatch(/shouldFillPrevOnCommit\(\s*scrollDirRef\.current\s*\)/);
-    // 方向 ref 的声明 + 写入必须在场（覆盖「声明了但没人写」＝恒 0 的变异）
+    // ★ 反向断言：不得再用 `shouldFillPrevOnCommit(scrollDirRef.current)` 驱动 forcePrev
+    //   （那是 V4 的契约；V8 起该判定只用于「跨章提交时预装 prev」那一处）
+    expect(seg).not.toMatch(/forcePrev\s*:\s*shouldFillPrevOnCommit\(/);
+    // 方向 ref 仍必须由 ScrollMode 的回调写入（V8 沿用它判断上滚方向）
     const rFull = stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
-    expect(rFull).toMatch(/const scrollDirRef = useRef\(/);
     expect(rFull).toMatch(/scrollDirRef\.current\s*=\s*dir/);
-    // ★ 位置关系：写入点必须在跨章提交调用点**之前**（否则读到的是上一帧的陈值）
-    const iWrite = rFull.indexOf('scrollDirRef.current = dir');
-    const iUse = rFull.indexOf('fillNeighborsRef.current', rFull.indexOf('handleScrollCommit'));
-    expect(iWrite).toBeGreaterThan(-1);
-    expect(iUse).toBeGreaterThan(-1);
-    expect(iWrite).toBeLessThan(iUse);
     // ★ 方向 ref 不得进任何 useEffect 依赖数组（进依赖＝每帧重跑预取）
     expect(rFull).not.toMatch(/\[\s*loaded\s*,\s*activeChapterId\s*,\s*loadChapterData\s*,\s*scrollDirRef\s*\]/);
   });

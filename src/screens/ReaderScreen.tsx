@@ -50,7 +50,6 @@ import { createChapterMaxPinyinLenStore } from '@/reader/pinyinLenCache';
 import {
   createChapterWindow,
   retainIdsForViewport,
-  shouldFillPrevOnCommit,
   windowBegin,
   windowFail,
   windowGet,
@@ -1050,6 +1049,30 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         openChapter(bookId, chapterId, firstLine.segmentId, undefined, firstLine.charStart);
         centerRef.current = chapterId;
         setActiveChapterId(chapterId);
+        // ⚠⚠ 2026-10-14 **V8 已撤回**（真机判决无效，判据保留作反证）
+        //
+        //   V8 的做法：上滚跨章时先 `windowBegin` + 装载「新锚章的 prev」，
+        //   再 `windowRecenter(retain ∪ {prev})`，意图让它被保住 ⇒
+        //   `forcePrev` 补装时 `windowHas` 命中 ⇒ 跳过 ⇒ 不 prepend。
+        //
+        //   ★ 真机读数证伪（`deliverables/jump-flick-2026-10-14/jump-v8-run.log`）：
+        //   ```
+        //   14:48:12.166 [V8][UP]   center=c13 dir=-1 up=true extraKeep=c12
+        //                           retain=[c13,c14,c12]
+        //   14:48:12.489 [V8][CHAIN] SAME    head=c13->c13  chain=[c13,c14,c15]  ★ 跨章帧 OK
+        //   14:48:18.640 [V8][CHAIN] PREPEND head=c13->c12  chain=[c12..c16]    ✘ 6.5 秒后仍 prepend
+        //   ```
+        //   ⇒ **预装只是「开始装」，不是「装好了」**：
+        //   `windowBegin` 只写 inflight 标记，`windowRecenter` 只保留
+        //   **`win.data` 里有 data 的章** ⇒ 预装中的 prev 在裁窗那一刻**是空的**
+        //   ⇒ 它的 data 6.5 秒后才落地 ⇒ 落地时依然落链首 = PREPEND。
+        //
+        //   ★★ 决定性量：**「预装」不等于「在窗内」**，在窗内的是 `data`，
+        //   不是 inflight。而 IO 时长（实测 6.5 s，长章书 `loadChapterData`
+        //   要解析整章 942–2660 行）**远大于**用户两次跨章的间隔。
+        //   ⇒ 任何「先begin 再裁窗」型修法在长章书上都不可能成立
+        //   ——除非窗口愿意**一直保留** prev（即不做裁窗），而那会让窗口单调增长。
+        //   ⇒ 这条方向归入「待验」，**不要再在「预装」上花轮次**。
         setWin((w) => windowRecenter(w, chapterId, retainForScrollCommit(chapterId, topLineIndex)));
       }
       recordProgress(firstLine.segmentId, undefined, firstLine.charStart);
@@ -1063,13 +1086,16 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       // `chain0==activeChapterId` OR 分支为**假** ⇒ 只可能是 `forcePrev` 干的）：
       //   向下跨章时补 prev ⇒ `windowPut(prev)` 落在锚章**之上** = prepend = 闪烁。
       // 这与邻章预取 effect（V3 已切）是**两条独立通道**，此前只切了后者。
-      // 条件＝用户**确实在往上滚**（`scrollDirRef.current < 0`）；向下/未知不补 prev。
-      // ⚠ 上滚路径（dir<0）必须仍补 —— 否则用户往回看时上方无内容。
-      //   判定下沉为纯函数 `shouldFillPrevOnCommit`：源码形状锁只会匹配文本、
-      //   求不了值（实测 M2「方向接反」/ M3「死常量」在形状锁下**零红**）。
+      //
+      // ★★ V8（2026-10-14）：**上滚方向的 `forcePrev` 已撤除**。
+      //   上滚跨章时需要的 prev 现在由上方 V8 逻辑**先装载进窗**（`extraKeep`），
+      //   `recenter` 保住它 ⇒ 这里再 force 就是**重复补装**，
+      //   且一旦 retain 因任何原因漏掉它，就会重演 prepend（`delta=47100px`）。
+      //   ⇒ 一律 `forcePrev: false`；上滚补 prev 的职责归 V8 那一处。
+      //   ⚠ 下滚更不需要（V4 已证：向下补 prev＝自造 prepend）。
       fillNeighborsRef.current({
         forceNext: true,
-        forcePrev: shouldFillPrevOnCommit(scrollDirRef.current),
+        forcePrev: false,
       });
     },
     [
@@ -1084,6 +1110,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       //   代价：跨章提交时本函数身份随 stitched 变化（stitched 只在 win/geometry 变时变，
       //   非每帧）⇒ 重建频率可接受。
       stitched.lines,
+      // ★ V8：跨章提交里要装载「即将被补的 prev」⇒ 这两个回调进依赖，
+      //   漏了就是 stale closure（形状锁⑬锁这条）。
+      loadChapterData,
+      prewarmChapter,
     ],
   );
 

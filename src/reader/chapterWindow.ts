@@ -389,6 +389,16 @@ export function retainIdsForViewport(
  * - `dir === 0` 未滚过（首屏）⇒ **不补**：首屏的「链首==锚章」由 `fillNeighbors`
  *   自己的 `needPrev` OR 分支负责，本函数不承担（否则首屏就自造 prepend）。
  *
+ * ## ⚠⚠⚠ 本函数已**退役**（2026-10-14 V8 真机判决，**保留仅为可追溯**）
+ *
+ * V4 曾用它驱动 `handleScrollCommit` 的 `forcePrev`；V8 真机判决证明：
+ * **只要「补的章」不在 `win.data` 里，补装就必然落链首 = prepend**，
+ * 与「补装时机」无关。上滚方向**无论补不补、什么时候补**都闪
+ * （除非那一章的 data 早就在窗内，而长章书 IO 实测 6.5 s 做不到）。
+ * ⇒ 生产侧已改为 `forcePrev: false`；本函数**当前无生产调用方**。
+ * ★**别把它当可用杠杆重新接上**——真机已判决该方向无效（读数见
+ *   `deliverables/jump-flick-2026-10-14/jump-v8-run.log`）。
+ *
  * @param scrollDir 滚动方向：+1 向下 / -1 向上 / 0 未滚过
  */
 export function shouldFillPrevOnCommit(scrollDir: number): boolean {
