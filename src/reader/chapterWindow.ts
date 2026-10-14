@@ -367,3 +367,30 @@ export function retainIdsForViewport(
   }
   return base;
 }
+
+/**
+ * ★★ V4（2026-10-14）：跨章提交时`fillNeighbors` 的 `forcePrev` 该不该置位。
+ *
+ * ## 为什么要抽成纯函数（不是直接写 `scrollDirRef.current < 0`）
+ *
+ * 初版把条件内联在 `handleScrollCommit` 里，判据只能做**源码文本形状锁**。实测：
+ * ```
+ * M1 forcePrev 改回无条件 true   ⇒ 红 1条✔（形状锁有鉴别力）
+ * M2 方向接反（< 0 写成 > 0）    ⇒ 零红 ✘
+ * M3 死常量（&& false）           ⇒ 零红 ✘
+ * ```
+ * ⇒ 形状锁**只会匹配文本、求不了值**（条目 109/114：变异点在哪一层，判据就得走
+ * 哪一层）⇒ 把「方向 → 是否补 prev」这个决策下沉成纯函数，判据**直测函数值**，
+ * M2/M3 立刻可红。
+ *
+ * ## 语义（正负号约定与 `ScrollMode.onScrollDirChange` 一致）
+ * - `dir < 0` 用户在**往上滚** ⇒ 上方内容会被看到 ⇒ **补 prev**
+ * - `dir > 0` 往下滚 ⇒ 上方内容已在视口内 ⇒ **不补 prev**（补了就是 prepend）
+ * - `dir === 0` 未滚过（首屏）⇒ **不补**：首屏的「链首==锚章」由 `fillNeighbors`
+ *   自己的 `needPrev` OR 分支负责，本函数不承担（否则首屏就自造 prepend）。
+ *
+ * @param scrollDir 滚动方向：+1 向下 / -1 向上 / 0 未滚过
+ */
+export function shouldFillPrevOnCommit(scrollDir: number): boolean {
+  return scrollDir < 0;
+}

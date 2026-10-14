@@ -50,6 +50,7 @@ import { createChapterMaxPinyinLenStore } from '@/reader/pinyinLenCache';
 import {
   createChapterWindow,
   retainIdsForViewport,
+  shouldFillPrevOnCommit,
   windowBegin,
   windowFail,
   windowGet,
@@ -1018,7 +1019,21 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       setSegment(firstLine.segmentId);
       // 跨章即预载邻章（fillNeighbors 幂等，「链首==锚章」保护在普通路径生效，
       // force 仅触发一次装载尝试）
-      fillNeighborsRef.current({ forceNext: true, forcePrev: true });
+      //
+      // ★★ V4（2026-10-14 真机 A/B 后）：`forcePrev` 必须**挂滚动方向条件**。
+      // 此前是无条件 `{forceNext:true, forcePrev:true}`，真机读数（`[V3][DATA]
+      // lines=2985->4762 (+1777)`，此时 `chain0=c4 ≠ active=c6` ⇒ `needPrev` 的
+      // `chain0==activeChapterId` OR 分支为**假** ⇒ 只可能是 `forcePrev` 干的）：
+      //   向下跨章时补 prev ⇒ `windowPut(prev)` 落在锚章**之上** = prepend = 闪烁。
+      // 这与邻章预取 effect（V3 已切）是**两条独立通道**，此前只切了后者。
+      // 条件＝用户**确实在往上滚**（`scrollDirRef.current < 0`）；向下/未知不补 prev。
+      // ⚠ 上滚路径（dir<0）必须仍补 —— 否则用户往回看时上方无内容。
+      //   判定下沉为纯函数 `shouldFillPrevOnCommit`：源码形状锁只会匹配文本、
+      //   求不了值（实测 M2「方向接反」/ M3「死常量」在形状锁下**零红**）。
+      fillNeighborsRef.current({
+        forceNext: true,
+        forcePrev: shouldFillPrevOnCommit(scrollDirRef.current),
+      });
     },
     [
       activeChapterId,

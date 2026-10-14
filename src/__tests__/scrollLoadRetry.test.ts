@@ -14,7 +14,7 @@
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-import { retainIdsByBudget, retainIdsForViewport, chaptersInRowRange } from '../reader/chapterWindow';
+import { retainIdsByBudget, retainIdsForViewport, chaptersInRowRange, shouldFillPrevOnCommit } from '../reader/chapterWindow';
 import { indexOfLineKey, lineKeyOf, type AnchorLineLike } from '../reader/core/modes/scrollAnchor';
 
 function stripComments(src: string): string {
@@ -472,5 +472,122 @@ describe('V3 邻章预取：跨章滚动不得补 prev（闪烁真因通道）',
     //   两档量级下保留集都保住旧章 ⇒ prepend 只可能来自「预取无条件补 prev」这条通道，
     //   因为 windowHas 已拦住对已保留章的重复补装。⇒ 修法点在预取的方向条件，不在保留集。
     expect(keep.has('c5') && keepLong.has('c5')).toBe(true);
+  });
+});
+
+/**
+ * ★★★ V4 判据组：跨章提交时`fillNeighbors` 的 `forcePrev` 必须挂滚动方向条件。
+ *
+ * ## 为什么要有这一组（V3 真机判决：修法生效但不充分）
+ *
+ * V3 真机 A/B 读数（`deliverables/flick-fixV3-2026-10-14/v3-run.log`）：
+ * ```
+ * 13:06:59 [V3][PF] scrollDir=0 targets=["tongjian-c6"] chain0=tongjian-c5 active=tongjian-c5
+ * 13:07:05 [V3][DATA] dir=PREPEND-SUSPECT lines=980->2985 (+2005) anchorIdx=1364
+ * 13:08:43 [V3][PF] scrollDir=1 targets=["tongjian-c7"] chain0=tongjian-c4 active=tongjian-c6
+ * 13:08:49 [V3][DATA] dir=PREPEND-SUSPECT lines=2985->4762 (+1777) anchorIdx=2876
+ * ```
+ * - ✔ V3 修法生效：`targets` 在 `scrollDir=1` 时确实只剩 next（prev 消失）。
+ * - ✘ prepend 仍在：`+2005 = 952(c4) + 1053(c6)`，而 PF 只请求了 c6
+ *   ⇒ **c4 来自另一条通道**。
+ *
+ * ## 第二条通道的定量归因（不是猜）
+ *
+ * `fillNeighbors` 的 `needPrev` 有两个来源：
+ * ```
+ * needPrev = opts?.forcePrev === true || loadedChapters[0] === activeChapterId
+ * ```
+ * 第二次事件时 `chain0=tongjian-c4 ≠ active=tongjian-c6` ⇒ **OR 右支为假**
+ * ⇒ 只可能是 `opts.forcePrev === true` ⇒ 来自
+ * `handleScrollCommit` 里那句**无条件** `{forceNext:true, forcePrev:true}`。
+ * ⇒ `windowPut(prev)` 落在锚章之上 = prepend，**与邻章预取是两条独立通道**。
+ *
+ * ★ 这就是「一轮只切一条通道」的教训：V3 切了邻章预取，V4 才切`forcePrev`。
+ *   两者必须**各自**有判据，否则回退其中一条不会被发现。
+ *
+ * ## 本组分层（条目 113：层间不可互相遮蔽）
+ * - 形状锁④：`forcePrev` 的实参**必须带方向条件**（语义级，不钉字面写法）
+ * - 形状锁⑤：ScrollMode→ReaderScreen 的方向接线在（覆盖 M5/M6 接线变异）
+ * - 行为组：`needPrev` 判据在两种方向下的取值（纯函数层，补形状锁抓不到的语义）
+ */
+describe('V4 跨章提交：fillNeighbors 的 forcePrev 必须挂滚动方向条件', () => {
+  /** 取 `handleScrollCommit` 尾部那段`fillNeighborsRef.current(...)` 调用（代码特征锚点） */
+  const commitFillSrc = (src: string): string => {
+    // ★ 锚点用**代码**（src 已 stripComments ⇒ 注释锚点必然 -1，条目 91/120）
+    const anchor = 'fillNeighborsRef.current';
+    const start = src.indexOf(anchor, src.indexOf('handleScrollCommit'));
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf('}, [', start);
+    const seg = src.slice(start, end === -1 ? start + 400 : end);
+    // ★ 正对照（条目 8：切片整体切空 ⇒ 所有断言恒真＝零鉴别力）
+    expect(seg.length).toBeGreaterThan(40);
+    expect(seg).toContain('forceNext');
+    expect(seg).toContain('forcePrev');
+    return seg;
+  };
+
+  it('形状锁④：forcePrev 必须调纯函数（不得内联方向算式/常量）', () => {
+    const seg = commitFillSrc(readerSrc);
+    // ★★ 上一版断言「实参不是字面 true」⇒ M1 红但 **M2/M3 零红**（形状锁求不了值，
+    //   条目 109/114）⇒ 改为要求**实参是纯函数调用**，这样函数体内部被变异
+    //   （方向接反 / 死常量）时，行为组直测纯函数即可抓到。
+    const m = seg.match(/forcePrev\s*:\s*([^,}\n]+)/);
+    expect(m).not.toBeNull();
+    const arg = (m as RegExpMatchArray)[1].trim();
+    // 必须是一个函数调用（形如 `shouldXxx(...)`）
+    expect(arg).toMatch(/^[A-Za-z_$][\w$]*\(/);
+    // 不得内联比较算式或常量
+    expect(arg).not.toMatch(/[<>]=?|&&|\|\||\?/);
+    expect(arg).not.toMatch(/^\(?\s*(-?\d+|true|false)\s*\)?$/);
+    // 反向断言：不得出现「裸 ref 直接比较」形态（否则判据与实现同源、变异绕过）
+    expect(arg).not.toMatch(/scrollDirRef\.current\s*[<>]/);
+  });
+
+  it('形状锁⑤：跨章提交必须调shouldFillPrevOnCommit，且方向 ref 由回调写入', () => {
+    const seg = commitFillSrc(readerSrc);
+    // 函数调用在场（正对照：切片非空 + 上条已验证 forcePrev 有实参）
+    expect(seg).toMatch(/forcePrev\s*:\s*shouldFillPrevOnCommit\(/);
+    // 实参必须**读同一个方向 ref**（覆盖「传常量 0」变异）
+    expect(seg).toMatch(/shouldFillPrevOnCommit\(\s*scrollDirRef\.current\s*\)/);
+    // 方向 ref 的声明 + 写入必须在场（覆盖「声明了但没人写」＝恒 0 的变异）
+    const rFull = stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
+    expect(rFull).toMatch(/const scrollDirRef = useRef\(/);
+    expect(rFull).toMatch(/scrollDirRef\.current\s*=\s*dir/);
+    // ★ 位置关系：写入点必须在跨章提交调用点**之前**（否则读到的是上一帧的陈值）
+    const iWrite = rFull.indexOf('scrollDirRef.current = dir');
+    const iUse = rFull.indexOf('fillNeighborsRef.current', rFull.indexOf('handleScrollCommit'));
+    expect(iWrite).toBeGreaterThan(-1);
+    expect(iUse).toBeGreaterThan(-1);
+    expect(iWrite).toBeLessThan(iUse);
+    // ★ 方向 ref 不得进任何 useEffect 依赖数组（进依赖＝每帧重跑预取）
+    expect(rFull).not.toMatch(/\[\s*loaded\s*,\s*activeChapterId\s*,\s*loadChapterData\s*,\s*scrollDirRef\s*\]/);
+  });
+
+  it('★★ 行为组（直测纯函数）：shouldFillPrevOnCommit 的三向语义', () => {
+    // ★ 这一组是 M2/M3 的**唯一**暴露路径 —— 形状锁只会匹配文本、求不了值。
+    //   变异「< 0 写成 > 0」/「&& false」都必须在此变红。
+    // 向下滚（dir=+1）：上方内容已在视口内 ⇒ 不补 prev（补了就是 prepend）
+    expect(shouldFillPrevOnCommit(1)).toBe(false);
+    expect(shouldFillPrevOnCommit(10)).toBe(false);
+    // 往上滚（dir=-1）：上方内容会被看到 ⇒ 必须补
+    expect(shouldFillPrevOnCommit(-1)).toBe(true);
+    expect(shouldFillPrevOnCommit(-10)).toBe(true);
+    // 未滚过（dir=0）：不补 —— 首屏由 fillNeighbors 的 needPrev OR 分支负责
+    expect(shouldFillPrevOnCommit(0)).toBe(false);
+  });
+
+  it('★ 行为组：needPrev 判据在向下/向上两种滚动方向下的取值', () => {
+    // 纯函数层复刻 `fillNeighbors` 的 needPrev 语义（生产侧由形状锁④⑤保证接线）。
+    // 长章书真几何（实测 tongjian cpl=13：单章 880 行，lpp=13，链首 c4 / 锚章 c6）
+    const needPrev = (opts: { forcePrev?: boolean }, chain0: string, active: string): boolean =>
+      opts.forcePrev === true || chain0 === active;
+    // 向下跨章：V4 后不再无条件 force ⇒ chain0(c4) ≠ active(c6) ⇒ 不补 prev ✔
+    expect(needPrev({ forceNext: true, forcePrev: shouldFillPrevOnCommit(1) }, 'c4', 'c6')).toBe(false);
+    // 向上跨章：forcePrev=true ⇒ 必须补（否则用户往回看时上方无内容）✔
+    expect(needPrev({ forceNext: true, forcePrev: shouldFillPrevOnCommit(-1) }, 'c7', 'c6')).toBe(true);
+    // 首屏链首==锚章：OR 分支仍为真 ⇒ 照补（与 V4 前同，无回归）✔
+    expect(needPrev({ forceNext: true, forcePrev: shouldFillPrevOnCommit(0) }, 'c5', 'c5')).toBe(true);
+    // ★ 阴性对照：V4 前的无条件 forcePrev 在向下跨章时也会补 ⇒ 缺陷形态可被本组区分
+    expect(needPrev({ forceNext: true, forcePrev: true }, 'c4', 'c6')).toBe(true);
   });
 });
