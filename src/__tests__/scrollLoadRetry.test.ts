@@ -704,3 +704,119 @@ describe('V5 跳章：retain 集合必须整批装载（跳章后 prepend 通道
     expect(CH14 + CH13 + CH15).toBe(4439);
   });
 });
+
+/**
+ * ★★★ V6 判据组：跳转必须把续读位置重写为「目标章 + 章首」。
+ *
+ * ## 为什么要有这一组（2026-10-14 用户报告）
+ *
+ * 「进入时是汉纪七（**非章节顶头位置**），跳转到汉纪四，再跳回汉纪七，
+ *   **位置不对，汉纪七没有顶头**」。
+ *
+ * ## 根因（读实现得出，非推断）
+ *
+ * `initialCharOffset` 的持久化分支是：
+ * ```
+ * lastRead.chapterId === activeChapterId ? lastRead.charOffset : 0
+ * ```
+ * 而 `jumpTo` 切换了 `activeChapterId` + bump `switchSeq`（FlatList 重挂载，
+ * 重挂载读 `initialLineIndex` ← `initialCharOffset` ← `lastRead`），
+ * 却**从不写 `lastRead`** ⇒ `lastRead` 仍是**离开前那一章**：
+ * - 跳去**别的**章：条件不成立 ⇒ 用 0 ⇒ 顶头 ✔（**碰巧对**）
+ * - 跳回**曾读到一半**的章：条件成立 ⇒ 用**旧 charOffset**
+ *   ⇒ 落在章中 ⇒ **「没有顶头」** ✘
+ *
+ * ★即「跳到某章＝该章章首」这件事当时是**巧合**，不是契约。
+ *
+ * 第二处：中心章 `lastRead` 同步 effect 的守卫只比 `chapterId`，
+ * 不比位置 ⇒ 旧 `charOffset` 非零时它早退 ⇒ 错位位置留在 `lastRead`。
+ */
+describe('V6 跳章续读：跳转必须重写 lastRead 为目标章章首', () => {
+  const jumpSegOf = (src: string): string => {
+    const start = src.indexOf('const jumpTo = useCallback(');
+    expect(start).toBeGreaterThan(-1);
+    const seg = src.slice(start, start + 2600);
+    // ★ 正对照（条目 8：切片切空 ⇒ 断言恒真＝零鉴别力）
+    expect(seg.length).toBeGreaterThan(600);
+    expect(seg).toContain('setSwitchSeq');
+    return seg;
+  };
+
+  it('形状锁⑧：jumpTo 必须显式把 lastRead 重写为「目标章 + charOffset 0」', () => {
+    const seg = jumpSegOf(readerSrc);
+    // 必须调 openChapter(bookId, <目标章>, undefined, undefined, 0)
+    expect(seg).toMatch(/openChapter\(\s*bookId\s*,\s*cid\s*,\s*undefined\s*,\s*undefined\s*,\s*0\s*\)/);
+    // ★ 位置必须写在 switchSeq bump **之前**（重挂载读的是那一刻的 lastRead）
+    const iWrite = seg.indexOf('openChapter(');
+    const iBump = seg.indexOf('setSwitchSeq');
+    expect(iWrite).toBeGreaterThan(-1);
+    expect(iBump).toBeGreaterThan(-1);
+    expect(iWrite).toBeLessThan(iBump);
+    // ★ 反向断言：不得用 `undefined` 当 charOffset（会被幂等条件在旧值为
+    //   undefined 时跳过，且 initialCharOffset 的 `>= 0` 会把 0 吃掉）
+    expect(seg).not.toMatch(/openChapter\(\s*bookId\s*,\s*cid\s*,\s*undefined\s*,\s*undefined\s*,\s*undefined\s*\)/);
+  });
+
+  it('形状锁⑨：jumpTo 依赖数组必须含 bookId 与 openChapter（防 stale closure）', () => {
+    const start = readerSrc.indexOf('const jumpTo = useCallback(');
+    const seg = readerSrc.slice(start, start + 3200);
+    // 依赖数组那一行
+    const m = seg.match(/\[\s*loadChapterData\s*,[^\]]*\]/);
+    expect(m).not.toBeNull();
+    const deps = (m as RegExpMatchArray)[0];
+    expect(deps).toMatch(/\bbookId\b/);
+    expect(deps).toMatch(/\bopenChapter\b/);
+  });
+
+  it('形状锁⑩：中心章同步 effect 的守卫必须连charOffset 一起比', () => {
+    // 取那个 effect（代码特征：`loaded.chapter.id !== activeChapterId`）
+    const start = readerSrc.indexOf('loaded.chapter.id !== activeChapterId');
+    expect(start).toBeGreaterThan(-1);
+    const seg = readerSrc.slice(start, start + 900);
+    expect(seg).toContain('openChapter(');
+    // 守卫里必须出现 charOffset 的比较（不只比 chapterId）
+    expect(seg).toMatch(/charOffset/);
+    // 反向断言：不得出现「只比 chapterId 就早退」的裸守卫形态
+    expect(seg).not.toMatch(
+      /lastRead\?\.bookId === bookId && lastRead\?\.chapterId === activeChapterId \)\s*\{\s*return/,
+    );
+  });
+
+  it('★ 行为组：initialCharOffset 的持久化分支在「跳回曾读过的章」时给出旧偏移', () => {
+    // 复刻 `initialCharOffset` 的判定（生产接线由形状锁⑧⑩保证）
+    const initialCharOffset = (
+      routeOwned: boolean,
+      routeOffset: number | undefined,
+      lastRead: { bookId: string; chapterId: string; charOffset?: number } | null,
+      bookId: string,
+      activeChapterId: string,
+    ): number => {
+      if (routeOwned && typeof routeOffset === 'number' && routeOffset >= 0) {
+        return routeOffset;
+      }
+      if (
+        lastRead &&
+        lastRead.bookId === bookId &&
+        lastRead.chapterId === activeChapterId &&
+        typeof lastRead.charOffset === 'number' &&
+        lastRead.charOffset >= 0
+      ) {
+        return lastRead.charOffset;
+      }
+      return 0;
+    };
+    const bookId = 'b1';
+    // 场景：离开汉纪七时读到章中（charOffset=5000），跳去汉纪四（lastRead=四），
+    //       再跳回汉纪七 ⇒ V6 前 lastRead 仍是「四」⇒ 持久化分支不成立 ⇒ 0
+    const stale = { bookId, chapterId: 'c-h4', charOffset: 5000 };
+    expect(initialCharOffset(false, undefined, stale, bookId, 'c-h7')).toBe(0);
+    //场景：lastRead 恰好就是汉纪七且带旧偏移（另一条进入路径）⇒ 返回旧偏移（非 0）
+    const selfStale = { bookId, chapterId: 'c-h7', charOffset: 5000 };
+    expect(initialCharOffset(false, undefined, selfStale, bookId, 'c-h7')).toBe(5000);
+    //★ V6 后：jumpTo 显式写入 {chapterId:c-h7, charOffset:0} ⇒ 0 ⇒ 顶头
+    const afterV6 = { bookId, chapterId: 'c-h7', charOffset: 0 };
+    expect(initialCharOffset(false, undefined, afterV6, bookId, 'c-h7')).toBe(0);
+    // 阴性对照：charOffset=0 是合法章首，不得被真值判断吃掉
+    expect(initialCharOffset(false, undefined, { bookId, chapterId: 'c-h7', charOffset: 0 }, bookId, 'c-h7')).toBe(0);
+  });
+});

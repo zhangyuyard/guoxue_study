@@ -386,14 +386,21 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   // 同步，杀进程重开会恢复到切换前的旧章（真机实测复现）。与 R1 路由
   // 跳章语义一致：跳到新中心 = lastRead 重写为新章（charOffset 空 = 章首）；
   // 之后的滚动停止仍由 recordProgress 以码点真值覆盖。
+  //
+  // ★★ V6（2026-10-14）：守卫加严为「章**与位置**都未变才早退」。
+  //   原守卫只比 `chapterId`，于是「跳到曾读到一半的章」这条路上：
+  //   `jumpTo` 已把 charOffset 置0（章首），但若上一轮滚动又把 `recordProgress`
+  //   的非零值写回，本effect 会因「章没变」而早退 ⇒ 错位位置留在 lastRead。
+  //   ⇒ 必须连`charOffset` 一起比。
   useEffect(() => {
     if (!loaded || loaded.chapter.id !== activeChapterId || !bookId) {
       return;
     }
-    if (lastRead?.bookId === bookId && lastRead?.chapterId === activeChapterId) {
+    const cur = lastRead?.chapterId === activeChapterId ? lastRead.charOffset : undefined;
+    if (lastRead?.bookId === bookId && lastRead?.chapterId === activeChapterId && (cur === undefined || cur === 0)) {
       return;
     }
-    openChapter(bookId, activeChapterId, undefined, undefined, undefined);
+    openChapter(bookId, activeChapterId, undefined, undefined, 0);
   }, [loaded, activeChapterId, bookId, lastRead, openChapter]);
 
   // ── 行化（L1）：段文本按码点切行，行不跨段、章局码点连续 ──
@@ -438,8 +445,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [win, activeChapterId],
   );
   const stitched = useMemo(
-    () =>
-      buildStitchedLines(
+    () =>      buildStitchedLines(
         loadedChapters,
         (id) => layoutOfMap.get(id),
         // scroll 模式：章界插标题行（取窗内该章 title）；page 模式不插（翻页头另渲染）。
@@ -874,6 +880,15 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       //     （同起点对照 A 臂 err=795 / B 臂 err=952，均出 prepend）。
       //     ⇒ 余量大小**不是**这里的杠杆；杠杆在 `handleScrollCommit` 的无条件 `forcePrev`。
       //     ⇒ 现值只是「不引入新量纲」的占位，**不要再靠调它治病**，也不要凭感觉上调。
+      //
+      // ⚠⚠ 2026-10-14 V7 **已撤回**（纸上验算自我否决，记此防复发）：
+      //   曾试「额外保留锚章的 next」，理由是「next 在链尾 ⇒ 事后补装落链尾而非链首」。
+      //   ★但 `forcePrev` 补的是 `getSiblingChapters(链首).prev`——
+      //     链首仍是锚章本身（窗口为 `[c14,c15]` 时链首=c14）⇒ prev 仍是 c13
+      //     ⇒ **照补、照落链首** ⇒ prepend 一模一样。
+      //   ⇒ 决定性量：「保留谁」与「谁落在链首」是两个独立量，
+      //     **前者改变不了后者**（链条顺序由章序决定，不由保留集决定）。
+      //   ⇒ 真正的杠杆只有一个：**补的章在不在窗内**。
       return retainIdsForViewport(
         cid,
         loadedChapters,
@@ -1191,6 +1206,25 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    *     让窗口**一次到位**（center+prev+next 同时在窗），
    *     事后 `fillNeighbors` 因 `chain0≠active` 与 `windowHas` 双拦而不再补 prev。
    *   ⚠ 不得改回「只装中心章」：那等于把 prepend 从「跳章后」挪回「滚动时」。
+   *
+   * ★★ V6（2026-10-14 用户报告：「跳到汉纪四再跳回汉纪七，汉纪七没有顶头」）：
+   *   `jumpTo` 切换了 `activeChapterId` 并 bump `switchSeq`（FlatList 重挂载），
+   *   却**没有同步 `lastRead`**。而 `initialCharOffset` 的持久化分支是
+   *   ```
+   *   lastRead.chapterId === activeChapterId ? lastRead.charOffset : 0
+   *   ```
+   *   跳章路径下 `lastRead` 仍是**离开前那一章**（或更早），于是：
+   *   - 跳去别的章：条件不成立 ⇒ 用 0 ⇒ 顶头 ✔（碰巧对）
+   *   - 跳回**曾经读过且读到一半**的章：条件成立 ⇒ 用**旧 charOffset**
+   *     ⇒ 落在章中 ⇒ **用户看到「没有顶头」** ✘
+   *   ★另外 `handleScrollCommit` 会立刻用旧窗口的首行调 `recordProgress`，
+   *     把「错位位置」又写回 `lastRead` ⇒ **一次错位被持久化**。
+   *   ⇒ 修法：`jumpTo` **显式**把 `lastRead` 重写为「目标章 + 章首」
+   *     （`openChapter(bookId, cid, undefined, undefined, 0)`），
+   *     使「跳到某章 = 该章章首」成为**显式契约**而非巧合。
+   *   ★用 `0` 而非 `undefined`：`undefined` 会让 `openChapter` 的幂等条件
+   *     在「旧值恰为 undefined」时跳过写入，且 `initialCharOffset` 的
+   *     `>= 0` 真值判断会把 0 吃掉（`charOffset: 0` 是合法章首，store 已按此修）。
    */
   const jumpTo = useCallback(
     (cid: string) => {
@@ -1199,6 +1233,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       }
       const retain = retainSetFor(cid);
       centerRef.current = cid;
+      // ★★ V6：跳转即重写续读位置为「目标章 + 章首」。
+      //   ★ 必须在 `setActiveChapterId` 与 `setSwitchSeq` **之前**写：
+      //   后两者驱动 FlatList 重挂载，重挂载时读 `initialLineIndex`
+      //   ← `initialCharOffset` ← `lastRead`。写在它们之后 ⇒ 重挂载那一刻
+      //   `lastRead` 可能还是旧章/旧偏移 ⇒ 落在章中（用户报告「没有顶头」）。
+      if (bookId) {
+        openChapter(bookId, cid, undefined, undefined, 0);
+      }
       setActiveChapterId(cid);
       setSwitchSeq((s) => s + 1);
       // 装载判定用合并前窗：recenter 只裁剪不新增，begin 判定结果与合并后一致
@@ -1234,7 +1276,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         })();
       }
     },
-    [loadChapterData, retainSetFor, prewarmChapter],
+    // ★ V6：`bookId`/`openChapter` 必须进依赖 —— 少进 ⇒ stale closure ⇒
+    //   跳转时用旧的 bookId 写lastRead（要么写错书、要么被幂等跳过）。
+    [loadChapterData, retainSetFor, prewarmChapter, bookId, openChapter],
   );
 
   // ── 目录（TOC，2026-10-08）：顶栏点章节名 → 目录弹层 → 点章名跳章 ──
