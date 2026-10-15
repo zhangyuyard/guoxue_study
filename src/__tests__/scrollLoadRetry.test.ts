@@ -14,15 +14,7 @@
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-import {
-  retainIdsByBudget,
-  retainIdsForViewport,
-  chaptersInRowRange,
-  shouldFillPrevOnCommit,
-  reservedPrevHeight,
-  reservedHeaderDeltaContentSize,
-  PREV_HINT_MIN_H,
-} from '../reader/chapterWindow';
+import { retainIdsByBudget, retainIdsForViewport, chaptersInRowRange, shouldFillPrevOnCommit } from '../reader/chapterWindow';
 import { indexOfLineKey, lineKeyOf, type AnchorLineLike } from '../reader/core/modes/scrollAnchor';
 
 function stripComments(src: string): string {
@@ -66,16 +58,9 @@ describe('滚动邻章装载失败可重试：接线断言', () => {
     expect(countOf(readerSrc, 'setFillFailed((prev)')).toBe(2);
   });
 
-  it('占位在失败时显示失败态文案（next/prev 各 1 处）', () => {
-    // ★★ V9（2026-10-14 占位等高）契约变更：头部占位的**正常态**文案由
-    //   「上一章加载中…」改成「上章」（用户裁定：预留空白里放「上章」提示），
-    //   失败态随之改成「上章加载失败，滑动重试」。
-    //   ★断言按「写法会变」写（条目 101）：只锁「失败分支存在且两侧各一」，
-    //     **不锁死具体字面量** —— 文案是产品决策，不是契约。
-    expect(countOf(scrollSrc, 'loadError?.next ?')).toBe(1);
-    expect(countOf(scrollSrc, 'loadError?.prev ?')).toBe(1);
-    //失败分支必须真的带「重试」语义（否则用户不知道还能再滑）
-    expect(countOf(scrollSrc, '重试')).toBe(2);
+  it('占位在失败时显示「加载失败，滑动重试」（next/prev 各 1 处）', () => {
+    expect(countOf(scrollSrc, "loadError?.next ? '加载失败，滑动重试'")).toBe(1);
+    expect(countOf(scrollSrc, "loadError?.prev ? '加载失败，滑动重试'")).toBe(1);
   });
 
   it('loadError 接线：ReaderScreen 计算并传入 ScrollMode', () => {
@@ -85,13 +70,12 @@ describe('滚动邻章装载失败可重试：接线断言', () => {
     expect(countOf(scrollSrc, 'loadError?: { next?: boolean; prev?: boolean };')).toBe(1);
   });
 
-  it('阴性对照：正常态文案仍在（失败时才切失败态），且计数工具本身有效', () => {
-    // 同范围正对照：「重试」二字在场 ⇒ 计数工具本身有效（防「grep 打偏 = 假 0」）
-    expect(countOf(scrollSrc, '重试')).toBeGreaterThan(0);
-    // 尾部占位正常态文案（未改，仍锁字面量：它与V9 无关）
+  it('阴性对照：旧文案仍保留正常态（继续滑动 / 加载中），工具有效', () => {
+    // 同范围正对照：失败文案在场 ⇒ 计数工具本身有效（防「grep 打偏 = 假 0」）
+    expect(countOf(scrollSrc, '加载失败，滑动重试')).toBeGreaterThan(0);
+    // 正常态文案仍在（失败时才切换成失败文案）
     expect(countOf(scrollSrc, '继续滑动以加载下一章…')).toBe(1);
-    // ★头部占位正常态：V9 改为「上章」+ **贴底**渲染
-    expect(countOf(scrollSrc, "'上章'")).toBe(1);
+    expect(countOf(scrollSrc, '加载中…')).toBe(1);
   });
 
   /**
@@ -136,13 +120,7 @@ describe('滚动邻章装载失败可重试：接线断言', () => {
     //    ★ 2026-10-14：上方余量也用同一算式（`SCROLL_WINDOW_KEEP_SCREENS * lpp`）
     //      ⇒ 该串出现 2 次（budget + leadRows），是**有意**的，不是重复代码。
     expect(countOf(readerSrc, 'SCROLL_WINDOW_KEEP_SCREENS * lpp')).toBe(2); // budget + leadRows
-    // ★ 2026-10-14 V9-b：该串现在出现 **2** 次——`retainForScrollCommit` 的
-    //   `lineCountOfOf` 与 V9-b 的「预留行数取窗口 max」是**两处不同用途**的
-    //   同款表达式（前者算保留集，后者算预留高度），**有意为之**。
-    //   ⇒ 按「写法会变」写（条目 101）：锁「≥1 且被 retainForScrollCommit 用到」，
-    //     不锁死出现次数。
-    expect(countOf(readerSrc, 'stitched.lineCountOf.get(id) ?? 0')).toBeGreaterThanOrEqual(1);
-    expect(readerSrc).toMatch(/\(id\)\s*=>\s*stitched\.lineCountOf\.get\(id\)/);
+    expect(countOf(readerSrc, 'stitched.lineCountOf.get(id) ?? 0')).toBe(1);
     // ★ 上方余量必须真的传进去（不传 ⇒ leadRows 默认 0 ⇒ 纯视口语义 ⇒ 跨章时旧章保不住，
     //   自造 prepend 照旧 —— 这是第一版落码的真实缺陷，钉住它）
     expect(countOf(readerSrc, 'SCROLL_WINDOW_KEEP_SCREENS * lpp,\n      );')).toBe(1); // 余量作末参传入
@@ -845,242 +823,5 @@ describe('V6 跳章续读：跳转必须重写 lastRead 为目标章章首', () 
     expect(initialCharOffset(false, undefined, afterV6, bookId, 'c-h7')).toBe(0);
     // 阴性对照：charOffset=0 是合法章首，不得被真值判断吃掉
     expect(initialCharOffset(false, undefined, { bookId, chapterId: 'c-h7', charOffset: 0 }, bookId, 'c-h7')).toBe(0);
-  });
-});
-
-/**
- * ★★★ V9 判据组：占位等高（Reserved-Space Header）—— 闪烁的根治方案。
- *
- * ## 机理（为什么它能根治）
- *
- * 旧行为：头部占位是**固定 44px 提示条**。prev 章落地时：
- * ```
- * contentSize 前 = 44 + body×rowH
- * contentSize 后 = 0+ (body + prev) × rowH
- * ΔcontentSize   = prev×rowH − 44 ★实测51812px
- * ```
- * 而补偿恰逢 `fresh=false`（内容高陈旧）⇒ `shouldDeliverCompensation` **跳过投递**
- * ⇒ 那一帧无补偿 ⇒ 整章跳过去（闪 + 回弹）。
- *
- * 新行为：头部占位＝**prev 章的预留空间**
- * ```
- * headerH = reservedPrevHeight(est, act, rowH) = max(0, est − act) × rowH
- * ```
- * ⇒ `contentSize` 在落地前后**恒定** ⇒ 原生无需调 offset
- * ⇒ **补偿器整条链路不被触发** ⇒ 不闪、不回弹。
- *
- * ★**关键性质：只要 `est ≥ act`，ΔcontentSize 恒为 0，与预估准不准无关。**
- *   预估偏大只会留「顶部空白」（可渲染成「上章」提示），不会造成位移。
- */
-describe('V9 占位等高：prev 落地前后 contentSize 恒定', () => {
-  const rowH = 50; // 真机实测
-
-  it('★ 核心：ΔcontentSize 恒为 0（真机长章书几何的多组样本）', () => {
-    // 真机读数（jump-v8-run.log / mvcp-run.log）：
-    //   prev=c11/c12/c13 行数 1038/874/1038；已装 body 1980/4572 行
-    const samples: Array<[number, number, number]> = [
-      // [est, act, bodyLines]
-      [1038, 1038, 1980], // 预估恰等于真值
-      [1038, 874, 1980],  // 预估偏大（窗口里最长的章比实际长）
-      [1200, 1038, 4572], // 预估明显偏大
-      [1000, 1000, 0],    // 空body（边界）
-      [1, 1, 1],          // 极小
-    ];
-    for (const [est, act, body] of samples) {
-      const delta = reservedHeaderDeltaContentSize(est, act, body, rowH);
-      expect(delta).toBe(0);
-    }
-  });
-
-  it('★ 反向对照：旧行为（固定 44px 占位）ΔcontentSize ≠ 0 —— 工具能区分', () => {
-    // 同一样本，旧行为的 Δ = act×rowH − 44
-    const est = 1038;
-    const act = 1038;
-    const body = 1980;
-    const oldBefore = PREV_HINT_MIN_H + body * rowH;
-    const oldAfter = 0 + (body + act) * rowH;
-    const oldDelta = oldAfter - oldBefore;
-    expect(oldDelta).not.toBe(0);
-    // 新行为必须显著更小（这正是「不闪」的量化定义）
-    const newDelta = reservedHeaderDeltaContentSize(est, act, body, rowH);
-    expect(Math.abs(newDelta)).toBeLessThan(Math.abs(oldDelta));
-  });
-
-  it('形状锁⑭：ScrollMode 的 headerH 必须用 reservedPrevHeight（不得回到常量）', () => {
-    const s = stripComments(readFileSync(SCROLL_MODE_PATH, 'utf8'));
-    // 必须调纯函数
-    expect(s).toMatch(/reservedPrevHeight\(/);
-    // ★ 反向断言：**不得**再出现 `hasMorePrev ? BOUNDARY_HINT_H : 0`
-    //   （那是旧行为 = 闪烁根因本身）
-    expect(s).not.toMatch(/const headerH = hasMorePrev \? BOUNDARY_HINT_H : 0/);
-    // 必须保留提示下限（用户裁定：预留空白里放「上章」文字）
-    expect(s).toMatch(/Math\.max\(\s*reservedPrevH\s*,\s*BOUNDARY_HINT_H\s*\)/);
-  });
-
-  it('形状锁⑮：宿主必须把 prev 的预估/实际行数接进 props', () => {
-    const r = stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
-    expect(r).toMatch(/const prevEstimatedLines = useMemo\(/);
-    expect(r).toMatch(/const prevActualLines = useMemo\(/);
-    expect(r).toMatch(/prevEstimatedLines: prevEstimatedLines,/);
-    expect(r).toMatch(/prevActualLines: prevActualLines,/);
-    // ★ 预估必须取**窗口内已装章行数的 max**（同类章上界，天然 ≥ 真值）
-    expect(r).toMatch(/stitched\.lineCountOf\.get\(cid\)/);
-    expect(r).toMatch(/if \(n > max\)/);
-  });
-
-  it('★ 行为组：reservedPrevHeight 的边界与几何安全性', () => {
-    // 无 prev ⇒ 0
-    expect(reservedPrevHeight(0, 0, rowH)).toBe(0);
-    // 未落地（act=0）⇒ 全额预留
-    expect(reservedPrevHeight(1038, 0, rowH)).toBe(1038 * rowH);
-    // 已落地（act=est）⇒ 预留归零
-    expect(reservedPrevHeight(1038, 1038, rowH)).toBe(0);
-    // act > est（预估不足）⇒ **不得返回负高度**（几何安全，退回旧行为）
-    expect(reservedPrevHeight(500, 800, rowH)).toBe(0);
-    // rowH 非法⇒ 0（防 0/负高度把 getItemLayout 算崩）
-    expect(reservedPrevHeight(1038, 0, 0)).toBe(0);
-    expect(reservedPrevHeight(1038, 0, -50)).toBe(0);
-    // ★ 恒非负（不变量）
-    for (const [e, a] of [[1, 999], [999, 1], [500, 500], [0, 100]]) {
-      expect(reservedPrevHeight(e, a, rowH)).toBeGreaterThanOrEqual(0);
-    }
-  });
-});
-
-/**
- * ★★★ V9-b 判据组：占位等高的三个前置条件（2026-10-14 真机白屏回归的修复）。
- *
- * ## 回归现象（用户报告 + 真机读数）
- *
- * 「初次进入资治通鉴，恢复上次阅读进度到汉纪三，顶部显示『上章』，**无任何动作，
- *   几秒后变白屏**，稍后显示内容」。
- *
- * ```
- * 16:59:18.962 [V9][HEADER] est=874 act=874 reserved=0    headerH=44
- * 16:59:21.415 [V9][HEADER] est=874 act=815 reserved=2950 headerH=2950
- * 16:59:21.458 [MVCP][COMP] delta=43656 offset=0 fresh=false
- * 16:59:23.964 [V9][HEADER] est=1038 act=815 reserved=11150
- * ```
- *
- * ★ 三个叠加缺陷（**都出在第一版 V9 自己**）：
- * ① `prevActualLines` 把**锚章自己**当成「已落地的 prev」⇒ 冷启动 `reserved=0`
- *    ⇒ 完全没预留（真机 `est=874 act=874 reserved=0` 自证）。
- * ② `est` 取「窗口内 max」⇒ 随窗口漂移（874→1038）⇒ **预留高度自己会变**
- *    ⇒ 每次都产生新的 contentSize 突变。
- * ③ `bootScrollIndex` 在 `initialLineIndex===0` 时返回 `undefined`
- *    ⇒ 原生停在 offset=0，而 offset 0 **就是预留空白** ⇒ **白屏**。
- *
- * ⚠ 本组三条判据对应三条**独立**修复；缺任何一条都还会白屏。
- */
-describe('V9-b 占位等高的三个前置条件', () => {
-  const r = () => stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
-  const s = () => stripComments(readFileSync(SCROLL_MODE_PATH, 'utf8'));
-
-  it('形状锁⑯：预留行数必须**书级恒定**（跨 prev 对象也不变）', () => {
-    const src = r();
-    expect(src).toMatch(/reservedForRef\s*=\s*useRef/);
-    // ★★ V9-d：必须是**书级**锁（真机读数headerH 49100→52650 单调增大
-    //   ⇒ 每换一个 prev 就按更大窗口重算 ⇒ 每行 cell 被推下 ⇒ 全量重排 ⇒ 白屏）
-    expect(src).toMatch(/bookReservedLinesRef\s*=\s*useRef/);
-    // 关键：已锁定时**直接沿用书级值**，不再看 pendingPrevId 是否变化
-    expect(src).toMatch(/if \(bookReservedLinesRef\.current > 0\) \{[\s\S]{0,200}return bookReservedLinesRef\.current/);
-    // ★ 反向断言：不得再按「同对象」判断沿用（那正是 header 反复增长的来源）
-    expect(src).not.toMatch(/reservedForRef\.current === pendingPrevId && reservedLinesRef\.current > 0/);
-    // ★ prev 落地后**只清本轮对象，不清书级锁**
-    const iClear = src.indexOf('reservedForRef.current = null;');
-    expect(iClear).toBeGreaterThan(-1);
-    const after = src.slice(iClear, iClear + 220);
-    expect(after).toMatch(/reservedLinesRef\.current = 0/);
-    expect(after).not.toMatch(/bookReservedLinesRef\.current = 0/);
-    // 首次锁定必须带安全余量（真实 prev 可能比窗口 max 更长）
-    expect(src).toMatch(/Math\.ceil\(max \* 1\.25\)/);
-  });
-
-  it('形状锁⑰：首屏/续读定位不得预留（门控＝用户已发生过真实滚动）', () => {
-    const src = r();
-    // 必须有「用户已滚动」门控
-    expect(src).toMatch(/const \[userScrolled, setUserScrolled\] = useState\(/);
-    // 预估的首行判据必须含 userScrolled
-    expect(src).toMatch(/if \(!userScrolled \|\| !pendingPrevId\) \{\s*return 0;/);
-    // ★ 宿主必须把它接到 ScrollMode 的回调上
-    expect(src).toMatch(/onUserScrolledOnce: handleUserScrolledOnce,/);
-    expect(src).toMatch(/const handleUserScrolledOnce = useCallback\(/);
-    // ★ ScrollMode 侧必须在**用户手指拖拽**那一刻上抛（且只抛一次）
-    const sc = s();
-    //★★ 必须用**独立的**手势 ref，**不得**复用 `userScrolledRef`：
-    //   `userScrolledRef` 会被**程序定位**的 onScroll 置真（首屏定位/boot 重挂载/
-    //   补偿投递都走 onScroll）⇒ 复用它时手势开闸的 `if` 永远为假
-    //   ⇒ 真机读数：`onScrollBeginDrag` 触发 4 次但 `est` 恒 0（三次回归的根因）。
-    expect(sc).toMatch(/const userGestureRef = useRef\(/);
-    expect(sc).toMatch(/if \(!userGestureRef\.current\) \{[\s\S]{0,200}onUserScrolledOnce\?\.\(\)/);
-    // ★ 反向断言：开闸 if 里不得出现 userScrolledRef
-    const gateSeg = sc.slice(sc.indexOf('const handleScrollBeginDrag'), sc.indexOf('const handleMomentumBegin'));
-    expect(gateSeg).not.toMatch(/userScrolledRef/);
-    //★★ 必须挂在 `onScrollBeginDrag`，**不得**挂在 `onScroll`：
-    //   原生 scrollToOffset 也会触发 onScroll ⇒ 用户**完全没动手**的首屏
-    //   就出现 `reserved=51900` ⇒ 巨额预留 ⇒ **仍白屏**（二次回归的根因）。
-    expect(sc).toMatch(/onScrollBeginDrag=\{handleScrollBeginDrag\}/);
-    expect(sc).not.toMatch(/onScrollBeginDrag=\{onScroll\}/);
-  });
-
-  it('形状锁⑲：prevActualLines 必须用「预留对象 id」，不得用链首（防缺陷①）', () => {
-    // ★ 用**未 strip** 的源码定位：`stripComments` 先删块注释再删行注释，
-    //   块注释里的 `*/` 残留会让行注释正则吞掉后续真实代码 ⇒ 定位落空
-    //   （实测踩过：判据自身的构造错误，条目 91）。
-    const src = readFileSync(READER_SCREEN_PATH, 'utf8');
-    const i = src.indexOf('const prevActualLines = useMemo(');
-    expect(i).toBeGreaterThan(-1); // 正对照：锚点必须命中
-    const seg = src.slice(i, i + 700);
-    // ★ 必须用预留对象
-    expect(seg).toMatch(/const id = reservedForRef\.current/);
-    // ★ 反向断言：**不得**用 `loadedChapters[0]`——
-    //   冷启动时链首是**锚章**而非「已落地的 prev」，用它会把锚章行数误当
-    //   act 扣掉 ⇒ reserved 归零 ⇒ 完全没预留（真机 `est=874 act=874
-    //   reserved=0` 自证）。
-    expect(seg).not.toMatch(/const id = loadedChapters\[0\]/);
-    // 且必须真的查「该id 是否已在窗内」
-    expect(seg).toMatch(/loadedChapters\.includes\(id\)/);
-  });
-
-  it('形状锁⑱：bootScrollIndex 在 initialLineIndex===0 时也必须定位（防白屏）', () => {
-    const sc = s();
-    // ★ 反向断言：不得出现 `initialLineIndex > 0 ? … : undefined`
-    //   （返回 undefined ⇒ FlatList 不定位 ⇒ offset 0＝预留空白 ⇒ 白屏）
-    expect(sc).not.toMatch(/initialLineIndex > 0 \? initialLineIndex : undefined/);
-    // 必须恒定返回下标（>=0 都返回，含 0）
-    expect(sc).toMatch(/return initialLineIndex >= 0 \? initialLineIndex : 0;/);
-  });
-
-  it('★ 行为组：预留门控的三种状态（首屏 / 滚动后 / prev 已落地）', () => {
-    //复刻三态判定（生产接线由形状锁⑯⑰保证）
-    const reservedLines = (
-      userScrolled: boolean,
-      pendingPrevId: string | null,
-      lockedFor: string | null,
-      lockedLines: number,
-    ): number => {
-      if (!userScrolled || !pendingPrevId) {
-        return 0; // 首屏/续读定位 ⇒ 不预留（防白屏）
-      }
-      if (lockedFor === pendingPrevId && lockedLines > 0) {
-        return lockedLines; // 沿用锁定值 ⇒ 恒定
-      }
-      return 874; // 首次为该 prev 设预留（窗口 max 的代表值）
-    };
-    // 首屏：未滚动 ⇒ 0 ⇒ headerH 退化成 44px 提示条 ⇒ **无空白 ⇒ 不白屏**
-    expect(reservedLines(false, 'c13', null, 0)).toBe(0);
-    expect(reservedPrevHeight(reservedLines(false, 'c13', null, 0), 0, 50)).toBe(0);
-    // 滚动后：开闸 ⇒ 预留
-    expect(reservedLines(true, 'c13', null, 0)).toBe(874);
-    // 同对象再算⇒ **锁定值不变**（缺陷②的修复点）
-    expect(reservedLines(true, 'c13', 'c13', 874)).toBe(874);
-    // 换对象 ⇒ 重新起算（新的补装周期）
-    expect(reservedLines(true, 'c12', 'c13', 874)).toBe(874);
-    // prev 已落地 ⇒ act=真值 ⇒ 预留归零 ⇒ contentSize 恒定
-    const est = reservedLines(true, 'c13', 'c13', 874);
-    expect(reservedPrevHeight(est, 874, 50)).toBe(0);
-    // ★ 白屏判据：首屏时 headerH 必须 ≤ 提示条高度（不得出现巨额空白）
-    const headerHAtBoot = Math.max(reservedPrevHeight(0, 0, 50), 44);
-    expect(headerHAtBoot).toBe(44);
   });
 });
