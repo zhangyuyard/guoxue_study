@@ -825,3 +825,84 @@ describe('V6 跳章续读：跳转必须重写 lastRead 为目标章章首', () 
     expect(initialCharOffset(false, undefined, { bookId, chapterId: 'c-h7', charOffset: 0 }, bookId, 'c-h7')).toBe(0);
   });
 });
+
+/**
+ * ★★★ R1 判据组：切章等待期**不得空白**（修「切章后纯白 2~3 秒」）。
+ *
+ * ## 根因链（录屏 + 真机探针，非推断）
+ *
+ * 录屏（`vscan.py`，34.57s/30fps）测得 **3 次白屏，每次精确 3.0 秒**，
+ * 形态＝**顶栏与底部章间导航已渲染、只有正文区纯白**（条目 139）。
+ * 探针（`deliverables/mvcp-rootfix-2026-10-14/rootprobe-run.log`）逐段对齐：
+ * ```
+ * 09:56:50.721 [RP][PAINT] lines=1642 initIdx=781 bootSeq=0  ← 白屏开始
+ * 09:56:50.924 [RP][LOAD]  cid=c3 emptyShell=true degrade=1166ms
+ * 09:56:52.885 [RP][PAINT] lines=2437← 白屏结束（1.96s）
+ * ```
+ * ★ 排除项（都**不是**真因）：`lines` 全程**非空**、`initIdx` **不越界**、
+ *   `bootSeq` 恒 0（**无重挂载**）⇒ 不是渲染丢帧/越界/重挂载。
+ * ★ 真因：跳到**空壳章**（首开只装配目标章，其余后台分批填充）⇒ 触发
+ *   `degradeChapterToWholeRead` **同步整章直读**（实测 1.2–2.2s）
+ *   ⇒ **JS 线程阻塞** ⇒ React 无法提交；而 `setSwitchSeq` 已让 `listKey` 变
+ *   ⇒ FlatList 已重挂载却**一个 cell 都没画** ⇒ 正文区纯白。
+ */
+describe('R1 切章等待期：不得空白', () => {
+  const r = () => stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
+
+  it('形状锁⑳：必须有 switching 状态，且两处 setSwitchSeq 都要开闸', () => {
+    const src = r();
+    expect(src).toMatch(/const \[switching, setSwitching\] = useState\(/);
+    // ★ 两处切章入口（路由 effect + jumpTo）都必须开闸，漏一处就有白屏
+    const opens = countOf(src, 'setSwitching(true)');
+    expect(opens).toBe(2);
+    // ★ 每处开闸必须紧跟同一次切章（不得挂在别处）
+    expect(countOf(src, 'setSwitchSeq((s) => s + 1);')).toBe(opens);
+  });
+
+  it('形状锁㉑：关闸条件必须是「目标章已产出可渲染的行」而非 promise 完成', () => {
+    const src = r();
+    const i = src.indexOf('if (!switching)');
+    expect(i).toBeGreaterThan(-1); // 正对照：effect 在场
+    const seg = src.slice(i, i + 420);
+    // ★ 用 stitched 的真值（行进了渲染序列）才关闸
+    expect(seg).toMatch(/stitched\.lineCountOf\.get\(activeChapterId\)/);
+    expect(seg).toMatch(/stitched\.lines\.length > 0/);
+  });
+
+  it('形状锁㉒：switching 分支必须排在 !loaded 之后、空文案之前', () => {
+    const src = r();
+    const iNotLoaded = src.indexOf(') : !loaded ? (');
+    const iSwitching = src.indexOf(') : switching ? (');
+    const iEmpty = src.indexOf(') : (readerMode ===');
+    expect(iNotLoaded).toBeGreaterThan(-1);
+    expect(iSwitching).toBeGreaterThan(-1);
+    expect(iEmpty).toBeGreaterThan(-1);
+    // 顺序错 ⇒ 等待期仍走「空文案」或直接渲染未挂载的 FlatList
+    expect(iNotLoaded).toBeLessThan(iSwitching);
+    expect(iSwitching).toBeLessThan(iEmpty);
+    // 分支内必须有可见反馈（spinner + 文案），不能是空 View
+    const seg = src.slice(iSwitching, iSwitching + 420);
+    expect(seg).toMatch(/ActivityIndicator/);
+    expect(seg).toMatch(/正在载入章节/);
+  });
+
+  it('★ 行为组：switching 的开/关状态机（三场景）', () => {
+    // 复刻关闸判定（接线由形状锁⑳㉑保证）
+    const gate = (
+      switching: boolean,
+      targetLines: number,
+      stitchedLen: number,
+    ): boolean => {
+      if (!switching) return false;
+      return targetLines > 0 && stitchedLen > 0;
+    };
+    // 切章瞬间：目标章还没行 ⇒ 保持 loading（**不空白**）
+    expect(gate(true, 0, 1642)).toBe(false);
+    // 数据到了 ⇒ 关闸（目标章 795 行 + 拼接序列非空）
+    expect(gate(true, 795, 2437)).toBe(true);
+    // 边界：行数为 0 ⇒ 不能关
+    expect(gate(true, 0, 0)).toBe(false);
+    // 未切章时恒 false（不干扰正常阅读）
+    expect(gate(false, 0, 0)).toBe(false);
+  });
+});

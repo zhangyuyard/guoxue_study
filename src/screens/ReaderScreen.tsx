@@ -142,6 +142,25 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   const [error, setError] = useState<string | null>(null);
   /** 就地切换序号：切换章时递增，驱动 FlatList 重挂载（initialScrollIndex 重算） */
   const [switchSeq, setSwitchSeq] = useState(0);
+  /**
+   * ★★ R1（2026-10-15 录屏+探针判决后的修复）：切章**等待期**标记。
+   *
+   * 根因链（真机读数 `rootprobe-run.log`）：
+   * ```
+   * 09:56:50.721 [RP][PAINT] lines=1642 initIdx=781 bootSeq=0← 白屏开始
+   * 09:56:50.924 [RP][LOAD]  cid=c3 emptyShell=true degrade=1166ms
+   * 09:56:52.885 [RP][PAINT] lines=2437                ← 白屏结束（1.96s）
+   * ```
+   * 跳到「空壳章」（首开只装配目标章，其余后台分批填充）⇒ 触发
+   * `degradeChapterToWholeRead` **同步整章直读**（实测 1.2–2.2s）⇒
+   * **JS 线程被阻塞**，React 无法提交；而 `setSwitchSeq` 已让 `listKey` 变
+   * ⇒ FlatList 已重挂载却一个 cell 都没画 ⇒ **正文区纯白2~3 秒**
+   * （录屏测得「精确 3.0s」，顶栏/底栏正常）。
+   *
+   * ★ 本状态只解决**观感**（等待期不再空白，给出明确反馈）；
+   *   等待时长本身要靠 `degradeChapterToWholeRead` 不阻塞 JS 来根治。
+   */
+  const [switching, setSwitching] = useState(false);
   /** 当前中心章 ref（异步装载回写的陈旧判定用，避免闭包过期） */
   const centerRef = useRef<string>(chapterId);
   // 路由 chapterId 变化（书架重进/路由跳章）时同步中心
@@ -255,6 +274,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     centerRef.current = chapterId;
     setActiveChapterId(chapterId);
     setSwitchSeq((s) => s + 1); // 路由进入/跳转也驱动列表重挂载（initialScrollIndex 重算）
+    setSwitching(true); // ★ R1：切章等待期（同步整章直读会阻塞 JS 2s+）不给空白
     const retain = retainSetFor(chapterId);
     const before = winRef.current;
     const cached = windowGet(before, chapterId);
@@ -994,6 +1014,19 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     fillNeighbors();
   }, [fillNeighbors]);
 
+  // ★★ R1：切章等待期的**关闸**条件＝「目标章已产出可渲染的行」。
+  //   ★不用「装载 promise 完成」当条件：那只是数据到位，FlatList 还没画出来
+  //   ⇒ 关早了仍会有空窗。用 `stitched` 的真值（行已进渲染序列）才准。
+  useEffect(() => {
+    if (!switching) {
+      return;
+    }
+    const n = stitched.lineCountOf.get(activeChapterId) ?? 0;
+    if (n > 0 && stitched.lines.length > 0) {
+      setSwitching(false);
+    }
+  }, [switching, activeChapterId, stitched.lineCountOf, stitched.lines.length]);
+
   // ── 原生 FlatList 滚动模式（stitched.lines 平铺行流直接作 data）──
   // 书级边界：窗口首/末章的相邻章存在性
   const hasMorePrev = useMemo(() => {
@@ -1273,6 +1306,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       }
       setActiveChapterId(cid);
       setSwitchSeq((s) => s + 1);
+      setSwitching(true); // ★ R1：同上
       // 装载判定用合并前窗：recenter 只裁剪不新增，begin 判定结果与合并后一致
       const before = winRef.current;
       // ★★ V5：目标集合＝retain ∪ {cid}（retain 已含 cid，这里只补防御）
@@ -1455,6 +1489,14 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
         </View>
+      ) : switching ? (
+        // ★★ R1：切章等待期（空壳章触发同步整章直读，JS 被阻塞 1.2–2.2s）。
+        //   此前此处直接渲染已重挂载但「一个 cell 都没画」的 FlatList ⇒ 纯白 2–3s
+        //   （录屏测得精确 3.0s，顶栏/底栏正常）。
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={[styles.switchHint, { color: colors.textSecondary }]}>正在载入章节…</Text>
+        </View>
       ) : (readerMode === 'scroll' ? stitched.lines.length === 0 : layout.lines.length === 0) ? (
         <View style={styles.center}>
           <Text style={{ color: colors.textSecondary }}>本章暂无正文</Text>
@@ -1619,6 +1661,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  /** ★ R1：切章等待期的提示文字（配 spinner；见 switching 分支） */
+  switchHint: { marginTop: 10, fontSize: 13 },
   list: {
     flex: 1,
   },
@@ -1660,6 +1704,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   headerSpacer: {
+  /** ★R1：切章等待期的提示文字（配 spinner） */
     width: 44,
   },
   // ★ 2026-10-08 删除 tapZoneL/tapZoneR（左右 30% 透明翻页热区）：
