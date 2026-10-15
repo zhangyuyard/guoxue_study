@@ -69,8 +69,11 @@ describe('① 滚动模式：点击不再翻屏', () => {
     expect(countOf(scrollSrc, 'const handleScroll = useCallback(')).toBe(1);
     expect(countOf(scrollSrc, 'const onScroll = useCallback(')).toBe(1);
     expect(countOf(scrollSrc, 'onScroll={onScroll}')).toBe(1);
-    // 两个 scrollToOffset：数据位移补偿 + onScrollToIndexFailed 兜底（均非翻屏）
-    expect(countOf(scrollSrc, 'scrollToOffset')).toBe(2);
+    // 三个 scrollToOffset（均非翻屏）：
+    //   ① 数据位移补偿 ② onScrollToIndexFailed 兜底
+    //   ③ ★D1（2026-10-15）跳章落位（scroll 模式去掉重挂载后，initialScrollIndex
+    //      只在挂载生效 ⇒ 必须显式落位；锚点补偿对跳章无效，见 jumpToChapterId）
+    expect(countOf(scrollSrc, 'scrollToOffset')).toBe(3);
     expect(countOf(scrollSrc, 'onScrollToIndexFailed')).toBe(1);
   });
 

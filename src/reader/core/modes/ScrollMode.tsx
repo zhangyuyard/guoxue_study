@@ -100,6 +100,23 @@ export interface ScrollModeProps {
   loadError?: { next?: boolean; prev?: boolean };
   /** 重挂载键（切模式/跳章触发全新列表） */
   listKey?: string;
+  /**
+   * ★★★ D1（2026-10-15）：**待跳转目标章 id**（scroll 模式去掉重挂载后的落位依据）。
+   *
+   * ★背景：`initialScrollIndex` 只在 FlatList **挂载**时生效。跳章若靠
+   *   `listKey` 变化触发重挂载来落位，代价是 ~117 个带拼音 `TextView` 全部
+   *   重建⇒ **1.4s 空窗**（真机：目标章 `emptyShell=false` 数据已就绪仍白屏）。
+   * ⇒ 改为「不重挂载 + 数据就绪后显式 `scrollToOffset` 落位」。
+   */
+  jumpToChapterId?: string;
+  /** 落位完成（宿主据此清 `pendingJumpTo`，否则会反复落位） */
+  onJumpToSettled?: () => void;
+  /**
+   * ★ 各章首行在拼接序列里的**全局下标**（`stitched.firstLineOf`）。
+   * ★D1 的跳章落位用它把「目标章」翻译成「行下标」——不能靠 `lines.findIndex`
+   *   线性扫（每帧 O(n)），也不能靠锚点（跳章时锚行不存在 ⇒ 恒 -1）。
+   */
+  firstLineOf?: ReadonlyMap<string, number>;
 }
 
 /** 章界提示条高度（dp）。★ 旧值 = 视口高（整屏），见文件头 ②：占位高度直接
@@ -188,6 +205,9 @@ const ScrollMode = memo(function ScrollMode({
   onScrollDirChange,
   loadError,
   listKey,
+  jumpToChapterId,
+  onJumpToSettled,
+  firstLineOf,
 }: ScrollModeProps) {
   const listRef = useRef<FlatList<Line> | null>(null);
   const rowH = Math.max(1, geometry.rowHeight);
@@ -734,6 +754,51 @@ const ScrollMode = memo(function ScrollMode({
    * 挂载定位行下标：bootSeq=0（首次挂载）用上层给的全局下标；重挂载时用
    * **锚行 key 在当前数据里的下标**——数据可能已前插/后插，key 是唯一稳定真值。
    */
+  /**
+   * ★★★ D1（2026-10-15）：**跳章落位**（不重挂载路线的定位实现）。
+   *
+   * ## 为什么需要它
+   * `initialScrollIndex` 只在 FlatList 挂载时生效；D1 把 scroll 模式的
+   * `listKey` 改成常量（不再随 `switchSeq` 变）⇒ 跳章**不再重挂载**
+   * ⇒ 必须在这里显式 `scrollToOffset` 落到目标章首行。
+   *
+   * ## 为什么能落在正确位置
+   * `firstLineOf` 由宿主（`buildStitchedLines`）给出「每章首行在拼接序列里的
+   * 全局下标」⇒ 目标 offset = `contentYOfLineIndex(firstLineOf.get(cid), …)`，
+   * 与 `initialLineIndex` 走的是**同一个算式**（`ReaderScreen` 里
+   * `first + clampWithin`）⇒ 两条路径的落点一致。
+   *
+   * ## 时序
+   * 1. `jumpTo` → `setPendingJumpTo({cid})` → 本 prop 变化
+   * 2. 目标章数据未就绪 ⇒ `firstLineOf.get(cid)` 为 undefined ⇒ **不投**（等）
+   * 3. 数据就绪（win 装好、`stitched` 重算）⇒ 本 effect 重跑 ⇒ 落位 + 回调清pending
+   *
+   * ★落位后必须 `onJumpToSettled()`，否则 prop 不变 ⇒ 本 effect 不会再跑，
+   *   但若因任何原因重跑会**二次跳回**同一位置（用户已滚走就被拽回）。
+   */
+  const jumpSettledRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!jumpToChapterId || !onJumpToSettled) {
+      return;
+    }
+    // 同一目标只落位一次（防「lines 再变 ⇒ 又跳回去」）
+    if (jumpSettledRef.current === jumpToChapterId) {
+      return;
+    }
+    const firstIdx = firstLineOf?.get(jumpToChapterId);
+    if (firstIdx === undefined) {
+      return; // 目标章还没进拼接序列 ⇒ 等
+    }
+    const target = contentYOfLineIndex(firstIdx, headerHRef.current, rowH);
+    listRef.current?.scrollToOffset({ offset: target, animated: false });
+    offsetRef.current = target;
+    topLineRef.current = firstIdx;
+    const l = linesRef.current[firstIdx];
+    anchorRef.current = l ? { key: lineKeyOf(l), index: firstIdx } : null;
+    jumpSettledRef.current = jumpToChapterId;
+    onJumpToSettled();
+  }, [jumpToChapterId, onJumpToSettled, firstLineOf, lines, headerH, rowH]);
+
   const bootScrollIndex = useMemo(() => {
     if (bootSeq === 0) {
       return initialLineIndex > 0 ? initialLineIndex : undefined;

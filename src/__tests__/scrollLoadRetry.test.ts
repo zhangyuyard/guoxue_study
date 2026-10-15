@@ -968,3 +968,83 @@ describe('B1 邻章预装：切章前把邻章装好', () => {
     expect(seg).toMatch(/prefilledRef\.current\.delete\(key\)/);
   });
 });
+
+/**
+ * ★★★ D1 判据组：跳章**不重挂载**（治根：消除 1.4s 空窗）。
+ *
+ * ## 为什么必须改
+ * 跳章时 bump `switchSeq` ⇒ `listKey = scroll:${switchSeq}` 变 ⇒ **FlatList 整体
+ * 重挂载** ⇒ ~117 个带拼音 `TextView` 全部重建 ⇒ 重排期间无 cell ⇒ **1.4s
+ * 空窗**（真机：目标章 `emptyShell=false` 数据已就绪**仍**白屏 ⇒ 不是数据问题）。
+ *
+ * ## 为什么去掉重挂载后定位不会错位
+ * `initialScrollIndex` 只在挂载时生效 ⇒ 必须显式 `scrollToOffset`。
+ * ★**锚点补偿兜不住**：`indexOfLineKey` 在跳章时返回 **-1**（锚行属于旧章）
+ * ⇒ `anchorCompensationDelta` 的 `if (prevIndex < 0 || nextIndex < 0) return 0`
+ * ⇒ **delta 恒 0** ⇒ 锚点补偿只对「同一批行的数据变化」有效。
+ */
+describe('D1 跳章不重挂载：显式落位', () => {
+  const r = () => stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
+  const s = () => stripComments(readFileSync(SCROLL_MODE_PATH, 'utf8'));
+
+  it('形状锁㉖：scroll 模式的 listKey 必须是常量（不得含 switchSeq）', () => {
+    const src = r();
+    // ★ 反向断言：不得再出现 `scroll:${switchSeq}`
+    expect(src).not.toMatch(/`scroll:\$\{switchSeq\}`/);
+    expect(src).toMatch(/readerMode === 'scroll' \? 'scroll:static'/);
+    // ★ flip/page 模式**必须保留**按章重挂载（它们自己按章分页定位）
+    expect(src).toMatch(/`\$\{readerMode\}:\$\{activeChapterId\}:\$\{switchSeq\}`/);
+  });
+
+  it('形状锁㉗：jumpTo 必须登记 pendingJumpTo（否则跳章停在旧位置）', () => {
+    const src = r();
+    expect(src).toMatch(/const \[pendingJumpTo, setPendingJumpTo\] = useState/);
+    // ★ 必须紧跟 jumpTo 的 setActiveChapterId 之后
+    const iJump = src.indexOf('const jumpTo = useCallback(');
+    const seg = src.slice(iJump, iJump + 1400);
+    expect(seg).toMatch(/setPendingJumpTo\(\{ cid \}\)/);
+    // ★ 且必须接进 props
+    expect(src).toMatch(/jumpToChapterId: pendingJumpTo\?\.cid,/);
+    expect(src).toMatch(/onJumpToSettled: \(\) => setPendingJumpTo\(null\),/);
+  });
+
+  it('形状锁㉘：ScrollMode 落位必须用 firstLineOf（不得线性扫/不得靠锚点）', () => {
+    const src = s();
+    const i = src.indexOf('const jumpSettledRef = useRef<string | null>(null);');
+    expect(i).toBeGreaterThan(-1);
+    const seg = src.slice(i, i + 1100);
+    // ★ 用宿主给的章首行下标（O(1) Map 查）
+    expect(seg).toMatch(/firstLineOf\?\.get\(jumpToChapterId\)/);
+    // ★ 目标行未就绪时**不投**（等数据）
+    expect(seg).toMatch(/if \(firstIdx === undefined\) \{[\s\S]{0,80}return;/);
+    // ★ 必须落位后回调清除（否则 lines 再变会二次跳回）
+    expect(seg).toMatch(/onJumpToSettled\(\)/);
+    // ★ 同一目标只落一次
+    expect(seg).toMatch(/jumpSettledRef\.current === jumpToChapterId/);
+    // ★ 不得用 findIndex 线性扫（每帧 O(n)）
+    expect(seg).not.toMatch(/lines\.findIndex/);
+  });
+
+  it('★ 行为组：落位时机的三场景', () => {
+    // 复刻落位判定（接线由形状锁㉗㉘保证）
+    const settle = (
+      jumpToChapterId: string | undefined,
+      firstLineOf: ReadonlyMap<string, number>,
+      settled: string | null,
+    ): 'wait' | 'settle' | 'skip' => {
+      if (!jumpToChapterId) return 'skip';
+      if (settled === jumpToChapterId) return 'skip';
+      if (firstLineOf.get(jumpToChapterId) === undefined) return 'wait';
+      return 'settle';
+    };
+    const m = new Map([['c12', 942]]);
+    // 数据未就绪 ⇒ 等（★不投，错了就会停在旧位置）
+    expect(settle('c13', m, null)).toBe('wait');
+    // 数据就绪 ⇒ 落位
+    expect(settle('c12', m, null)).toBe('settle');
+    // 同一目标已落位 ⇒ 跳过（★防「lines 再变 ⇒ 把用户拽回去」）
+    expect(settle('c12', m, 'c12')).toBe('skip');
+    // 无跳转 ⇒ 跳过
+    expect(settle(undefined, m, null)).toBe('skip');
+  });
+});

@@ -170,6 +170,15 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    *   ⇒ 等待期又变回空白（真机：`switching` 提前关 ⇒ 连「正在载入章节…」都没有）。
    */
   const switchingTargetRef = useRef<string | null>(null);
+  /**
+   * ★★★ D1（2026-10-15）：**待跳转目标章**（scroll 模式不再重挂载后的定位依据）。
+   *
+   * ★为什么必须有它：跳章时 `listKey` 不变 ⇒ FlatList 不重挂载 ⇒
+   *   `initialScrollIndex` **被忽略** ⇒ 必须手动 `scrollToOffset` 落位。
+   * ★为什么不用锚点补偿：锚行属于旧章，`indexOfLineKey` 返回 -1
+   *   ⇒ `anchorCompensationDelta` 恒返回 0 ⇒ 天然不适用跳章。
+   */
+  const [pendingJumpTo, setPendingJumpTo] = useState<{ cid: string } | null>(null);
   /** 当前中心章 ref（异步装载回写的陈旧判定用，避免闭包过期） */
   const centerRef = useRef<string>(chapterId);
   // 路由 chapterId 变化（书架重进/路由跳章）时同步中心
@@ -1262,12 +1271,27 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     // 跨章连续性由 ScrollMode 的锚点补偿保障（该补偿在 ScrollMode 内，不在此）。
   }, [layout, initialCharOffset, readerMode, stitched, activeChapterId, params]);
 
-  // scroll 模式锚点滑动不重挂载：listKey 不含 activeChapterId（保持 data 原地更新，
-  // 视觉位置由 ScrollMode 的锚点补偿维持）；其余模式跳章/切模式走 switchSeq 触发重挂载。
-  // ★ 2026-10-08 修正：原注释写「补偿 effect 维持」，但那时的补偿**并不存在**
-  //   （stitch.compensationDelta 生产零消费）⇒ 真机表现为打开非首章整体偏一个整屏、
-  //   上滚跨章倒退两点几章。现由 ScrollMode 按视口顶行锚点补偿。
-  const listKey = readerMode === 'scroll' ? `scroll:${switchSeq}` : `${readerMode}:${activeChapterId}:${switchSeq}`;
+  // ★★★ D1（2026-10-15「治根」）：scroll 模式的 `listKey` **去掉 `switchSeq`**。
+  //
+  // ## 为什么去掉（治根对象＝「跳章后 1.4s 白屏」）
+  //
+  // 跳章时 bump `switchSeq` ⇒ `listKey` 变 ⇒ **FlatList 整体重挂载**
+  // ⇒ ~117 个带拼音的 `TextView` 全部重建 ⇒ 重排期间正文区无 cell
+  // ⇒ **1.4s 空窗**（真机：`emptyShell=false` 数据已就绪，仍白屏 ⇒ 不是数据问题）。
+  //
+  // ## 为什么「去掉重挂载后定位不会错位」——锚点补偿**天生不适用跳章**
+  //
+  // `indexOfLineKey(lines, anchorKey)` 在跳章时返回 **-1**（锚行属于旧章，
+  // 新章没有它）⇒ `anchorCompensationDelta` 的
+  // `if (prevIndex < 0 || nextIndex < 0) return 0` ⇒ **delta 恒 0**。
+  // ⇒ 锚点补偿只对「同一批行的数据变化」（prepend/裁窗）有效，
+  //   **跳章必须另有定位机制**（见下方 `pendingJumpToRef` + ScrollMode 的跳转分支）。
+  //
+  // ★首次进入书仍靠 `initialScrollIndex`（**首挂**生效，与本项无关）。
+  // ★`flip`/`page` 模式的 `listKey` 含 `activeChapterId` ⇒ **各自照旧重挂载**，
+  //   本改动只影响 scroll 模式。
+  const listKey =
+    readerMode === 'scroll' ? 'scroll:static' : `${readerMode}:${activeChapterId}:${switchSeq}`;
 
   // flip 模式（cover/slide/none）挂载定位页号：章内行下标 → 页号（与 FlipMode 内
   // paginateChapter 同式：linesPerPage = floor(viewportH / rowHeight)）
@@ -1367,6 +1391,9 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       setSwitchSeq((s) => s + 1);
       setSwitching(true); // ★ R1：同上
       switchingTargetRef.current = cid;
+      // ★★★ D1：scroll 模式不再靠重挂载定位（`listKey` 已去掉 switchSeq）
+      //   ⇒ 显式登记「待跳转到该章」，由 ScrollMode 在数据就绪后落位。
+      setPendingJumpTo({ cid });
       // 装载判定用合并前窗：recenter 只裁剪不新增，begin 判定结果与合并后一致
       const before = winRef.current;
       // ★★ V5：目标集合＝retain ∪ {cid}（retain 已含 cid，这里只补防御）
@@ -1587,6 +1614,10 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
             onLineChange: handleScrollLineChange,
             onNearBoundary: handleNearBoundary,
             onScrollDirChange: handleScrollDir,  // ★ V3：滚动方向→邻章预取的 prev 条件
+            // ★★★ D1：待跳转目标 + 落位完成回调
+            jumpToChapterId: pendingJumpTo?.cid,
+            firstLineOf: stitched.firstLineOf,
+            onJumpToSettled: () => setPendingJumpTo(null),
             loadError: loadError,
           }}
           page={{
