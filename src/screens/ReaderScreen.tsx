@@ -297,7 +297,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
         return;
       }
       prefilledRef.current.add(key);
-      void UserBookService.prefillBuiltinNeighbors(bookId, cid).catch(() => {
+      // ★★ D2：只装**next 方向** ⇒ 预装章落链尾（append）⇒ 不产生 prepend
+      void UserBookService.prefillBuiltinNeighbors(bookId, cid, undefined, 'next').catch(() => {
         // 预装失败不致命（切章时仍有 degrade 兜底）；允许重试
         prefilledRef.current.delete(key);
       });

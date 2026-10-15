@@ -2142,6 +2142,32 @@ export async function fillBuiltinChapterNow(
 }
 
 /**
+ * ★★ D2（2026-10-15）：`dir` —— **预装方向**。
+ * ★`'next'` = 只装**链尾方向**（append）⇒ **结构上不产生 prepend**。
+ *  `'both'`（默认）＝ 双向（r38 既有行为，不变）。
+ *
+ * ## 为什么需要它（真机探针 `put2-run.log`）
+ * ```
+ * 13:24:12.029 [PUT] id=c6 chain=[c7]     active=c7 → 随后 delta=52650
+ * 13:24:44.638 [PUT] id=c5 chain=[c6..c9] active=c6 → 随后 delta=49000
+ * 落点分布: BEFORE=0  AT_END=1  ABSENT=4
+ * ```
+ * ★**4/5 次 `windowPut` 都是 prepend**，put 的是连续邻章（＝ 预装范围）
+ * ⇒ 跨章 prepend 的来源是**预装的 prev 方向**（落在链首之前）。
+ * ★占位等高（V9 全系 6 次）已结构性判死：预留的「建立」与「撤销」各自
+ * 都是一次突变（`est=1257/act=795 headerH:44→62850→44 delta=62806/-23056`）。
+ * ⇒ ★**唯一可行的方向是「不产生 prepend」**，而不是抵消它。
+ *
+ * ★代价（诚实）：只装 next ⇒ 用户**上滚**时链首 prev 未装 ⇒ 仍要靠
+ * `fillNeighbors` 补那一次（`needPrev = 链首==锚章`）⇒ 那一次仍有 prepend，
+ * 但**不再有「后台预装持续不断地产生 prepend」**。
+ *
+ * ★默认仍是 `'both'`：调用方（ReaderScreen 的 B1/B2）显式传 `'next'`；
+ * 既有测试与灰度路径行为**逐字不变**。
+ */
+export type PreloadDir = 'both' | 'next';
+
+/**
  * 跳章邻章预热（保留函数名作兼容薄壳，内部改走统一装配调度器）。
  *
  * r38（T02）行为：
@@ -2158,6 +2184,7 @@ export async function prefillBuiltinNeighbors(
   bookId: string,
   chapterId: string,
   count = resolvePreloadSpan(),
+  dir: PreloadDir = 'both',
 ): Promise<void> {
   // ★2026-10-13（B 档步骤 7）：早退条件按书籍类型分流——用户书无
   //   `BuiltinBookSpec`，此前在此**无条件早退** ⇒ 邻章预热对用户书恒失效。
@@ -2188,7 +2215,10 @@ export async function prefillBuiltinNeighbors(
     for (let k = 1; k <= count; k += 1) {
       const prevId = idx - k >= 0 ? chapters[idx - k].id : null;
       const nextId = idx + k < chapters.length ? chapters[idx + k].id : null;
-      if (prevId) {
+      // ★★ D2：`dir === 'next'` 时**不提交 prev** ⇒ 预装章只落链尾（append）
+      //   ⇒ 结构上不产生 prepend（真机探针：4/5 次 windowPut 是 prepend，
+      //   put 的正是预装的 prev 方向邻章）。
+      if (prevId && dir !== 'next') {
         chapterAssemblyScheduler.requestMany(
           bookId,
           [prevId],
@@ -2211,9 +2241,12 @@ export async function prefillBuiltinNeighbors(
   }
   // —— 灰度回退：r37 串行「前 count 后 count」 ——
   const order: string[] = [];
-  for (let k = 1; k <= count; k += 1) {
-    if (idx - k >= 0) {
-      order.push(chapters[idx - k].id);
+  // ★★ D2：`'next'` 时跳过 prev 段（与调度器路径语义一致）
+  if (dir !== 'next') {
+    for (let k = 1; k <= count; k += 1) {
+      if (idx - k >= 0) {
+        order.push(chapters[idx - k].id);
+      }
     }
   }
   for (let k = 1; k <= count; k += 1) {

@@ -1129,3 +1129,71 @@ describe('B2 打开目录时扩大预装', () => {
     expect(prefill('c9')).toBe(false);
   });
 });
+
+/**
+ * ★★★ D2 判据组：预装**只装next 方向**（结构上消除 prepend 源）。
+ *
+ * ## 真机探针（`put2-run.log`，V9-f 之前的基线包）
+ * ```
+ * 13:24:12.029 [PUT] id=c6 chain=[c7]     active=c7 → 随后 delta=52650
+ * 13:24:44.638 [PUT] id=c5 chain=[c6..c9] active=c6 → 随后 delta=49000
+ * 落点分布: BEFORE=0  AT_END=1  ABSENT=4
+ * ```
+ * ★**4/5 次 `windowPut` 都是 prepend**，put 的是 c5/c6/c7/c8（连续邻章
+ * ＝ B1/B2 预装范围）⇒ **prepend 的来源是预装的 prev 方向**。
+ * ★占位等高（V9 全系 6 次）已**结构性判死**（预留的建立/撤销各自都是突变）
+ * ⇒ ★只剩「不产生 prepend」这条路。
+ */
+const SERVICE_PATH = resolve(
+  __dirname,
+  '../services/UserBookService.ts',
+);
+
+describe('D2 预装只装 next 方向', () => {
+  const r = () => stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
+  const svc = () => stripComments(readFileSync(SERVICE_PATH, 'utf8'));
+
+  it('形状锁㉛：service 必须有 dir 形参且两条路径都遵守', () => {
+    const src = svc();
+    expect(src).toMatch(/dir: PreloadDir = 'both'/);
+    // ★调度器路径
+    expect(src).toMatch(/if \(prevId && dir !== 'next'\)/);
+    // ★灰度回落路径（两条都要，否则灰度开关一关就退回双向）
+    expect(src).toMatch(/if \(dir !== 'next'\) \{[\s\S]{0,200}order\.push\(chapters\[idx - k\]\.id\)/);
+    // ★next 的提交**不得**被方向参数影响（永远要装）
+    expect(src).toMatch(/if \(nextId\) \{/);
+  });
+
+  it('形状锁㉜：调用方必须显式传 next（B1/B2 的预装都不得留 prev）', () => {
+    const src = r();
+    expect(src).toMatch(/prefillBuiltinNeighbors\(bookId, cid, undefined, 'next'\)/);
+    // ★反向断言：不得留下裸调用（默认 'both' ⇒ 会重新引入 prepend）
+    expect(src).not.toMatch(/prefillBuiltinNeighbors\(bookId, cid\)\.catch/);
+  });
+
+  it('★ 行为组：方向筛选的三种组合', () => {
+    const build = (idx: number, chapters: number, count: number, dir: 'both' | 'next') => {
+      const prev: number[] = [];
+      const next: number[] = [];
+      for (let k = 1; k <= count; k += 1) {
+        // 调度器路径：两个方向都提交（顺序无关）
+        if (idx - k >= 0 && dir !== 'next') prev.push(idx - k);
+        if (idx + k < chapters) next.push(idx + k);
+      }
+      return { prev, next };
+    };
+    const both = build(5, 20, 3, 'both');
+    const nextOnly = build(5, 20, 3, 'next');
+    // ★只 next ⇒ prev 为空（⇒ 预装章只落链尾 ⇒ append）
+    expect(nextOnly.prev).toEqual([]);
+    expect(nextOnly.next).toEqual([6, 7, 8]);
+    // ★双向 ⇒ 两个方向都有（既有行为不变）
+    expect(both.prev).toEqual([4, 3, 2]);
+    expect(both.next).toEqual([6, 7, 8]);
+    // ★边界：链首无 prev
+    expect(build(0, 20, 3, 'next').prev).toEqual([]);
+    expect(build(0, 20, 3, 'both').prev).toEqual([]);
+    // ★边界：链尾无 next
+    expect(build(19, 20, 3, 'next').next).toEqual([]);
+  });
+});
