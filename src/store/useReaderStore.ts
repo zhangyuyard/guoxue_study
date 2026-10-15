@@ -148,16 +148,38 @@ export const useReaderStore = create<ReaderState>()(
           segmentId: nextSegmentId,
           // 进度持久化口径：段级或字符级任一在场即写（旧数据只有段级，
           // 新版两者同写以便双向兼容）；皆无则只留章级（续读语义 = 回章首）
-          lastRead:
-            nextSegmentId || nextCharOffset !== undefined
-              ? {
-                  bookId,
-                  chapterId,
-                  ...(nextSegmentId ? { segmentId: nextSegmentId } : null),
-                  ...(nextRatio !== undefined ? { offsetRatio: nextRatio } : null),
-                  ...(nextCharOffset !== undefined ? { charOffset: nextCharOffset } : null),
-                }
-              : { bookId, chapterId },
+          //
+          // ★★ E1（2026-10-15 真机判决 `e1c-run.log`）：**同章重复装载时不得
+          //   抹掉已记录的位置**。原实现是「整体重写」，于是：
+          //   ```
+          //   16:13:50.202 lastRead={c1, charOffset:134, segmentId:s5}  ✔ 滚动记上了
+          //   16:13:52.518 lastRead={c1, charOffset:0}                ★★ 被抹回 0
+          //   16:13:52.519 lastRead={c1, charOffset:211}               ✔ 又记上
+          //   ```
+          //   某个重复触发的装载（预装落地 → win 变化 → effect 重跑）带着
+          //   `charOffset=0` 回来 ⇒ **把用户已滚到的位置清零** ⇒
+          //   退出后再进书回到章首（用户报障「没记住进度」）。
+          // ★修法：同章 + 调用方未给位置（两者皆空）⇒ **沿用 lastRead 现值**。
+          lastRead: (() => {
+            if (nextSegmentId || nextCharOffset !== undefined) {
+              return {
+                bookId,
+                chapterId,
+                ...(nextSegmentId ? { segmentId: nextSegmentId } : null),
+                ...(nextRatio !== undefined ? { offsetRatio: nextRatio } : null),
+                ...(nextCharOffset !== undefined ? { charOffset: nextCharOffset } : null),
+              };
+            }
+            // ★同章且无新位置 ⇒ 保留原位置（不回退章首）
+            if (
+              state.lastRead !== null &&
+              state.lastRead.bookId === bookId &&
+              state.lastRead.chapterId === chapterId
+            ) {
+              return state.lastRead;
+            }
+            return { bookId, chapterId };
+          })(),
           // 最近阅读记录：书架「最近」分类按此时间倒序。写入时同步裁剪，
           // 防止长期使用无限膨胀（旧记录时间戳不变，按时间淘汰最旧的）
           recentBooks: (() => {

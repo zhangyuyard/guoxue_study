@@ -662,6 +662,54 @@ const ScrollMode = memo(function ScrollMode({
    *   放弃判据＝重投次数用尽（`COMP_TARGET_MAX_RETRY`），因为「原生会不会接受
    *   这次投递」无法由 JS 预知。
    */
+  /**
+   * ★★★ E1（2026-10-15）：**按视口顶行归属行记账**（进度真值持久化）。
+   *
+   * ## 为什么要有这个共用体（真机判决 `prog-run.log`）
+   * ```
+   * 15:55:23 第1 次进书  resume=tongjian-c3← 上次读到 c3
+   * 15:55:49 第 2 次进书  resume=tongjian-c2    ★退回去了
+   * ```
+   * ⇒ 退出前的滚动**没有写进`lastRead`**。
+   *
+   * ## 根因（读实现得出，非注释）
+   * 章内进度的唯一通道是 `onLineChange`，而它**只在 `handleScrollEnd`
+   * 末尾触发**，且开头有：
+   * ```js
+   * if (pendingCompRef.current != null) return;   // ★补偿未落定 ⇒ 早退 ⇒ 不记账
+   * ```
+   * 快速滚动/跨章时 `pendingCompRef` 长期非 null ⇒ **早退吞掉记账**
+   * ⇒ `lastRead` 永远停在「上次进书时的那一章」。
+   * ★而 `onContentSizeChange`（补偿落定处）**只重投补偿、从不记账**
+   * ⇒ 补偿落定后也没有兜底。
+   *
+   * ## 修法
+   * 抽成本共用体，在**两处**调用：
+   * ① `handleScrollEnd`：把记账从早退之后**移到早退之前**（补偿未落定时
+   *    记的是「意图位置」，可能偏差；故仍在落定后再记一次覆盖）
+   * ② `onContentSizeChange` 补偿落定后：补记一次（★这才是最终位置的真值）
+   */
+  const commitProgressAtViewport = useCallback(() => {
+    const y = offsetRef.current;
+    if (y == null) {
+      return;
+    }
+    const cur = linesRef.current;
+    if (cur.length === 0) {
+      return;
+    }
+    const ownerIdx = viewportOwnerIndexAtContentY(
+      y,
+      headerHRef.current,
+      rowH,
+      cur.length,
+    );
+    if (ownerIdx == null) {
+      return;   // 几何不可信 ⇒ 不记账
+    }
+    lineChangeRef.current?.(firstContentLineOf(cur, ownerIdx));
+  }, [rowH]);
+
   const onContentSizeChange = useCallback((_w?: number, h?: number) => {
     if (typeof h !== 'number') {
       return;
@@ -689,7 +737,12 @@ const ScrollMode = memo(function ScrollMode({
       scheduleCompRetry();
     }
     applyCompensation(target);
-  }, [applyCompensation, viewportH, scheduleCompRetry]);
+    // ★★★ E1：补偿落定后**补记进度**。
+    //   `handleScrollEnd` 里`if (pendingCompRef.current != null) return;`
+    //   会在补偿未落定时早退 ⇒ 吞掉那次记账；而此处是**补偿真正落定**的位置
+    //   （`offsetRef` 已是实落点）⇒ ★这里才是最终位置的真值，必须记。
+    commitProgressAtViewport();
+  }, [applyCompensation, viewportH, scheduleCompRetry, commitProgressAtViewport]);
 
   // 滚动静止 → 进度真值持久化（复用 PageMode 静止门控：动量/慢拖防双派发）
   const momentumRef = useRef(false);
@@ -705,6 +758,12 @@ const ScrollMode = memo(function ScrollMode({
       // ★ 末端续装必须在此重试：到达内容末端后原生不再派发 onScroll
       //   （见 fireBoundary 纪律 ①），拖拽/动量结束是唯一的再触发点。
       fireBoundary(y);
+      // ★★★ E1：**先记一次进度，再看补偿是否落定**。
+      //   原来 early-return 把这次记账一起吞了 ⇒ 快速滚动/跨章时
+      //   `pendingCompRef` 长期非 null ⇒ `lastRead` 永不更新（真机 `resume` 退回c2）。
+      //   ★此处记的是「当前视口位置」，可能略偏；补偿落定后 `onContentSizeChange`
+      //   会再记一次覆盖它 ⇒ 最终以落定后的真值为准。
+      commitProgressAtViewport();
       if (pendingCompRef.current != null) return;
       // ★ 与 handleScroll 同源：进度记账也须走归属行（顶行 +1），且**越界钳制时
       //   不记账**——否则装配空窗期会把进度写成上一章末行 ⇒ 续读位置一起漂。
@@ -715,9 +774,10 @@ const ScrollMode = memo(function ScrollMode({
         cur.length,
       );
       if (ownerIdx == null) return;
+      // 已在早退之前记过一次；这里是「补偿已落定」的正常路径，再记一次以落定值覆盖
       lineChangeRef.current?.(firstContentLineOf(cur, ownerIdx));
     },
-    [rowH, fireBoundary],
+    [rowH, fireBoundary, commitProgressAtViewport],
   );
   const handleMomentumBegin = useCallback(() => {
     momentumRef.current = true;

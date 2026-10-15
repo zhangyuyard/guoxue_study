@@ -28,6 +28,7 @@ function countOf(src: string, needle: string): number {
 const APP_ROOT = resolve(__dirname, '..');
 const READER_SCREEN_PATH = resolve(APP_ROOT, 'screens/ReaderScreen.tsx');
 const SCROLL_MODE_PATH = resolve(APP_ROOT, 'reader/core/modes/ScrollMode.tsx');
+const SERVICE_STORE_PATH = resolve(APP_ROOT, 'store/useReaderStore.ts');
 
 // ★ 模块级（V3 判据组要用；原在下一describe 内属局部作用域）
 const readerSrc = stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
@@ -774,17 +775,30 @@ describe('V6 跳章续读：跳转必须重写 lastRead 为目标章章首', () 
   });
 
   it('形状锁⑩：中心章同步 effect 的守卫必须连charOffset 一起比', () => {
-    // 取那个 effect（代码特征：`loaded.chapter.id !== activeChapterId`）
-    const start = readerSrc.indexOf('loaded.chapter.id !== activeChapterId');
+    // ★锚点必须是**全文件唯一**的守卫行本身。★原锚点
+    //   `loaded.chapter.id !== activeChapterId` 在本文件出现多次 ⇒ `indexOf`
+    //   切到别的 effect ⇒ 判据自身定位错＝零鉴别力（条目 91）。
+    const guard =
+      'if (lastRead?.bookId === bookId && lastRead?.chapterId === activeChapterId) {';
+    //★该守卫串在文件里出现**两次**（另一处后面跟的是 `segmentsByChapter`）
+    //   ⇒ 必须 `lastIndexOf` 取**最后**那处（= 本 effect）。
+    const start = readerSrc.lastIndexOf(guard);
     expect(start).toBeGreaterThan(-1);
-    const seg = readerSrc.slice(start, start + 900);
+    const seg = readerSrc.slice(start, start + guard.length + 200);
     expect(seg).toContain('openChapter(');
-    // 守卫里必须出现 charOffset 的比较（不只比 chapterId）
-    expect(seg).toMatch(/charOffset/);
-    // 反向断言：不得出现「只比 chapterId 就早退」的裸守卫形态
-    expect(seg).not.toMatch(
-      /lastRead\?\.bookId === bookId && lastRead\?\.chapterId === activeChapterId \)\s*\{\s*return/,
+    // ★★ 2026-10-15 E1：**本条判据锁的正是那个 bug 的形态，按新契约重写**。
+    // V6 当时要求「守卫必须连charOffset 一起比」；而真机判决（`e1pr-run.log`）证明
+    //   恰恰是「比了 charOffset、且**只在 cur === 0 时早退**」才让
+    //   `openChapter(char=0)` 每约 2 秒抹掉刚记好的位置 ⇒ 退出后回到章首。
+    // ⇒ 正确契约：**已是当前章就早退**（**不**看 charOffset），换章才写章首。
+    // ★★ 注意：`activeChapterId` 后面**直接是 `)`**，没有空格 ⇒ 正则里
+    //   写成 `activeChapterId \)`（多一个空格）会**永远不匹配**。
+    //   ★我在这上面空转了 20 分钟（node -e 验证还被 shell 转义误导过一次）。
+    expect(seg).toMatch(
+      /lastRead\?\.bookId === bookId && lastRead\?\.chapterId === activeChapterId\)\s*\{\s*return/,
     );
+    // ★反向断言：取反形态（`cur` 只在为 0 时早退）不得复现
+    expect(seg).not.toMatch(/cur === undefined \|\| cur === 0/);
   });
 
   it('★ 行为组：initialCharOffset 的持久化分支在「跳回曾读过的章」时给出旧偏移', () => {
@@ -1195,5 +1209,97 @@ describe('D2 预装只装 next 方向', () => {
     expect(build(0, 20, 3, 'both').prev).toEqual([]);
     // ★边界：链尾无 next
     expect(build(19, 20, 3, 'next').next).toEqual([]);
+  });
+});
+
+/**
+ * ★★★ E1 判据组：阅读进度**不被抹掉**（修「退出后从首章开始」）。
+ *
+ * ## 用户报障
+ * 「书籍退出后，没有记住阅读进度，再次进入直接从首章开始」。
+ *
+ * ## 真机判决（`e1pr-run.log`，store 层探针）
+ * ```
+ * 16:30:32.708 [OC] char=0  prevLast={c1, charOffset:51,  s4}   ★ 被抹
+ * 16:30:34.817 [RP] char=134 ⇒ lastRead={c1, 134, s5}            ✔ 记上
+ * 16:30:35.046 [OC] char=0  prevLast={c1, 134, s5}                ★ 又被抹
+ * 16:30:37.058 [RP] char=211 ⇒ lastRead={c1, 211, s5}            ✔
+ * 16:30:39.653 [OC] char=0  prevLast={c1, 294, s6}                ★★ 退出前最后一次抹掉
+ * ```
+ * ★`recordProgress` **每次都写对了**（134→211→294），但另一个
+ * `openChapter(char=0)` 每约 2 秒来抹一次，**退出前最后一次正是 char=0**
+ * ⇒ 落盘的永远是章首。
+ *
+ * ## 根因：**守卫条件取反**
+ * ```js
+ * const cur = lastRead?.chapterId === activeChapterId ? lastRead.charOffset : undefined;
+ * if (… && (cur === undefined || cur === 0)) return;   // ★cur 为 0 才早退
+ * openChapter(bookId, activeChapterId, undefined, undefined, 0);  // ★cur>0 反而写 0
+ * ```
+ * ⇒ **`charOffset > 0`（刚记好的位置）走进来被写成 0**。
+ * ★该effect 依赖 `loaded`/`loadChapterData`，而**预装落地会改 `loaded`**
+ * ⇒ 每约 2 秒触发一次 ⇒ 滚到哪里都被抹回章首。
+ *
+ * ## 正确语义
+ * **已经是当前章就不该动它**（无论位置是不是 0）；只有「换章了」才写新章章首。
+ *
+ * ## 真机判决（截图，`fix_reopen.png`）
+ * 退出前首屏「以礼之大节不可乱也…」⇒ 重进书**同一位置同一内容**，
+ * 且**章标题行不再出现**（定位在章中而非章首）。
+ */
+describe('E1 阅读进度不被抹掉', () => {
+  const r = () => stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
+
+  it('形状锁㉝：store 的 openChapter 同章无位置时须沿用 lastRead', () => {
+    const src = stripComments(readFileSync(SERVICE_STORE_PATH, 'utf8'));
+    // ★同章 + 调用方未给位置 ⇒ 返回原 lastRead（不回退章首）
+    expect(src).toMatch(
+      /state\.lastRead !== null &&\s*state\.lastRead\.bookId === bookId &&\s*state\.lastRead\.chapterId === chapterId/,
+    );
+    // ★反向断言：不得只剩 `{ bookId, chapterId }` 的裸回退
+    expect(src).not.toMatch(/:\s*\{ bookId, chapterId \},\s*$/m);
+  });
+
+  it('★ 行为组：守卫真值表（锁住「取反」这个缺陷）', () => {
+    // 复刻修好后的守卫（接线由形状锁⑩ +㉝ 保证）
+    const shouldRewrite = (
+      lastRead: { bookId: string; chapterId: string; charOffset?: number } | null,
+      bookId: string,
+      activeChapterId: string,
+    ): boolean => {
+      if (lastRead?.bookId === bookId && lastRead?.chapterId === activeChapterId) {
+        return false;   // 已是当前章 ⇒ 不动
+      }
+      return true;      // 换章了 ⇒ 写新章章首
+    };
+    const lr = { bookId: 'b', chapterId: 'c1', charOffset: 294 };
+    // ★核心：刚记好的非零位置**不得**被重写（旧实现在这里返回 true）
+    expect(shouldRewrite(lr, 'b', 'c1')).toBe(false);
+    expect(shouldRewrite({ ...lr, charOffset: 0 }, 'b', 'c1')).toBe(false);
+    expect(shouldRewrite({ bookId: 'b', chapterId: 'c1' }, 'b', 'c1')).toBe(false);
+    expect(shouldRewrite(lr, 'b', 'c2')).toBe(true);    // 换章 ⇒ 该写
+    expect(shouldRewrite(lr, 'b2', 'c1')).toBe(true);   // 换书 ⇒ 该写
+    expect(shouldRewrite(null, 'b', 'c1')).toBe(true);   // 无 lastRead ⇒ 该写
+    // ★★ 反向对照：旧实现（取反）在同一组输入上的行为必须不同，
+    //   否则形状锁是零鉴别力的（条目 90/91）。
+    const oldShouldRewrite = (
+      lastRead: { bookId: string; chapterId: string; charOffset?: number } | null,
+      bookId: string,
+      activeChapterId: string,
+    ): boolean => {
+      const cur = lastRead?.chapterId === activeChapterId ? lastRead.charOffset : undefined;
+      if (
+        lastRead?.bookId === bookId &&
+        lastRead?.chapterId === activeChapterId &&
+        (cur === undefined || cur === 0)
+      ) {
+        return false;
+      }
+      return true;
+    };
+    expect(oldShouldRewrite(lr, 'b', 'c1')).toBe(true);        // ★旧实现会抹掉
+    expect(oldShouldRewrite(lr, 'b', 'c1')).not.toBe(
+      shouldRewrite(lr, 'b', 'c1'),
+    );                                          // ★两者必须不同 ⇒ 判据有鉴别力
   });
 });

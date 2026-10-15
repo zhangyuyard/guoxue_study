@@ -480,8 +480,24 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     if (!loaded || loaded.chapter.id !== activeChapterId || !bookId) {
       return;
     }
-    const cur = lastRead?.chapterId === activeChapterId ? lastRead.charOffset : undefined;
-    if (lastRead?.bookId === bookId && lastRead?.chapterId === activeChapterId && (cur === undefined || cur === 0)) {
+    // ★★ E1（2026-10-15 真机判决 `e1pr-run.log`）：**守卫条件原本取反了**。
+    //
+    // ```
+    // 16:30:32.708 [OC] char=0  prevLast={c1, charOffset:51,  s4}   ★ 抹掉
+    // 16:30:34.817 [RP] char=134 ⇒ lastRead={c1, 134, s5}            ✔ 记上
+    // 16:30:35.046 [OC] char=0  prevLast={c1, 134, s5}                ★ 又抹掉
+    // 16:30:37.058 [RP] char=211 ⇒ lastRead={c1, 211, s5}            ✔
+    // 16:30:39.653 [OC] char=0  prevLast={c1, 294, s6}                ★★ 退出前最后抹掉
+    // ```
+    // 原条件：`(cur === undefined || cur === 0)` 才早退
+    //⇒ **`charOffset > 0`（刚记好的位置）反而走进来被写成 0**。
+    // 本effect 的依赖含 `loaded`/`loadChapterData`，而**预装落地会改 `loaded`**
+    //   ⇒ 每约 2 秒触发一次 ⇒ 用户滚到哪里都会被抹回章首
+    //   ⇒ 杀进程/退出后再进书从章首开始（用户报障「没记住阅读进度」）。
+    //
+    // ★正确语义：**已经是当前章就不该动它**（无论位置是不是 0）；
+    //   只有「换章了」才写新章的章首。
+    if (lastRead?.bookId === bookId && lastRead?.chapterId === activeChapterId) {
       return;
     }
     openChapter(bookId, activeChapterId, undefined, undefined, 0);
