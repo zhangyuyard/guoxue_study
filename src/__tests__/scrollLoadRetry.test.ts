@@ -863,10 +863,21 @@ describe('R1 切章等待期：不得空白', () => {
     const src = r();
     const i = src.indexOf('if (!switching)');
     expect(i).toBeGreaterThan(-1); // 正对照：effect 在场
-    const seg = src.slice(i, i + 420);
-    // ★ 用 stitched 的真值（行进了渲染序列）才关闸
-    expect(seg).toMatch(/stitched\.lineCountOf\.get\(activeChapterId\)/);
+    const seg = src.slice(i, i + 520);
+    // ★★ R1-b：必须查**开闸时的目标章**（`switchingTargetRef`），
+    //   不得用 `activeChapterId`—— 它是 setState（异步），关闸 effect 可能
+    //   在它还是旧章值时就跑 ⇒ 提前关闸 ⇒ 等待期又空白（真机已复现：
+    //   连「正在载入章节…」文案都没出现）。
+    expect(src).toMatch(/const switchingTargetRef = useRef<string \| null>\(null\)/);
+    expect(seg).toMatch(/const target = switchingTargetRef\.current/);
+    expect(seg).toMatch(/stitched\.lineCountOf\.get\(target\)/);
     expect(seg).toMatch(/stitched\.lines\.length > 0/);
+    // ★ 反向断言：关闸处不得直接读 activeChapterId
+    expect(seg).not.toMatch(/lineCountOf\.get\(activeChapterId\)/);
+    // ★ 开闸时必须记录目标章（两处切章入口）；关闸处另有一次「清空 = null」
+    expect(countOf(src, 'switchingTargetRef.current = chapterId;')).toBe(1);
+    expect(countOf(src, 'switchingTargetRef.current = cid;')).toBe(1);
+    expect(countOf(src, 'switchingTargetRef.current = null;')).toBe(1);
   });
 
   it('形状锁㉒：switching 分支必须排在 !loaded 之后、空文案之前', () => {
@@ -904,5 +915,56 @@ describe('R1 切章等待期：不得空白', () => {
     expect(gate(true, 0, 0)).toBe(false);
     // 未切章时恒 false（不干扰正常阅读）
     expect(gate(false, 0, 0)).toBe(false);
+  });
+});
+
+/**
+ * ★★★ B1 判据组：装完章即**预装其邻章**（根治「切章撞空壳 ⇒ 同步直读 ⇒ 白屏」）。
+ *
+ * ## 根因（R1 判决）
+ * 跳到空壳章 ⇒ `degradeChapterToWholeRead` **同步整章直读** 实测 1.2–2.2s
+ * ⇒ JS 阻塞 ⇒ 正文区纯白（录屏「精确 3.0s × 3 次」）。
+ *
+ * ## 修法
+ * 接上**既有的** `UserBookService.prefillBuiltinNeighbors`（双向交错入调度器，
+ * fire-and-forget）。★它此前**全仓零生产调用方**（只有测试调）⇒ 从未预装。
+ * ★内置书（《资治通鉴》走 `getBuiltinSpec` 分支）**不走**那条
+ *   `if (isUser && !oversizedBookFiles.has(bookId)) return;` 早退 ⇒ 完全适用。
+ */
+describe('B1 邻章预装：切章前把邻章装好', () => {
+  const r = () => stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
+
+  it('形状锁㉓：必须调 prefillBuiltinNeighbors（生产调用方此前不存在）', () => {
+    const src = r();
+    // ★ 该导出在服务侧存在（机制已实现），缺的是**调用方**
+    expect(src).toMatch(/UserBookService\.prefillBuiltinNeighbors\(/);
+  });
+
+  it('形状锁㉔：每处章装载成功后都要调（不得只挂在切章一条路径）', () => {
+    const src = r();
+    // 章装载成功点= `prewarmChapter`（同位置、同参数）
+    const prewarms = countOf(src, 'prewarmChapter(data, id)');
+    const prefills = countOf(src, 'prefillNeighborsOf(id)');
+    expect(prewarms).toBeGreaterThan(0);
+    // ★ 数量必须相等：漏一处 ⇒ 该路径切章仍会撞空壳
+    expect(prefills).toBe(prewarms);
+    // 另一处变量名的调用点（prewarmChapter(data, nid)）
+    expect(countOf(src, 'prefillNeighborsOf(nid)')).toBe(
+      countOf(src, 'prewarmChapter(data, nid)'),
+    );
+  });
+
+  it('形状锁㉕：同 (书,章) 只预装一次，且失败允许重试', () => {
+    const src = r();
+    expect(src).toMatch(/const prefilledRef = useRef\(new Set<string>\(\)\)/);
+    // 去重键= bookId:cid
+    const seg = src.slice(src.indexOf('const prefilledRef'), src.indexOf('const prefilledRef') + 700);
+    expect(seg).toMatch(/const key = `\$\{bookId\}:\$\{cid\}`/);
+    expect(seg).toMatch(/if \(prefilledRef\.current\.has\(key\)\)/);
+    // ★ fire-and-forget：不得 await（会阻塞切章路径）
+    expect(seg).toMatch(/void UserBookService\.prefillBuiltinNeighbors\(/);
+    expect(seg).not.toMatch(/await UserBookService\.prefillBuiltinNeighbors\(/);
+    // 失败要删键允许重试（预装失败仍有 degrade 兜底，不该永久放弃）
+    expect(seg).toMatch(/prefilledRef\.current\.delete\(key\)/);
   });
 });

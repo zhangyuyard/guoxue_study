@@ -161,6 +161,15 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
    *   等待时长本身要靠 `degradeChapterToWholeRead` 不阻塞 JS 来根治。
    */
   const [switching, setSwitching] = useState(false);
+  /**
+   * ★★ R1-b（2026-10-15 B1 验证时暴露）：开闸时的**目标章 id**。
+   *
+   * ★为什么必须单独记：关闸条件要看「**新章**是否已有行」，
+   *   但 `activeChapterId` 是 `setState` ⇒ **异步** ⇒ 关闸 effect 可能在
+   *   它还是**旧章**值时就跑 ⇒ `lineCountOf.get(旧章) > 0` ⇒ **提前关闸**
+   *   ⇒ 等待期又变回空白（真机：`switching` 提前关 ⇒ 连「正在载入章节…」都没有）。
+   */
+  const switchingTargetRef = useRef<string | null>(null);
   /** 当前中心章 ref（异步装载回写的陈旧判定用，避免闭包过期） */
   const centerRef = useRef<string>(chapterId);
   // 路由 chapterId 变化（书架重进/路由跳章）时同步中心
@@ -244,6 +253,49 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     [pinyinOn, pinyinMode, bookId],
   );
 
+  /**
+   * ★★ B1（2026-10-15）：**章装载完成后预装它的邻章**。
+   *
+   * ## 为什么（根因见 R1）
+   *
+   * 跳到尚未填充的章（空壳章）⇒ `loadChapterData` 触发
+   * `degradeChapterToWholeRead` **同步整章直读**，实测 **1.2–2.2s**
+   * ⇒ JS 线程阻塞 ⇒ 正文区纯白（录屏测得「精确 3.0s × 3 次」）。
+   *
+   * ## 修法：把「同步补装」变成「提前装好」
+   *
+   * `UserBookService.prefillBuiltinNeighbors(bookId, chapterId, count)`是
+   * **既有的**邻章预装机制（双向交错序入`chapterAssemblyScheduler`，
+   * fire-and-forget 不阻塞）。★它**此前在全仓没有任何生产调用方**——
+   * 只有测试调它 ⇒ 邻章从未被预装 ⇒ 每次切章都可能撞空壳。
+   *
+   * ★注意它**不是**新增功能，而是**接上一个已存在但没被调用的机制**：
+   * 其 `if (isUser && !oversizedBookFiles.has(bookId)) return;` 早退
+   * **只在用户书路径生效**；内置书（《资治通鉴》走`getBuiltinSpec` 分支）
+   * 完全适用。
+   *
+   * ★去重：同一 (书, 章) 只预装一次（`prefilledRef`）—— 否则每次滚动装邻章
+   *   都会重复入队，白白占用调度器。
+   */
+  const prefilledRef = useRef(new Set<string>());
+  const prefillNeighborsOf = useCallback(
+    (cid: string) => {
+      if (!bookId || !cid) {
+        return;
+      }
+      const key = `${bookId}:${cid}`;
+      if (prefilledRef.current.has(key)) {
+        return;
+      }
+      prefilledRef.current.add(key);
+      void UserBookService.prefillBuiltinNeighbors(bookId, cid).catch(() => {
+        // 预装失败不致命（切章时仍有 degrade 兜底）；允许重试
+        prefilledRef.current.delete(key);
+      });
+    },
+    [bookId],
+  );
+
   /** 指定章的滑窗保留集：中心 ∪ 前后邻章（跳章清窗语义的裁剪白名单） */
   const retainSetFor = useCallback((cid: string): Set<string> => {    const set = new Set<string>([cid]);
     const sib = TextLibraryService.getSiblingChapters(cid);
@@ -275,6 +327,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     setActiveChapterId(chapterId);
     setSwitchSeq((s) => s + 1); // 路由进入/跳转也驱动列表重挂载（initialScrollIndex 重算）
     setSwitching(true); // ★ R1：切章等待期（同步整章直读会阻塞 JS 2s+）不给空白
+    switchingTargetRef.current = chapterId;
     const retain = retainSetFor(chapterId);
     const before = winRef.current;
     const cached = windowGet(before, chapterId);
@@ -332,6 +385,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
               finalize(data);
             }
             prewarmChapter(data, id);
+            prefillNeighborsOf(id); // ★ B1：装完本章即预装其邻章
           } catch (e) {
             if (cancelled) {
               return;
@@ -394,6 +448,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
           const data = await loadChapterData(nid);
           setWin((w) => windowPut(w, nid, data));
           prewarmChapter(data, nid);
+          prefillNeighborsOf(nid); // ★ B1
         } catch {
           setWin((w) => windowFail(w, nid));
         }
@@ -1021,11 +1076,15 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
     if (!switching) {
       return;
     }
-    const n = stitched.lineCountOf.get(activeChapterId) ?? 0;
+    // ★★ R1-b：查**开闸时的目标章**，不是 `activeChapterId`
+    //   （后者此刻可能还是旧章 ⇒ 会提前关闸 ⇒ 等待期又空白）。
+    const target = switchingTargetRef.current;
+    const n = target ? stitched.lineCountOf.get(target) ?? 0 : 0;
     if (n > 0 && stitched.lines.length > 0) {
+      switchingTargetRef.current = null;
       setSwitching(false);
     }
-  }, [switching, activeChapterId, stitched.lineCountOf, stitched.lines.length]);
+  }, [switching, stitched.lineCountOf, stitched.lines.length]);
 
   // ── 原生 FlatList 滚动模式（stitched.lines 平铺行流直接作 data）──
   // 书级边界：窗口首/末章的相邻章存在性
@@ -1307,6 +1366,7 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
       setActiveChapterId(cid);
       setSwitchSeq((s) => s + 1);
       setSwitching(true); // ★ R1：同上
+      switchingTargetRef.current = cid;
       // 装载判定用合并前窗：recenter 只裁剪不新增，begin 判定结果与合并后一致
       const before = winRef.current;
       // ★★ V5：目标集合＝retain ∪ {cid}（retain 已含 cid，这里只补防御）
@@ -1333,6 +1393,8 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
               const data = await loadChapterData(id);
               setWin((w) => windowPut(w, id, data));
               prewarmChapter(data, id);
+              prefillNeighborsOf(id); // ★ B1
+            prefillNeighborsOf(id); // ★ B1：装完本章即预装其邻章
             } catch {
               setWin((w) => windowFail(w, id));
             }
