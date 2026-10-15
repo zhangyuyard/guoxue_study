@@ -4086,6 +4086,13 @@ const PREFILL_SPAN_FALLBACK = 3;
 /** 跳章双向预热跨距（每方向）= tier.preloadSpan；读档位失败回落 3 */
 function resolvePreloadSpan(): number {
   const params = safeTierParams();
+  // ★ SPAN-PROBE（可移除）：本机档位与实际 span（判「预装覆盖够不够」）
+  console.info(
+    `[SPAN] tierParams=${params ? JSON.stringify(params) : 'null'} span=${Math.max(
+      1,
+      Math.round(pickTierNumber(params?.preloadSpan, PREFILL_SPAN_FALLBACK)),
+    )}`,
+  );
   return Math.max(
     1,
     Math.round(pickTierNumber(params?.preloadSpan, PREFILL_SPAN_FALLBACK)),

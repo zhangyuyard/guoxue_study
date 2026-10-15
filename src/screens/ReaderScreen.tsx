@@ -1448,8 +1448,60 @@ function ReaderScreen({ route, navigation }: ReaderScreenProps): React.JSX.Eleme
   }, [bookId]);
   /** 目录弹层高度：0.7 窗高，下限 320（矮屏下若只剩两三行，长书等于不可用） */
   const tocHeight = Math.max(320, Math.round(windowHeight * 0.7));
-  const openToc = useCallback(() => setTocVisible(true), []);
+  /**
+   * ★★★ B2（2026-10-15）：**打开目录时扩大预装范围**。
+   *
+   * ## 为什么（实测三连）
+   *
+   * ① 预装跨度**太小**：本机档位 `[SPAN] tierParams={"preloadSpan":2,…}`
+   *    ⇒ 只覆盖当前章 **±2** ⇒ 跳到第 3 章外必然撞「空壳章」
+   *    ⇒ 必然现场读 IO。
+   * ② 现场读 IO 有**约 1/3 概率撞抖动**（真机 `[PERF][fill-now]` 六次采样）：
+   *    `readMs` 正常 53–69ms，异常 **552ms / 1459ms**（字节数相同 ⇒ 与章无关，
+   *    是设备 IO 层抖动）⇒ 等待从 ~90ms 跳到 500–1500ms。
+   * ③ 用户**点目录的那一刻**才暴露跳转意图 ⇒ 这是预装的**唯一窗口**。
+   *
+   * ## 做法
+   * 打开目录时对「当前章 ± `TOC_PREFILL_SPAN`」各提交一次邻章预装
+   * （复用 B1 已接上的 `prefillNeighborsOf`，只是多提交几个锚点）。
+   * ★不扩大 `preloadSpan` 全局值：那会让**每次装章**都多预装 N 倍
+   *   （低档机 IO 本就抖动 ⇒ 反而更慢）；而「打开目录」是低频事件，
+   *   在这个时机补装最划算。
+   */
+  const openToc = useCallback(() => {
+    setTocVisible(true);
+    if (!bookId || !activeChapterId) {
+      return;
+    }
+    const sibOf = (cid: string, dir: 1 | -1): string | null => {
+      const s = TextLibraryService.getSiblingChapters(cid);
+      if (!s.success || !s.data) {
+        return null;
+      }
+      return dir < 0 ? s.data.prev?.id ?? null : s.data.next?.id ?? null;
+    };
+    let cur: string | null = activeChapterId;
+    for (let i = 0; i < TOC_PREFILL_SPAN; i += 1) {
+      cur = sibOf(cur, -1);
+      if (!cur) break;
+      prefillNeighborsOf(cur); // ★B2：向前扩散装
+    }
+    cur = activeChapterId;
+    for (let i = 0; i < TOC_PREFILL_SPAN; i += 1) {
+      cur = sibOf(cur, 1);
+      if (!cur) break;
+      prefillNeighborsOf(cur); // ★B2：向后扩散装
+    }
+  }, [bookId, activeChapterId, prefillNeighborsOf]);
   const closeToc = useCallback(() => setTocVisible(false), []);
+
+  /**
+   * ★★ B2：打开目录时向外扩散预装的章数（每侧）。
+   *★取值权衡：`preloadSpan`（本机 2）只保证±2；目录里用户最可能跳的是
+   *  前后几章 ⇒ 每侧 6 足以覆盖一次「翻几章找位置」的常见操作，
+   *  而 IO 量 = 12 章 × 约 30KB ≈ 360KB，分散在用户浏览目录的几秒内。
+   */
+  const TOC_PREFILL_SPAN = 6;
 
   /**
    * 目录点章 → 就地跳章。★ 复用 `jumpTo`（与底栏上一章/下一章、翻页边界同一

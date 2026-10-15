@@ -1048,3 +1048,84 @@ describe('D1 跳章不重挂载：显式落位', () => {
     expect(settle(undefined, m, null)).toBe('skip');
   });
 });
+
+/**
+ * ★★★ B2 判据组：打开目录时扩大预装（治「跳远章必撞空壳 + IO 抖动」）。
+ *
+ * ## 实测依据（三条，互相独立）
+ * ① 本机档位 `[SPAN] tierParams={"preloadSpan":2,…}` ⇒ B1 的预装只覆盖 **±2**
+ *    ⇒ 跳到第 3 章外必然撞「空壳章」⇒ 必然现场读 IO。
+ * ② 现场读 IO 有**约 1/3 概率抖动**（`[PERF][fill-now]` 六次采样）：
+ *    `readMs` 正常 53–69ms，异常 **552 / 1459ms**；**字节数相同**（28KB 级）
+ *    ⇒ 与章的大小/位置无关 ⇒ 是设备 IO 层抖动，不可治，只能**提前装**规避。
+ * ③ 用户**点目录那一刻**才暴露跳转意图 ⇒ 那是预装的唯一窗口。
+ */
+describe('B2 打开目录时扩大预装', () => {
+  const r = () => stripComments(readFileSync(READER_SCREEN_PATH, 'utf8'));
+
+  it('形状锁㉙：openToc 必须向外扩散预装（不得只是 setTocVisible）', () => {
+    const src = r();
+    const i = src.indexOf('const openToc = useCallback(');
+    expect(i).toBeGreaterThan(-1);
+    const seg = src.slice(i, i + 1300);
+    // ★ 必须双向扩散（只有单向 ⇒ 一半的跳章仍撞空壳）
+    expect(seg).toMatch(/sibOf\(cur, -1\)/);
+    expect(seg).toMatch(/sibOf\(cur, 1\)/);
+    // ★ 必须真正提交预装
+    expect(seg.match(/prefillNeighborsOf\(cur\)/g)?.length).toBe(2);
+    // ★ 必须有终止条件（否则到书首/书尾死循环）
+    expect(seg).toMatch(/if \(!cur\) break;/);
+  });
+
+  it('形状锁㉚：扩散跨度必须是具名常量且 > preloadSpan（本机=2）', () => {
+    const src = r();
+    expect(src).toMatch(/const TOC_PREFILL_SPAN = \d+;/);
+    const m = src.match(/const TOC_PREFILL_SPAN = (\d+);/);
+    expect(m).not.toBeNull();
+    const span = Number((m as RegExpMatchArray)[1]);
+    // ★ 必须大于本机档位 preloadSpan=2，否则 B2 形同虚设
+    expect(span).toBeGreaterThan(2);
+    // ★ 但也不能无节制（IO 压力）：设一个上限防止有人调到几百
+    expect(span).toBeLessThanOrEqual(12);
+    // 循环必须用这个常量（不得写死别的数）
+    const i = src.indexOf('const openToc = useCallback(');
+    const seg = src.slice(i, i + 1300);
+    expect(seg).toMatch(/i < TOC_PREFILL_SPAN/);
+  });
+
+  it('★ 行为组：扩散的终止与去重', () => {
+    // 复刻扩散逻辑（接线由形状锁㉙㉚保证）
+    const spread = (
+      sibOf: (cid: string, dir: 1 | -1) => string | null,
+      start: string,
+      dir: 1 | -1,
+      span: number,
+    ): string[] => {
+      const out: string[] = [];
+      let cur: string | null = start;
+      for (let i = 0; i < span; i += 1) {
+        cur = sibOf(cur as string, dir);
+        if (!cur) break;          // 到书首/书尾 ⇒ 停
+        out.push(cur);
+      }
+      return out;
+    };
+    // 书够长 ⇒ 每次都取到下一个（c10→c9→c8…）
+    const sibOf = (cid: string, dir: 1 | -1): string | null => {
+      const n = Number(cid.replace('c', ''));
+      return dir < 0 ? `c${n - 1}` : `c${n + 1}`;
+    };
+    expect(spread(sibOf, 'c10', -1, 6)).toEqual(['c9', 'c8', 'c7', 'c6', 'c5', 'c4']);
+    // 到书首 ⇒ 提前停（不越界）
+    expect(spread(() => null, 'c1', 1, 6)).toEqual([]);
+    // ★ 去重由prefillNeighborsOf 内的 prefilledRef 承担（同章只装一次）
+    const done = new Set<string>();
+    const prefill = (cid: string) => {
+      if (done.has(cid)) return false;
+      done.add(cid);
+      return true;
+    };
+    expect(prefill('c9')).toBe(true);
+    expect(prefill('c9')).toBe(false);
+  });
+});
