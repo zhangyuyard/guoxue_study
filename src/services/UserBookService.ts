@@ -5192,13 +5192,63 @@ let librarySyncGen = 0;
  * 既禁用下架清扫（`purgeBlocked`）也禁用注册写回（`skipRootDrift`）） */
 let lastScannedBooksRoot: string | null = null;
 
+/**
+ * ★★ 待补扫标记：在飞期间又来了新的扫描请求。
+ *  ★根因（2026-10-15 真机读数`imp-run.log`）：
+ * ```
+ * 17:31:40.787 [PERF][library-sync] registerBuiltinMeta=7ms
+ * 17:31:41.029 join in-flight sync        ← 导入完成后 loadBooks() 触发了这条
+ * 17:31:41.040 [PERF][library-sync] done folder=1 builtin=77 +261ms
+ * ```
+ * `folder=1` ⇒ 旧扫描只看到 1 本用户书（应为 2 本）⇒ 导入的那本没进结果。
+ * 用户报障：「导入了一本比较大的 epub，导入成功后书架上未显示，重启 app后才显示」。
+ *
+ * ★机制：导入大书耗时数秒 ⇒ 期间很可能已有一轮扫描在飞；
+ *   导入完成�� `loadBooks()` 调本函数 ⇒ **去重直接返回旧 promise**
+ *   ⇒ 那一轮的结果里**没有刚导入的书** ⇒ 书架不刷新。
+ *   而重启后是全量扫描 ⇒ 能看到。
+ *
+ * ⇒ 去重**不能只 join**：必须在在飞结束后**补跑一轮**，否则「去重」把新数据吞了。
+ */
+let librarySyncResyncPending = false;
+/**
+ * 上次**补跑**的时刻（ms），用于**时间节流**。
+ * ★补跑期间到达的请求同样会置 `pending` ⇒ 无限补跑会变成连续扫描打转。
+ * ⇒距上次补跑不足 `RESYNC_THROTTLE_MS` 就跳过（下一次正常扫描自然会带上新数据）。
+ * ★注：曾试「补跑时置闸、让补跑自身不触发补跑」——**无效**，因为补跑走的是
+ *   「不在飞」分支会把闸复位（实测判据行为组抓到的失败）。
+ */
+let lastResyncAt = 0;
+const RESYNC_THROTTLE_MS = 1500;
+
 export function loadAndRegisterAll(): Promise<ServiceResult<LibrarySyncSummary>> {
   if (librarySyncInFlight) {
     console.info('[PERF][library-sync] dedup: join in-flight sync');
+    // ★ 标记「在飞期间又来了请求」⇒ 在飞结束后补跑一轮（否则并发请求会漏数据：
+    //   表现为「导入成功但书架不显示，重启才显示」——真机 `imp-run.log` 判决）
+    librarySyncResyncPending = true;
     return librarySyncInFlight;
   }
   librarySyncInFlight = loadAndRegisterAllInternal().finally(() => {
     librarySyncInFlight = null;
+    // ★★ 在飞期间来过新请求 ⇒ **补跑一轮**（否则「去重」会把刚导入的书吞掉：
+    //   表现为「导入成功但书架不显示，重启才显示」——真机读数 `imp-run.log` 判决）。
+    // ★★ **时间节流**：距上次补跑不足 `RESYNC_THROTTLE_MS` 就不补跑
+    //   （下一次正常扫描自然会带上新数据）—— 防止「在飞→结束→补跑→在飞→…」
+    //   变成连续扫描打转。
+    //   ★注：曾试过「补跑时置一个闸、让补跑自身不再触发补跑」，但**无效**——
+    //     补跑走的是「不在飞」分支，会把闸复位 ⇒ 打转依旧（实测判据行为组抓到）。
+    if (librarySyncResyncPending) {
+      librarySyncResyncPending = false;
+      const now = Date.now();
+      if (now - lastResyncAt < RESYNC_THROTTLE_MS) {
+        console.info('[PERF][library-sync] resync skipped: 距上次补跑不足节流窗口');
+        return;
+      }
+      lastResyncAt = now;
+      console.info('[PERF][library-sync] resync: 在飞期间有新请求 ⇒ 补跑一轮');
+      void loadAndRegisterAll();
+    }
   });
   return librarySyncInFlight;
 }
