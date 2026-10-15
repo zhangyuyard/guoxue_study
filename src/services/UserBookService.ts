@@ -46,7 +46,7 @@ import { useRecitationStore } from '@/store/useRecitationStore';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { useNoteStore } from '@/store/useNoteStore';
 import { useReaderStore } from '@/store/useReaderStore';
-import { isLocalPath, toLocalPath } from '@/utils/localPath';
+import { toLocalPath } from '@/utils/localPath';
 import { decodeTextBytes } from '@/utils/textEncoding';
 import { decodeUtf8 } from '@/utils/utf8';
 import {
@@ -3802,13 +3802,23 @@ export async function pickBookFile(): Promise<ServiceResult<PickedBookFile>> {
       };
     }
     const chosen = f.fileCopyUri ?? f.uri;
-    // content:// 等 provider URI 无法被 RNFS 读取（部分机型 copyTo 会失败回落）
-    if (!isLocalPath(chosen)) {
-      return {
-        success: false,
-        error: '系统未能提供所选文件的本地副本，请重新选择（建议把文件放到「下载」目录后再试）',
-      };
-    }
+    // ★★ 2026-10-15 真机判决（`imp-run.log`）：**`content://` 不该在这里被拒**。
+    // ```
+    // [IMP][PICK] fileCopyUri=null isLocal=false
+    //   chosen=content://com.android.providers.downloads.documents/document/raw%3A%2F…%2Fprobe_book.txt
+    // [IMP][COPY] ok size=78          ★★ RNFS.copyFile 直接吃 content://，47ms 完成
+    // ```
+    // ⇒ `copyTo: 'cachesDirectory'` 在部分机型（华为）**会失败** ⇒ 回落 `content://`；
+    //   而原实现在**还没试 copyFile 之前**就用 `isLocalPath` 拒了
+    //   ⇒ 报「系统未能提供所选文件的本地副本」⇒ ★功能完全不可用。
+    //
+    // ★RNFS 对 `content://` 的支持是**分裂**的（记忆条目 85）：
+    //   `read` / `copyFile` **支持**（走 native ContentResolver），
+    //   而 `stat` **必失败**。⇒★**不要拿 `isLocalPath` 当「能不能导入」的判据**。
+    //
+    // 本函数**不再早退**：把 uri 原样交给 `importBook` 的 `RNFS.copyFile` 去试；
+    // 万一失败，`importBook` 的 catch 会给出可操作的错误文案。
+    // ★`size` 在 `content://` 下不可靠（`stat` 必失败）⇒ 这里不取，传 0 由下游按需处理。
     return {
       success: true,
       data: { uri: chosen, fileName, size: f.size ?? 0 },
@@ -5809,6 +5819,9 @@ export async function importBook(
     await ensureDirs();
     const destName = await uniqueDestName(root, file.fileName);
     destPath = `${root}/${destName}`;
+    // ★ `toLocalPath` 对 `content://` 原样返回（只规范化 file://），
+    //   而 `RNFS.copyFile` 的 src **直接吃 URI** ⇒ 这里必须传 `toLocalPath(...)`
+    //   的结果（file:// 要剥前缀），但**不能**先 `isLocalPath` 判定。
     await RNFS.copyFile(toLocalPath(file.uri), destPath);
   } catch (e) {
     return { success: false, error: `复制文件到书籍文件夹失败：${(e as Error).message}` };

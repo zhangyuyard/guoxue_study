@@ -87,20 +87,50 @@ export const DictFileService = {
           error: `不支持的文件类型 .${ext}（支持 ${DICT_EXTENSIONS.join('/')}）`,
         };
       }
+      // ★★ 2026-10-15 真机判决（`imp-run.log`，同一台华为机）：
+      // ```
+      // [IMP][PICK] fileCopyUri=null isLocal=false
+      //   chosen=content://com.android.providers.downloads.documents/document/raw%3A%2F…%2Fprobe_book.txt
+      // [IMP][COPY] ok size=78      ★★ RNFS.copyFile 直接吃 content://，47ms 完成
+      // ```
+      // ⇒ `copyTo: 'cachesDirectory'` 在部分机型**会失败** ⇒ 回落 `content://`；
+      //   而原实现**在还没试 copyFile 之前**就拒了 ⇒ 字典导入 100% 不可用。
+      //
+      // ★与书籍侧（`UserBookService.importBook`）的差别：
+      //   书籍只把 uri 交给 `copyFile`（已证明直传可行）；
+      //   而字典后续要用 `RNFS.stat` 拿 `fileSize`（★`stat` 对 `content://` **必失败**）
+      //   ⇒ 这里**必须先落地成本地副本**，让下游全走本地路径。
       const chosen = f.fileCopyUri ?? f.uri;
-      // content:// 等 provider URI 无法被 RNFS 读取（部分机型 copyTo 会失败回落）
+      let localUri = chosen;
       if (!isLocalPath(chosen)) {
-        return {
-          success: false,
-          error: '系统未能提供所选文件的本地副本，请重新选择（建议把文件放到「下载」目录后再试）',
-        };
+        // 自己复制到 cache（RNFS.copyFile 支持 content://，走 native ContentResolver）
+        const dir = `${RNFS.CachesDirectoryPath}/dict-import`;
+        const dest = `${dir}/${Date.now()}-${fileName}`;
+        try {
+          await RNFS.mkdir(dir);
+          await RNFS.copyFile(chosen, dest);
+          localUri = `file://${dest}`;
+        } catch (e) {
+          return {
+            success: false,
+            error: `复制所选文件到缓存失败：${(e as Error).message}（可先把文件复制到「下载」目录再试）`,
+          };
+        }
+      }
+      // ★size 用本地副本的 stat 读（`content://` 下 stat 必失败，此时已是本地路径）
+      let size = f.size ?? 0;
+      try {
+        size = Number((await RNFS.stat(toLocalPath(localUri))).size);
+        if (!Number.isFinite(size) || size < 0) size = 0;
+      } catch {
+        size = 0;
       }
       return {
         success: true,
         data: {
-          uri: chosen,
+          uri: localUri,
           fileName,
-          size: f.size ?? 0,
+          size,
         },
       };
     } catch (e) {
