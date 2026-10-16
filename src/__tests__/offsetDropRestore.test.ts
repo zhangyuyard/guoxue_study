@@ -34,12 +34,16 @@ describe('RB3 JS 阻塞后的 offset 回退补投', () => {
 
   it('形状锁㊶：必须记录「data 变化前的 offset」作基准', () => {
     const s = src();
-    expect(s).toMatch(/const offsetBeforeDataChangeRef = useRef<number \| null>\(null\)/);
-    // ★基准必须在「lines/headerH 变化」的那段 effect 里写
-    const i = s.indexOf('offsetBeforeDataChangeRef.current = offsetRef.current ?? 0;');
+    // ★基准必须是**带许可标志**的结构（回归修复，见文件头注释）
+    expect(s).toMatch(
+      /const offsetBeforeDataChangeRef = useRef<\{\s*offset: number;\s*allowRestore: boolean;\s*\} \| null>\(null\)/,
+    );
+    const i = s.indexOf('offsetBeforeDataChangeRef.current = {');
     expect(i).toBeGreaterThan(-1);
     const seg = s.slice(Math.max(0, i - 300), i + 200);
     expect(seg).toMatch(/prevLinesRef\.current = lines/);
+    // ★记录时必须是「允许」初值，随后由 delta 判定关闭
+    expect(seg).toMatch(/allowRestore: true/);
   });
 
   it('形状锁㊷：回退检测 + **延两帧**补投（★立即投已证无效）', () => {
@@ -57,23 +61,49 @@ describe('RB3 JS 阻塞后的 offset 回退补投', () => {
     expect(seg).toMatch(/scrollToOffset\(\{ offset: before, animated: false \}\)/);
   });
 
+  it('形状锁㊸：★delta≠0（锚点补偿接管）时必须关闭补投许可', () => {
+    // ★★ 回归根因（真机：向上滚动「反复回弹到原章」）：
+    //   向上滚的 prepend 插在锚点**之前** ⇒ 正确目标 = before + delta（**更大**），
+    //   而 RB3 补投的是 `before`（更小）⇒ **方向反** ⇒ 把用户拉回原章开头。
+    //   ⇒ 凡 delta≠0（锚点补偿已接管）必须 `allowRestore = false`。
+    const s = src();
+    const i = s.indexOf('const delta = anchorCompensationDelta(');
+    expect(i).toBeGreaterThan(-1);
+    const seg = s.slice(i, i + 600);
+    expect(seg).toMatch(/if \(delta !== 0 && offsetBeforeDataChangeRef\.current\)/);
+    expect(seg).toMatch(/offsetBeforeDataChangeRef\.current\.allowRestore = false/);
+    // ★补投判定必须读这个许可
+    const j = s.indexOf('const baseline = offsetBeforeDataChangeRef.current;');
+    expect(j).toBeGreaterThan(-1);
+    expect(s.slice(j, j + 300)).toMatch(/baseline\.allowRestore/);
+  });
+
   it('★ 行为组：回退检测 + 补投状态机（含「立即投无效」的语义）', () => {
     const TH = 40;
     // 复刻修复后的判定
-    const detect = (baseline: number | null, y: number): number | null => {
-      if (baseline === null) return null;
-      const back = baseline - y;
+    // ★带许可闸的判定（与生产同构）
+    const detect = (
+      baseline: { offset: number; allowRestore: boolean } | null,
+      y: number,
+    ): number | null => {
+      if (baseline === null || !baseline.allowRestore) return null;   // ★闸关⇒一律不补
+      const back = baseline.offset - y;
       return back > TH ? back : null;
     };
+    const allow = { offset: 38998, allowRestore: true };
+    const denied = { offset: 38998, allowRestore: false };
     // ① 无基准（未发生 data 变化）⇒ 不动作
     expect(detect(null, 38000)).toBeNull();
-    // ② 回退超过阈值 ⇒ 检出
-    expect(detect(38998, 38116)).toBe(882);
+    // ② 回退超过阈值且**许可开启** ⇒ 检出
+    expect(detect(allow, 38116)).toBe(882);
     // ③ 未回退 / 回退很小 ⇒ 不动作（避免与正常动量抖动打架）
-    expect(detect(38998, 39000)).toBeNull();
-    expect(detect(38998, 38990)).toBeNull();      // 8px < 40
-    // ④ 补投后 offset 对齐 ⇒ 再判定为「无需补」
-    expect(detect(38998, 38998)).toBeNull();
+    expect(detect(allow, 39000)).toBeNull();
+    expect(detect(allow, 38990)).toBeNull();      // 8px < 40
+    // ★★ ④ **许可关闭（delta≠0，锚点补偿已接管）⇒ 即使大幅回退也一律不补**
+    //     这条就是回归的判据：向上滚动时靠它拦住「拉回原章」。
+    expect(detect(denied, 30000)).toBeNull();
+    // ⑤ 补投后 offset 对齐 ⇒ 再判定为「无需补」
+    expect(detect(allow, 38998)).toBeNull();
     // ★⑤ 延两帧才投：立即投会被覆盖（真机 rb4 读数），故补投必须发生在帧回调里
     //   （jest 环境无 rAF ⇒ 用可手动推进的队列模拟「帧」）
     const order: string[] = [];
