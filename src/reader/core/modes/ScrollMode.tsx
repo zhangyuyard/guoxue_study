@@ -226,6 +226,35 @@ const ScrollMode = memo(function ScrollMode({
   const offsetRef = useRef(0);
   /** 视口锚点（顶行的身份键 + 下标）：数据变更后按 key 求新下标算补偿 */
   const anchorRef = useRef<{ key: string; index: number } | null>(null);
+  /**
+   * RB3 的回退判定阈值（px）。
+   * ★取40：录屏量到的**正常滚动帧间抖动**最大约 90px（`rb3-run.log` 里
+   *   连续 `-78~-91px` 那批是动量期间的正常反向采样，不是丢帧）；
+   *   而真正的丢帧是 **280px / 715px** ⇒ 40~150 是安全区间，取 40 偏保守侧。
+   */
+  const RB3_DROP_THRESHOLD_PX = 40;
+  /**
+   * ★★★ RB3（2026-10-16）：**JS 阻塞后的 offset 回退**记账。
+   *
+   * ## 真机判决（`rb3-run.log`，一次 prepend 的完整读数）
+   * ```
+   * 08:16:50.091 [RB][DELTA]  delta=0            ← 锚点下标没变，补偿「不该」触发（正确）
+   * 08:16:50.095 [RB2][CS]    contentSize 121894 → 169494（+47600px）
+   * 08:16:50.095 [PERF][jank] jsBlocked=2468ms   ★★ JS 阻塞 2.47 秒
+   * 08:16:50.095 [RB2][DROP]  dropped=715px dt=2468ms   ★★ 回弹时长 == 阻塞时长
+   * ```
+   *
+   * ## 机理（★与「锚点算错」无关）
+   * JS 阻塞期间：FlatList 的 `VirtualizedList` 状态**冻结**，而原生 `ScrollView`
+   * 继续派发滚动 ⇒ 阻塞结束时 FlatList 用**冻结前的旧 offset** 覆盖了原生位置
+   * ⇒ **丢掉 715px**。⇒ `delta=0` 是正确的，回弹是**补偿「被覆盖」而非「没发生」**。
+   *
+   * ⇒ 修法：**回退检测 + 补投**。`data` 变化前记下 `offset`，之后若 `onScroll`
+   *   报来的 offset 比它**小**（回退）且差值超阈值 ⇒ 立即把 offset 投回去。
+   *   （`prevAnchorRef` 那种「改锚点算法」的路子在这里**无效**——调研已否。）
+   */
+  /** `data` 变化前记录的 offset（回退判定的基准） */
+  const offsetBeforeDataChangeRef = useRef<number | null>(null);
   const pendingCompRef = useRef<number | null>(null);
   const pendingCompAtRef = useRef(0);
   /**
@@ -488,6 +517,56 @@ const ScrollMode = memo(function ScrollMode({
       if (!line) return;
       anchorRef.current = { key: lineKeyOf(line), index: idx };
 
+      // ★★★ RB3：**JS 阻塞后的 offset 回退**检测 + 立即补投。
+      //
+      // 真机读数（`rb3-run.log`）：prepend 后 `jsBlocked=2468ms`，
+      // 紧接着 `dropped=715px dt=2468ms`（回弹时长 == 阻塞时长）
+      // ⇒ FlatList 用冻结前的旧 offset 覆盖了原生位置。
+      // ⇒ 这里把「丢掉的 offset」直接投回去。
+      //
+      // ★为什么放在 `handleScroll` 而不是补偿 effect：
+      //   补偿 effect 走的是「锚点位移」语义，而本例**锚点确实没变**（delta=0）
+      //   ⇒ 那条路径按定义不会投。★这是**另一种**丢失（状态失同步），
+      //   必须独立检测。
+      const before = offsetBeforeDataChangeRef.current;
+      if (before !== null && before - y > RB3_DROP_THRESHOLD_PX) {
+        const back = before - y;
+        offsetBeforeDataChangeRef.current = null;   // 只补一次，避免与真机振荡
+        console.info(
+          `[RB3][RESTORE] offset 回退 ${Math.round(back)}px（${Math.round(y)}→${Math.round(before)}）` +
+            `⇒ 延两帧补投（★立即投无效，见下）`,
+        );
+        // ★★ 必须**延两帧**再投，不能立即投。
+        // 真机读数（`rb4-run.log`，第一次补投失败的现场）：
+        // ```
+        // 08:32:12.265 [RB3][RESTORE] 回退 178px（38820→38998）⇒ 投38998
+        // 08:32:12.265 [RB2][CS]      offsetRef=38328        ★★ 立刻被改回
+        // 08:32:12.265 [PERF][jank]   jsBlocked=2426ms
+        // 08:32:12.265 [RB2][DROP]    dropped=670px（38998→38328）
+        // ```
+        // ⇒ 那一刻**JS 正在阻塞**（2.4s）⇒ 立即投的 `scrollToOffset` 排在
+        //   FlatList 重渲染**之后**⇒ 又被它冻结前的旧 offset 覆盖 ⇒ 白投。
+        // ⇒ 必须等 JS 解阻塞 + FlatList 提交新布局后再投。
+        const restore = () => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              const cur = offsetRef.current ?? 0;
+              if (before - cur <= RB3_DROP_THRESHOLD_PX) {
+                return;   // 已自行恢复（或被别的路径补过）⇒ 不重复投
+              }
+              console.info(
+                `[RB3][APPLY] 补投 ${Math.round(before - cur)}px（${Math.round(cur)}→${Math.round(before)}）`,
+              );
+              listRef.current?.scrollToOffset({ offset: before, animated: false });
+              offsetRef.current = before;
+            });
+          });
+        };
+        restore();
+        offsetRef.current = before;   // 账面上先对齐，防中途再判成回退
+        return;
+      }
+
       // ★ 章归属行 = 几何顶行 +1，且**越界钳制时放弃提交**（viewportOwnerIndexAtContentY）。
       //   两个独立机理（见 scrollAnchor.ts 注释）：
       //   ① 亚像素落点误差 ⇒ 顶行比锚定少一行 ⇒ 落章首时错判成上一章末行；
@@ -564,6 +643,11 @@ const ScrollMode = memo(function ScrollMode({
       ) {
         return;
       }
+      // ★★ RB-PROBE（可移除）：补偿投递（含**向上**的回弹）
+      console.info(
+        `[RB][COMP] apply target=${Math.round(target)} cur=${Math.round(offsetRef.current)} real=${Math.round(real)} ` +
+          `headerH=${headerHRef.current} contentLines=${contentLinesRef.current}/${cur.length}`,
+      );
       listRef.current?.scrollToOffset({ offset: real, animated: false });
       offsetRef.current = real;
       const idx = lineIndexAtContentY(real, headerHRef.current, rowH, cur.length);
@@ -577,6 +661,8 @@ const ScrollMode = memo(function ScrollMode({
   useLayoutEffect(() => {
     const prevLines = prevLinesRef.current;
     const prevHeaderH = prevHeaderHRef.current;
+    // ★★ RB3：记下「变化前」的 offset 作回退基准（见上面 ref 的机理注释）
+    offsetBeforeDataChangeRef.current = offsetRef.current ?? 0;
     prevLinesRef.current = lines;
     prevHeaderHRef.current = headerH;
     if (prevLines === lines && prevHeaderH === headerH) {
@@ -588,6 +674,11 @@ const ScrollMode = memo(function ScrollMode({
     }
     const nextIndex = indexOfLineKey(lines, a.key);
     const delta = anchorCompensationDelta(a.index, nextIndex, rowH, prevHeaderH, headerH);
+    // ★★ RB-PROBE（可移除）：delta 的成因（负值 = 向上回弹）
+    console.info(
+      `[RB][DELTA] delta=${Math.round(delta)} anchorIdx=${a.index} nextIdx=${nextIndex} ` +
+        `lines ${prevLines.length}→${lines.length} headerH ${prevHeaderH}→${headerH}`,
+    );
     if (delta === 0) {
       return;
     }
@@ -717,6 +808,12 @@ const ScrollMode = memo(function ScrollMode({
     contentHRef.current = h;
     // ★ 内容高与「当前数据长度」绑定 ⇒ 此后才算新鲜（见 contentLinesRef 闸门）
     contentLinesRef.current = linesRef.current.length;
+    // ★★ RB2-PROBE（可移除）：contentSize 变化的全量快照
+    console.info(
+      `[RB2][CS] h=${Math.round(h ?? 0)} headerH=${headerHRef.current} ` +
+        `offsetRef=${Math.round(offsetRef.current ?? 0)} pendingComp=${String(pendingCompRef.current)} ` +
+        `lines=${linesRef.current.length} record=${contentLinesRef.current}`,
+    );
     const target = compTargetRef.current;
     if (target == null) {
       return;
@@ -743,6 +840,41 @@ const ScrollMode = memo(function ScrollMode({
     //   （`offsetRef` 已是实落点）⇒ ★这里才是最终位置的真值，必须记。
     commitProgressAtViewport();
   }, [applyCompensation, viewportH, scheduleCompRetry, commitProgressAtViewport]);
+
+  // ★★ RB2-PROBE（可移除）：**offset 监视器** —— 抓「向上回弹」的时刻与元凶。
+  //
+  // ## 为什么要它
+  // 录屏逐帧量到「每 3 秒向上回弹约 200px（录屏）≈ 473px（实际）」，
+  // 而 `applyCompensation` 那条路径的 `offsetRef` 只动了 **-54px** ⇒★量级差一个数量级
+  // ⇒ **回弹不是补偿造成的**（我上一条的推断因此被否）。
+  // ⇒ 需要知道：**那一下是谁把 offset 改了**。
+  //
+  // ## 做法
+  // 每 200ms 采一次 offset；★一旦出现**负向突变**（本次比上次小 > 40px）
+  // 立刻打一条全量快照（offset / contentSize / lines / anchor / pendingComp /
+  // 是否处于拖拽或动量 / 最近一次补偿时刻）⇒ 事后与录屏逐帧对齐即可锁定元凶。
+  useEffect(() => {
+    let last = offsetRef.current ?? 0;
+    let lastAt = Date.now();
+    const timer = setInterval(() => {
+      const now = offsetRef.current ?? 0;
+      const drop = last - now;
+      if (drop > 40) {
+        const a = anchorRef.current;
+        console.info(
+          `[RB2][DROP] dropped=${Math.round(drop)}px  ${Math.round(last)}→${Math.round(now)}  ` +
+            `dt=${Date.now() - lastAt}ms  lines=${linesRef.current.length}  ` +
+            `headerH=${headerHRef.current}  pendingComp=${String(pendingCompRef.current)}  ` +
+            `contentH=${contentHRef.current}  recordLines=${contentLinesRef.current}  ` +
+            `anchor=${a ? `${a.key}@${a.index}` : 'null'}  ` +
+            `dragging=${dragEndTimerRef.current != null}  momentum=${momentumRef.current}`,
+        );
+      }
+      last = now;
+      lastAt = Date.now();
+    }, 200);
+    return () => clearInterval(timer);
+  }, []);
 
   // 滚动静止 → 进度真值持久化（复用 PageMode 静止门控：动量/慢拖防双派发）
   const momentumRef = useRef(false);
