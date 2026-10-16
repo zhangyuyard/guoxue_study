@@ -79,6 +79,24 @@ export function windowRecenter<T>(
 ): ChapterWindow<T> {
   const keep = new Set(retainIds);
   keep.add(centerId);
+  // ★★ RB4-PROBE（可移除）：裁窗的前后章集合 + 被裁章的 id。
+  //   动机（真机 `rb8-56.log` + 录屏 `291` 对齐墙钟 10:00:xx）：
+  //   `TRIM dropped=1` 后 0.3s 内出现 `DROP 287px + 332px`，
+  //   而 `CHG delta=0`（锚点 key 下标未变 ⇒ 锚点算法判定「不需补偿」）。
+  //   ⇒★**必须知道被裁的是哪一章、在锚点的哪一侧**，才能定修法。
+  {
+    const out: string[] = [];
+    for (const id of w.data.keys()) {
+      if (keep.has(id)) out.push(id);
+    }
+    const droppedIds = [...w.data.keys()].filter((id) => !keep.has(id));
+    console.info(
+      `[RB4][TRIM] center=${centerId} before=[${[...w.data.keys()].join(',')}] ` +
+        `after=[${out.join(',')}] dropped=${droppedIds.length}` +
+        `${droppedIds.length ? ` droppedIds=[${droppedIds.join(',')}]` : ''} ` +
+        `retainRequested=[${[...retainIds].join(',')}]`,
+    );
+  }
   const data = new Map<string, T>();
   for (const [id, v] of w.data) {
     if (keep.has(id)) {

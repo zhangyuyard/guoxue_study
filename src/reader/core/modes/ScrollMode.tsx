@@ -626,6 +626,14 @@ const ScrollMode = memo(function ScrollMode({
     }
     const nextIndex = indexOfLineKey(lines, a.key);
     const delta = anchorCompensationDelta(a.index, nextIndex, rowH, prevHeaderH, headerH);
+    // ★★ RB4-PROBE（可移除）：本次 `data` 变化时**补偿是否仍未落定**。
+    //   这是判定「已投出的补偿被裁窗推翻」的关键一手数据：
+    //   若裁窗时 `pendingComp == null` ⇒ 补偿早已落地、是被**后来的裁窗**推翻的。
+    console.info(
+      `[RB4][CHG] delta=${Math.round(delta)} lines ${prevLines.length}→${lines.length} ` +
+        `pendingComp=${String(pendingCompRef.current)} compTarget=${String(compTargetRef.current)} ` +
+        `offsetRef=${Math.round(offsetRef.current ?? 0)} contentH=${contentHRef.current}`,
+    );
     // ★★ RB-PROBE（可移除）：delta 的成因（负值 = 向上回弹）
     console.info(
       `[RB][DELTA] delta=${Math.round(delta)} anchorIdx=${a.index} nextIdx=${nextIndex} ` +

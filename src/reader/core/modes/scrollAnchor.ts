@@ -111,10 +111,20 @@ export function clampScrollTarget(
   viewportHeight: number,
 ): number {
   const t = Math.max(0, target);
+  // ★★ RB4-PROBE（可移除）：钳制的入参/出参/是否被钳。
+  //   动机：实测出现「补偿按 contentH=46288 投出 target=23444，1.8s 后裁窗令
+  //   contentH 降到 35738」⇒ 需判定当时 target 是否**已超出新的可滚动上限**。
+  const maxScroll = Math.max(0, contentHeight - viewportHeight);
+  const clamped = t > maxScroll;
+  console.info(
+    `[RB4][CLAMP] target=${Math.round(t)} contentH=${Math.round(contentHeight)} ` +
+      `viewportH=${Math.round(viewportHeight)} maxScroll=${Math.round(maxScroll)} ` +
+      `⇒${clamped ? `★被钳 ${Math.round(t - maxScroll)}px` : '未钳'}`,
+  );
   if (!(contentHeight > 0)) {
     return t;
   }
-  return Math.min(t, Math.max(0, contentHeight - viewportHeight));
+  return Math.min(t, maxScroll);
 }
 
 /**
